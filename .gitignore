@@ -39,3 +39,33 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Node dependencies (Never commit this, it's huge)
+node_modules/
+
+# Expo specific temporary files
+.expo/
+dist/
+web-build/
+
+# Native build folders (These are generated when you build the app, do not track them)
+/android
+/ios
+
+# macOS specific junk files
+.DS_Store
+
+# Environment variables (Crucial: Never commit API keys or passwords)
+.env
+.env.local
+.env.*.local
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+expo-error.log*
+
+# Local utility scripts and outputs
+map-tree.bat
+project-map.txt
