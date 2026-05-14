@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "silo-app",
+    "name": "Silo",
     "slug": "silo-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -31,7 +31,6 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-dev-client",
       "@react-native-community/datetimepicker"
     ],
     "extra": {
