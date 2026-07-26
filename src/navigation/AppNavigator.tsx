@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationProps } from './types';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -9,35 +10,39 @@ import { Ionicons } from '@expo/vector-icons';
 import { RootTabParamList, RootStackParamList } from './types';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { useTransactionStore } from '../store/useTransactionStore'; // NEW: Import to boot DB
+import { useTransactionStore } from '../store/useTransactionStore';
+import { getGenerationService } from '../services/ai/generationService';
+import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 
-// Import Screens
 import { CashflowScreen } from '../screens/CashflowScreen';
 import { AddTransactionScreen } from '../screens/AddTransactionScreen';
 import { ReportsScreen } from '../screens/ReportsScreen';
 import { BudgetScreen } from '../screens/BudgetScreen';
 import { MoreScreen } from '../screens/MoreScreen';
 import { ChatbotScreen } from '../screens/ChatbotScreen';
-import { SettingsScreen } from '../screens/SettingsScreen'; 
+import { SettingsScreen } from '../screens/SettingsScreen';
+import { SystemLogsScreen } from '../screens/SystemLogsScreen';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const TabNavigator = () => {
-  const theme = useAppTheme(); 
+  const theme = useAppTheme();
   const globalNav = useNavigation<NavigationProps>();
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 10);
+  const tabBarHeight = 60 + bottomInset;
 
   return (
-    <Tab.Navigator 
+    <Tab.Navigator
       screenOptions={({ route }) => ({
-        // 1. FIX THE HEADER: This hides the default "Cashflow" top bar
-        headerShown: false, 
-        
+        headerShown: false,
+        sceneStyle: { backgroundColor: theme.background },
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.textMuted,
-        tabBarStyle: styles.tabBar,
-        
-        // 2. FIX THE ICONS: This maps the correct icon to each tab
+        tabBarStyle: [styles.tabBar, { backgroundColor: theme.surface, borderTopColor: theme.border, height: tabBarHeight, paddingBottom: bottomInset }],
+        tabBarItemStyle: { paddingTop: 6 },
+        tabBarLabelStyle: { paddingBottom: 4 },
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: keyof typeof Ionicons.glyphMap = 'help';
 
@@ -57,16 +62,16 @@ const TabNavigator = () => {
     >
       <Tab.Screen name="Cashflow" component={CashflowScreen} />
       <Tab.Screen name="Reports" component={ReportsScreen} />
-      
-      <Tab.Screen 
-        name="Add" 
-        component={View} 
+
+      <Tab.Screen
+        name="Add"
+        component={View}
         options={{
-          tabBarLabel: '', 
-          tabBarButton: (props) => (
-            <View style={{ top: -20, justifyContent: 'center', alignItems: 'center' }} pointerEvents="box-none">
-              <TouchableOpacity 
-                style={[styles.customButton, { backgroundColor: theme.primary }]} 
+          tabBarLabel: '',
+          tabBarButton: () => (
+            <View style={[styles.addButtonWrap, { bottom: Math.max(insets.bottom - 6, 0) }]} pointerEvents="box-none">
+              <TouchableOpacity
+                style={[styles.customButton, { backgroundColor: theme.primary }]}
                 onPress={() => globalNav.navigate('AddTransactionStack', {})}
               >
                 <Ionicons name="add" size={32} color="#fff" />
@@ -75,7 +80,7 @@ const TabNavigator = () => {
           ),
         }}
       />
-      
+
       <Tab.Screen name="Budget" component={BudgetScreen} />
       <Tab.Screen name="More" component={MoreScreen} />
     </Tab.Navigator>
@@ -83,39 +88,79 @@ const TabNavigator = () => {
 };
 
 export const AppNavigator = () => {
-  const isDarkMode = useSettingsStore(state => state.isDarkMode);
+  const isDarkMode = useSettingsStore((state) => state.isDarkMode);
+  const loadSettings = useSettingsStore((state) => state.loadSettings);
   const theme = useAppTheme();
 
-  // FIX 2: Boot up the SQLite database exactly once when the app starts
   useEffect(() => {
+    loadSettings();
     useTransactionStore.getState().initDB();
+
+    return () => {
+      void getGenerationService().dispose();
+      getModelLifecycleManager().dispose();
+    };
   }, []);
 
-  const MyTheme = {
+  const navigationTheme = {
     ...(isDarkMode ? DarkTheme : DefaultTheme),
+    dark: isDarkMode,
     colors: {
       ...(isDarkMode ? DarkTheme.colors : DefaultTheme.colors),
+      primary: theme.primary,
       background: theme.background,
       card: theme.surface,
       text: theme.text,
       border: theme.border,
+      notification: theme.primary,
     },
   };
 
   return (
-    <NavigationContainer theme={MyTheme}>
-      <Stack.Navigator initialRouteName="MainTabs" screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="MainTabs" component={TabNavigator} />
-        <Stack.Screen name="Chatbot" component={ChatbotScreen} />
-        {/* FIX: Give the Stack screen a unique name */}
-        <Stack.Screen name="AddTransactionStack" component={AddTransactionScreen} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <View style={[styles.appShell, { backgroundColor: theme.background }]}>
+      <NavigationContainer theme={navigationTheme}>
+        <Stack.Navigator
+          initialRouteName="MainTabs"
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.background },
+            animation: 'slide_from_right',
+          }}
+        >
+          <Stack.Screen name="MainTabs" component={TabNavigator} />
+          <Stack.Screen name="Chatbot" component={ChatbotScreen} />
+          <Stack.Screen name="AddTransactionStack" component={AddTransactionScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  tabBar: { position: 'absolute', bottom: 0, elevation: 0, height: 70, paddingBottom: 10, borderTopWidth: 1 },
-  customButton: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 }
+  appShell: { flex: 1 },
+  tabBar: {
+    position: 'absolute',
+    bottom: 0,
+    elevation: 0,
+    borderTopWidth: 1,
+    paddingTop: 6,
+  },
+  addButtonWrap: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
 });

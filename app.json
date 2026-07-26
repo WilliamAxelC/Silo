@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "Silo",
+    "owner": "LCS Dev",
     "slug": "silo-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,17 +15,17 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.will.silo"
+      "bundleIdentifier": "com.LCSdev.silo"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff",
-        "package": "com.will.silo"
+        "package": "com.LCSdev.silo"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.will.silo"
+      "package": "com.LCSdev.silo"
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,288 +1,813 @@
-import { GoogleGenerativeAI, FunctionDeclaration, SchemaType } from '@google/generative-ai';
-import { expoDb } from '../../db/index'; 
+import { expoDb, type AITransactionRow } from '../../db/index';
+import { getModelLifecycleManager } from './modelLifecycle';
+import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
+import { getNativeLocalInferenceBridge, isLocalInferenceBackendAvailable } from './localInferenceBridge';
+import {
+  QWEN_MODEL_DEFAULT_TEMPERATURE,
+  QWEN_MODEL_DEFAULT_TOP_P,
+  QWEN_MODEL_GROUNDED_TEMPERATURE,
+  QWEN_MODEL_GROUNDED_TOP_P,
+  QWEN_MODEL_HISTORY_TURN_LIMIT,
+  QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS,
+  QWEN_MODEL_MAX_OUTPUT_TOKENS,
+  QWEN_MODEL_MAX_PROMPT_CHARS,
+  QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
+  QWEN_MODEL_RETRIEVAL_ITEM_LIMIT,
+  QWEN_MODEL_STOP_TOKENS,
+} from './config';
+import type {
+  LocalGenerationMetrics,
+  LocalGenerationRequest,
+  LocalGenerationResult,
+  LocalRuntimeInfo,
+} from './localInferenceTypes';
 
-// ==========================================
-// PRE-DEFINED STRICT TOOLS (PRIORITY 1)
-// ==========================================
-const getTotalBalanceDeclaration: FunctionDeclaration = {
-  name: 'get_total_balance',
-  description: 'Gets the user\'s total net financial balance (all income combined with all expenses). Use this when asked for "total balance" or "how much money I have left overall".',
-};
+export type LocalAiMode = 'rag' | 'chat';
 
-const getCategorySpendingDeclaration: FunctionDeclaration = {
-  name: 'get_category_spending',
-  description: 'Gets the total amount spent within a specific category (e.g., Groceries, Transport, Food).',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      category: { type: SchemaType.STRING, description: 'The category to filter by (e.g., "Groceries", "Transport").' }
+interface RetrievedContextItem {
+  id: string;
+  kind: 'transaction' | 'balance' | 'category-spending' | 'note';
+  label: string;
+  content: string;
+  score: number;
+}
+
+const injectionPatterns = [/ignore all previous/i, /forget your instructions/i, /you are now a/i, /system prompt/i];
+const STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'about',
+  'balance',
+  'based',
+  'did',
+  'for',
+  'from',
+  'how',
+  'i',
+  'in',
+  'is',
+  'last',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'show',
+  'spend',
+  'spent',
+  'tell',
+  'the',
+  'to',
+  'transactions',
+  'what',
+  'with',
+]);
+
+function formatCurrency(amount: number | null | undefined): string {
+  const safeAmount = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0;
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(safeAmount);
+}
+
+function findCategorySpending(userPrompt: string): { category: string | null; days: number } {
+  const categoryMatch = userPrompt.match(/(?:spent on|spend on|for)\s+([a-zA-Z &-]+?)(?:\s+in|\s+over|\s+during|\?|$)/i);
+  const daysMatch = userPrompt.match(/last\s+(\d+)\s+days?/i);
+
+  return {
+    category: categoryMatch?.[1]?.trim() ?? null,
+    days: daysMatch ? Number(daysMatch[1]) : 30,
+  };
+}
+
+function getRecentTransactions(limit = 5) {
+  return expoDb.getAllSync<Pick<AITransactionRow, 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
+    `SELECT merchant_name, total_amount, category, date, note
+     FROM ai_transactions_view
+     ORDER BY date DESC
+     LIMIT ?`,
+    [limit],
+  );
+}
+
+function getCategorySpending(category: string, days: number) {
+  const now = Date.now();
+  const from = now - days * 24 * 60 * 60 * 1000;
+  const rows = expoDb.getAllSync<{ total: number | null }>(
+    'SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND category LIKE ? AND date >= ?',
+    [`%${category}%`, from],
+  );
+
+  return rows[0]?.total ?? 0;
+}
+
+function getTotalBalance() {
+  const rows = expoDb.getAllSync<{ total: number | null }>('SELECT SUM(total_amount) as total FROM ai_transactions_view');
+  return rows[0]?.total ?? 0;
+}
+
+function buildOfflineProvisioningMessage() {
+  const { provisioning, runtime } = useAIStore.getState();
+  const runtimeReason = runtime.lastRuntimeError ? ` Runtime error: ${runtime.lastRuntimeError.message}` : '';
+  const provisioningReason = provisioning.lastError ? ` Last error: ${provisioning.lastError}` : '';
+  return `Silo AI local inference is unavailable. Current provisioning status: ${provisioning.status}.${provisioningReason}${runtimeReason}`;
+}
+
+function buildLocalInferenceUnavailableMessage() {
+  const availability = getNativeLocalInferenceBridge().getAvailability();
+  return [
+    'Local conversational generation is unavailable in this build.',
+    availability.message,
+    'Grounded local retrieval still works from data stored on this device only.',
+    'Use Grounded mode for balances, category spending, and recent transaction questions.',
+  ].join('\n\n');
+}
+
+function tokenizePrompt(userPrompt: string) {
+  return userPrompt
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !STOP_WORDS.has(token));
+}
+
+function scoreCandidate(userPrompt: string, haystack: string) {
+  const tokens = tokenizePrompt(userPrompt);
+  if (tokens.length === 0) {
+    return 0;
+  }
+
+  const loweredHaystack = haystack.toLowerCase();
+  let score = 0;
+  tokens.forEach((token) => {
+    if (loweredHaystack.includes(token)) {
+      score += token.length > 4 ? 2 : 1;
+    }
+  });
+  return score;
+}
+
+export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[] {
+  const recentTransactions = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
+    `SELECT transaction_id, merchant_name, total_amount, category, date, note
+     FROM ai_transactions_view
+     ORDER BY date DESC
+     LIMIT 40`,
+  );
+
+  const contextItems: RetrievedContextItem[] = recentTransactions
+    .map((row) => {
+      const content = `${row.merchant_name || 'Unknown merchant'} ${row.category || 'Uncategorized'} ${formatCurrency(row.total_amount)} ${new Date(row.date).toLocaleDateString('en-GB')} ${row.note ?? ''}`;
+      return {
+        id: `tx-${row.transaction_id}`,
+        kind: 'transaction' as const,
+        label: row.merchant_name || 'Unknown merchant',
+        content,
+        score: scoreCandidate(userPrompt, content),
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
+
+  const { category, days } = findCategorySpending(userPrompt);
+  if (category) {
+    const total = getCategorySpending(category, days);
+    contextItems.unshift({
+      id: `category-${category.toLowerCase()}`,
+      kind: 'category-spending',
+      label: `${category} spending`,
+      content: `You spent ${formatCurrency(total)} on ${category} in the last ${days} days.`,
+      score: 10,
+    });
+  }
+
+  const totalBalance = getTotalBalance();
+  contextItems.push({
+    id: 'balance-total',
+    kind: 'balance',
+    label: 'Total balance',
+    content: `Current total balance across local records: ${formatCurrency(totalBalance)}.`,
+    score: /balance|money left|overall/i.test(userPrompt) ? 8 : 1,
+  });
+
+  return contextItems
+    .sort((a, b) => b.score - a.score)
+    .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT + 1);
+}
+
+function formatGroundedResponse(userPrompt: string, retrievedContext: RetrievedContextItem[]) {
+  const topContext = retrievedContext.slice(0, 3);
+  const bulletLines = topContext.map((item) => `- ${item.content}`).join('\n');
+
+  if (/recent transactions|latest transactions/i.test(userPrompt)) {
+    return `Here are the most relevant recent local records for your question:\n${bulletLines}`;
+  }
+
+  if (/balance|money left overall/i.test(userPrompt)) {
+    const balanceItem = retrievedContext.find((item) => item.kind === 'balance');
+    return balanceItem?.content ?? `I found grounded local context, but not a matching balance summary.\n${bulletLines}`;
+  }
+
+  const categoryItem = retrievedContext.find((item) => item.kind === 'category-spending');
+  if (categoryItem) {
+    return `${categoryItem.content}\n\nSupporting local context:\n${bulletLines}`;
+  }
+
+  return `Grounded local context for your question:\n${bulletLines}`;
+}
+
+function trimCollapsedText(value: string, maxChars: number) {
+  const collapsed = value.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= maxChars) {
+    return collapsed;
+  }
+
+  return `${collapsed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function trimPreservedText(value: string, maxChars: number) {
+  const normalized = value
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function sanitizeModelText(value: string) {
+  return value
+    .replace(/<\|im_start\|>/g, '')
+    .replace(/<\|im_end\|>/g, '')
+    .replace(/<\|endoftext\|>/g, '')
+    .replace(/\u0000/g, '')
+    .trim();
+}
+
+function buildChatHistorySummary(chatHistory: Message[]) {
+  return chatHistory
+    .slice(-QWEN_MODEL_HISTORY_TURN_LIMIT)
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${trimCollapsedText(message.text, 220)}`)
+    .join('\n');
+}
+
+function hasUsableLocalInferenceBackend() {
+  return isLocalInferenceBackendAvailable();
+}
+
+function canUseNativeLocalInference() {
+  if (!hasUsableLocalInferenceBackend()) {
+    return false;
+  }
+
+  const state = useAIStore.getState();
+  const runtimeAvailability = getAIRuntimeAvailability({
+    provisioning: state.provisioning,
+    runtimeReady: state.runtimeReady,
+    warmupPending: state.warmupPending,
+    runtime: state.runtime,
+  });
+  return runtimeAvailability.canRunNativeChat;
+}
+
+export async function ensureLocalRuntimeReady(onStatusChange?: (status: string) => void) {
+  if (!hasUsableLocalInferenceBackend()) {
+    onStatusChange?.('Local inference backend unavailable.');
+    throw new Error(buildLocalInferenceUnavailableMessage());
+  }
+
+  const manager = getModelLifecycleManager();
+  await manager.initialize();
+
+  if (!canUseNativeLocalInference()) {
+    onStatusChange?.('Preparing local model...');
+    await manager.startProvisioningIfNeeded();
+  }
+
+  if (!canUseNativeLocalInference()) {
+    throw new Error(buildOfflineProvisioningMessage());
+  }
+}
+
+function answerStructuredPrompt(userPrompt: string): string | null {
+  const normalizedPrompt = userPrompt.toLowerCase();
+
+  if (normalizedPrompt.includes('total balance') || normalizedPrompt.includes('money left overall')) {
+    const total = getTotalBalance();
+    return `Your total balance is ${formatCurrency(total)} based on your local records.`;
+  }
+
+  if (normalizedPrompt.includes('recent transactions') || normalizedPrompt.includes('latest transactions')) {
+    const rows = getRecentTransactions();
+    if (rows.length === 0) {
+      return 'You do not have any transactions recorded yet.';
+    }
+
+    const lines = rows
+      .map((row) => `- ${row.merchant_name || 'Unknown merchant'} · ${formatCurrency(row.total_amount)} · ${row.category || 'Uncategorized'}`)
+      .join('\n');
+
+    return `Here are your most recent transactions:\n${lines}`;
+  }
+
+  if (normalizedPrompt.includes('spent on') || normalizedPrompt.includes('spend on')) {
+    const { category, days } = findCategorySpending(userPrompt);
+    if (!category) {
+      return 'Tell me which category you want to check, for example: How much did I spend on food in the last 30 days?';
+    }
+
+    const total = getCategorySpending(category, days);
+    return `You spent ${formatCurrency(total)} on ${category} in the last ${days} days based on your offline records.`;
+  }
+
+  return null;
+}
+
+function escapeChatSegment(value: string) {
+  return sanitizeModelText(value).replace(/<\|im_start\|>/g, '').replace(/<\|im_end\|>/g, '').trim();
+}
+
+function supportsQwenChatTemplate(runtimeInfo: LocalRuntimeInfo | null | undefined) {
+  const family = runtimeInfo?.loadedModelFamily?.toLowerCase() ?? '';
+  const backend = runtimeInfo?.backend?.toLowerCase() ?? '';
+  const loadedPath = runtimeInfo?.loadedModelPath?.toLowerCase() ?? '';
+  return family.includes('qwen') || backend.includes('qwen') || loadedPath.includes('qwen');
+}
+
+function buildQwenChatPrompt(userPrompt: string, chatHistory: Message[], systemPrompt: string) {
+  const historyTurns = chatHistory.slice(-QWEN_MODEL_HISTORY_TURN_LIMIT);
+  const segments = [`<|im_start|>system\n${escapeChatSegment(systemPrompt)}<|im_end|>`];
+
+  historyTurns.forEach((message) => {
+    const role = message.role === 'user' ? 'user' : 'assistant';
+    segments.push(`<|im_start|>${role}\n${escapeChatSegment(message.text)}<|im_end|>`);
+  });
+
+  segments.push(`<|im_start|>user\n${escapeChatSegment(userPrompt)}<|im_end|>`);
+  segments.push('<|im_start|>assistant\n');
+  return segments.join('\n');
+}
+
+function buildFallbackChatPrompt(userPrompt: string, chatHistory: Message[], systemPrompt: string) {
+  const historySummary = buildChatHistorySummary(chatHistory);
+  return [
+    systemPrompt,
+    historySummary ? `Conversation so far:\n${historySummary}` : null,
+    `User: ${userPrompt}`,
+    'Assistant:',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildGroundedPrompt(userPrompt: string, retrievedContext: RetrievedContextItem[]) {
+  const contextBlock = trimCollapsedText(
+    retrievedContext
+      .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT)
+      .map((item) => `- ${trimCollapsedText(item.content, 320)}`)
+      .join('\n'),
+    QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
+  );
+  return [
+    'You are Silo AI, a local-only finance assistant running entirely on-device.',
+    'Answer only from the grounded local finance facts below.',
+    'If the facts are insufficient, say that you do not have enough local evidence.',
+    `Grounded local facts:\n${contextBlock}`,
+    `User question: ${trimCollapsedText(userPrompt, 500)}`,
+    'Respond in 3 short paragraphs or fewer.',
+  ].join('\n\n');
+}
+
+export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state: ReturnType<typeof useAIStore.getState>, retrievedContext?: RetrievedContextItem[]) {
+  const runtimeInfo = state.runtime.runtimeInfo;
+  const systemPrompt = [
+    'You are Silo AI, an offline finance assistant running locally on this Android device.',
+    'Be concise, practical, and honest about uncertainty.',
+    'Do not invent balances, transactions, or categories that are not present in the local app data.',
+    'For exact numeric finance queries, the app handles deterministic answers before you are called.',
+  ].join(' ');
+
+  const rawPrompt = mode === 'rag' && retrievedContext
+    ? buildGroundedPrompt(userPrompt, retrievedContext)
+    : supportsQwenChatTemplate(runtimeInfo)
+      ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt)
+      : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt);
+
+  return supportsQwenChatTemplate(runtimeInfo)
+    ? trimPreservedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS)
+    : trimCollapsedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS);
+}
+
+function publishGenerationText(text: string, requestId: string, onStatusChange?: (status: string) => void) {
+  const state = useAIStore.getState();
+  if (state.runtime.activeGenerationRequestId !== requestId) {
+    throw Object.assign(new Error('Local generation was cancelled.'), { code: 'generation-cancelled' });
+  }
+
+  state.setStreamingResponseText(text);
+  onStatusChange?.('Assistant response ready.');
+  return text;
+}
+
+export async function cancelActiveLocalGeneration(reason = 'Generation cancelled by user.') {
+  const state = useAIStore.getState();
+  const requestId = state.runtime.activeGenerationRequestId;
+  if (!requestId) {
+    return false;
+  }
+
+  state.appendLog({
+    level: 'warn',
+    event: 'generation-cancel-requested',
+    message: reason,
+    details: { requestId },
+  });
+
+  try {
+    await getNativeLocalInferenceBridge().cancelGeneration(requestId);
+  } catch (error) {
+    state.appendLog({
+      level: 'warn',
+      event: 'generation-cancel-bridge-error',
+      message: error instanceof Error ? error.message : 'Native cancelGeneration() failed.',
+      details: { requestId },
+    });
+  } finally {
+    const latestState = useAIStore.getState();
+    latestState.setActiveGenerationRequestId(null);
+    latestState.setStreamingResponseText('');
+    latestState.setActiveStatusLabel('Cancelled', null);
+    latestState.setRuntimeError({
+      code: 'generation-cancelled',
+      message: reason,
+      recoverable: true,
+    });
+  }
+
+  return true;
+}
+
+function buildGenerationStatusLabel(result: LocalGenerationResult) {
+  if (typeof result.tokensPerSecond === 'number' && result.tokensPerSecond > 0) {
+    return `Generating response locally... ${result.tokensPerSecond} tok/s`;
+  }
+
+  return 'Generating response locally...';
+}
+
+function appendGenerationLog(metrics: LocalGenerationMetrics) {
+  useAIStore.getState().appendLog({
+    level: metrics.status === 'error' ? 'error' : metrics.status === 'cancelled' ? 'warn' : 'info',
+    event: `generation-${metrics.status}`,
+    message: `Local assistant generation ${metrics.status}.`,
+    details: metrics as unknown as Record<string, unknown>,
+  });
+}
+
+function appendInferenceTraceLog(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  message: string,
+  details?: Record<string, unknown>,
+) {
+  useAIStore.getState().appendLog({
+    level,
+    event,
+    message,
+    details,
+  });
+}
+
+function appendRuntimeDiagnosticsLog(
+  requestId: string,
+  runtimeInfo: LocalRuntimeInfo | null | undefined,
+  mode: LocalAiMode,
+  generationResult?: LocalGenerationResult,
+) {
+  if (!runtimeInfo) {
+    return;
+  }
+
+  useAIStore.getState().appendLog({
+    level: 'info',
+    event: 'runtime-generation-diagnostics',
+    message: 'Native runtime diagnostics captured for local generation.',
+    details: {
+      requestId,
+      mode,
+      backend: runtimeInfo.backend,
+      version: runtimeInfo.version ?? null,
+      loadedModelPath: runtimeInfo.loadedModelPath ?? null,
+      loadedModelFamily: runtimeInfo.loadedModelFamily ?? null,
+      loadedModelQuantization: runtimeInfo.loadedModelQuantization ?? null,
+      abi: runtimeInfo.abi ?? null,
+      supportsStreaming: runtimeInfo.supportsStreaming,
+      maxContextTokens: runtimeInfo.maxContextTokens ?? null,
+      isModelLoaded: runtimeInfo.isModelLoaded ?? null,
+      configuredContextTokens: runtimeInfo.configuredContextTokens ?? null,
+      configuredCpuThreads: runtimeInfo.configuredCpuThreads ?? null,
+      configuredGpuLayers: runtimeInfo.configuredGpuLayers ?? null,
+      configuredBatchTokens: runtimeInfo.configuredBatchTokens ?? null,
+      configuredUseFlashAttention: runtimeInfo.configuredUseFlashAttention ?? null,
+      configuredUseMlock: runtimeInfo.configuredUseMlock ?? null,
+      resolvedContextTokens: runtimeInfo.resolvedContextTokens ?? null,
+      resolvedBatchTokens: runtimeInfo.resolvedBatchTokens ?? null,
+      resolvedMicroBatchTokens: runtimeInfo.resolvedMicroBatchTokens ?? null,
+      resolvedThreads: runtimeInfo.resolvedThreads ?? null,
+      resolvedThreadsBatch: runtimeInfo.resolvedThreadsBatch ?? null,
+      resolvedOffloadKqv: runtimeInfo.resolvedOffloadKqv ?? null,
+      estimatedGpuOffloadRequested: runtimeInfo.estimatedGpuOffloadRequested ?? null,
+      gpuOffloadSupportedByBuild: runtimeInfo.gpuOffloadSupportedByBuild ?? null,
+      detectedBackendDeviceCount: runtimeInfo.detectedBackendDeviceCount ?? null,
+      detectedVulkanDeviceCount: runtimeInfo.detectedVulkanDeviceCount ?? null,
+      detectedBackendSummary: runtimeInfo.detectedBackendSummary ?? null,
+      detectedVulkanDevices: runtimeInfo.detectedVulkanDevices ?? null,
+      likelyCpuOnlyRuntime: runtimeInfo.likelyCpuOnlyRuntime ?? null,
+      lastPromptTokens: runtimeInfo.lastPromptTokens ?? null,
+      lastCompletionTokens: runtimeInfo.lastCompletionTokens ?? null,
+      lastPromptEvalDurationMs: runtimeInfo.lastPromptEvalDurationMs ?? null,
+      lastGenerationEvalDurationMs: runtimeInfo.lastGenerationEvalDurationMs ?? null,
+      lastTotalDurationMs: runtimeInfo.lastTotalDurationMs ?? null,
+      lastStopReason: runtimeInfo.lastStopReason ?? null,
+      generationResultPromptTokens: generationResult?.promptTokens ?? null,
+      generationResultCompletionTokens: generationResult?.completionTokens ?? null,
+      generationResultPromptEvalDurationMs: generationResult?.promptEvalDurationMs ?? null,
+      generationResultGenerationEvalDurationMs: generationResult?.generationEvalDurationMs ?? null,
+      generationResultTotalDurationMs: generationResult?.totalDurationMs ?? null,
+      generationResultStopReason: generationResult?.stopReason ?? null,
+      runtimeMatchesGeneration:
+        generationResult == null
+          ? null
+          : {
+              promptTokens:
+                runtimeInfo.lastPromptTokens === undefined || generationResult.promptTokens === undefined
+                  ? null
+                  : runtimeInfo.lastPromptTokens === generationResult.promptTokens,
+              completionTokens:
+                runtimeInfo.lastCompletionTokens === undefined || generationResult.completionTokens === undefined
+                  ? null
+                  : runtimeInfo.lastCompletionTokens === generationResult.completionTokens,
+              promptEvalDurationMs:
+                runtimeInfo.lastPromptEvalDurationMs === undefined || generationResult.promptEvalDurationMs === undefined
+                  ? null
+                  : runtimeInfo.lastPromptEvalDurationMs === generationResult.promptEvalDurationMs,
+              generationEvalDurationMs:
+                runtimeInfo.lastGenerationEvalDurationMs === undefined || generationResult.generationEvalDurationMs === undefined
+                  ? null
+                  : runtimeInfo.lastGenerationEvalDurationMs === generationResult.generationEvalDurationMs,
+              totalDurationMs:
+                runtimeInfo.lastTotalDurationMs === undefined || generationResult.totalDurationMs === undefined
+                  ? null
+                  : runtimeInfo.lastTotalDurationMs === generationResult.totalDurationMs,
+              stopReason:
+                runtimeInfo.lastStopReason == null || generationResult.stopReason == null
+                  ? null
+                  : runtimeInfo.lastStopReason === generationResult.stopReason,
+            },
     },
-    required: ['category'],
-  },
-};
+  });
+}
 
-const getRecentTransactionsDeclaration: FunctionDeclaration = {
-  name: 'get_recent_transactions',
-  description: 'Fetches a list of the most recent transactions.',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      limit: { type: SchemaType.NUMBER, description: 'The number of transactions to return (e.g., 5).' }
-    },
-    required: ['limit'],
-  },
-};
+async function runLocalGeneration(request: LocalGenerationRequest, mode: LocalAiMode, onStatusChange?: (status: string) => void) {
+  const state = useAIStore.getState();
+  const bridge = getNativeLocalInferenceBridge();
+  const requestId = request.requestId ?? `req-${Date.now()}`;
+  const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
+  const metrics: LocalGenerationMetrics = {
+    requestId,
+    startedAt,
+    promptChars: request.prompt.length,
+    mode,
+    status: 'running',
+  };
 
-// ==========================================
-// FALLBACK TOOLS (PRIORITY 2)
-// ==========================================
-const executeSqlDeclaration: FunctionDeclaration = {
-  name: 'execute_sql_query',
-  description: 'FALLBACK ONLY: Executes a raw SQL SELECT query. Use this ONLY if the pre-defined tools (get_total_balance, get_category_spending, get_recent_transactions) cannot answer the user\'s highly specific question.',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      query: { type: SchemaType.STRING, description: 'A valid SQLite SELECT query targeting ai_transactions_view.' }
-    },
-    required: ['query'],
-  },
-};
+  appendInferenceTraceLog('info', 'generation-request-received', 'Local generation request received by JS orchestrator.', {
+    requestId,
+    mode,
+    promptChars: request.prompt.length,
+    maxTokens: request.maxTokens ?? null,
+    temperature: request.temperature ?? null,
+    topP: request.topP ?? null,
+    stopTokens: request.stop ?? [],
+    stream: request.stream ?? false,
+    runtimeState: state.runtime.runtimeState,
+    runtimeReady: state.runtimeReady,
+    modelLoaded: state.runtime.modelLoaded,
+    generationHealthy: state.runtime.generationHealthy,
+    activeGenerationRequestId: state.runtime.activeGenerationRequestId,
+  });
 
-const calculatorDeclaration: FunctionDeclaration = {
-  name: 'calculator',
-  description: 'Performs basic mathematical operations.',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      operation: { type: SchemaType.STRING, description: 'The operation: "add", "subtract", "multiply", "divide"' },
-      a: { type: SchemaType.NUMBER, description: 'The first number' },
-      b: { type: SchemaType.NUMBER, description: 'The second number' },
-    },
-    required: ['operation', 'a', 'b'],
-  },
-};
+  state.setActiveGenerationRequestId(requestId);
+  state.setStreamingResponseText('');
+  state.setActiveStatusLabel('Generating response locally...');
+  state.setRuntimeError(null);
+  appendGenerationLog({ ...metrics, status: 'queued' });
+  appendInferenceTraceLog('info', 'generation-enqueued', 'Generation request enqueued in JS state and dispatched to native bridge.', {
+    requestId,
+    queuedAt: startedAt,
+  });
+  onStatusChange?.('Generating response locally...');
+
+  try {
+    appendInferenceTraceLog('info', 'generation-dispatch-native', 'Dispatching generation request to native bridge.', {
+      requestId,
+      dispatchDelayMs: Date.now() - startedAtMs,
+    });
+    const result = await bridge.generate({
+      ...request,
+      requestId,
+    });
+
+    appendInferenceTraceLog('info', 'generation-native-resolved', 'Native bridge generation call resolved.', {
+      requestId,
+      nativeRoundTripMs: Date.now() - startedAtMs,
+      queueDurationMs: result.queueDurationMs ?? null,
+      promptEvalDurationMs: result.promptEvalDurationMs ?? null,
+      generationEvalDurationMs: result.generationEvalDurationMs ?? null,
+      totalDurationMs: result.totalDurationMs ?? null,
+      tokensPerSecond: result.tokensPerSecond ?? null,
+      stopReason: result.stopReason ?? null,
+      promptTokens: result.promptTokens ?? null,
+      completionTokens: result.completionTokens ?? null,
+      textChars: result.text.length,
+    });
+
+    const runtimeInfo = await bridge.getRuntimeInfo();
+    state.setRuntimeInfo(runtimeInfo);
+    appendRuntimeDiagnosticsLog(requestId, runtimeInfo, mode, result);
+    appendInferenceTraceLog('info', 'generation-runtime-snapshot', 'Captured runtime snapshot after native generation.', {
+      requestId,
+      backend: runtimeInfo.backend,
+      loadedModelPath: runtimeInfo.loadedModelPath ?? null,
+      configuredGpuLayers: runtimeInfo.configuredGpuLayers ?? null,
+      estimatedGpuOffloadRequested: runtimeInfo.estimatedGpuOffloadRequested ?? null,
+      gpuOffloadSupportedByBuild: runtimeInfo.gpuOffloadSupportedByBuild ?? null,
+      detectedBackendDeviceCount: runtimeInfo.detectedBackendDeviceCount ?? null,
+      detectedVulkanDeviceCount: runtimeInfo.detectedVulkanDeviceCount ?? null,
+      detectedBackendSummary: runtimeInfo.detectedBackendSummary ?? null,
+      detectedVulkanDevices: runtimeInfo.detectedVulkanDevices ?? null,
+      likelyCpuOnlyRuntime: runtimeInfo.likelyCpuOnlyRuntime ?? null,
+      fallbackReason:
+        runtimeInfo.estimatedGpuOffloadRequested && runtimeInfo.likelyCpuOnlyRuntime
+          ? runtimeInfo.gpuOffloadSupportedByBuild
+            ? 'gpu-requested-but-no-vulkan-devices-detected'
+            : 'gpu-requested-but-build-has-no-gpu-offload-support'
+          : null,
+    });
+
+    const cleanedText = sanitizeModelText(result.text);
+    onStatusChange?.(buildGenerationStatusLabel(result));
+    const streamedText = publishGenerationText(cleanedText, requestId, onStatusChange);
+    state.setStreamingResponseText(streamedText);
+    state.setActiveStatusLabel('Response ready', null);
+
+    appendGenerationLog({
+      ...metrics,
+      finishedAt: new Date().toISOString(),
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      totalDurationMs: result.totalDurationMs,
+      queueDurationMs: result.queueDurationMs,
+      promptEvalDurationMs: result.promptEvalDurationMs,
+      generationEvalDurationMs: result.generationEvalDurationMs,
+      tokensPerSecond: result.tokensPerSecond,
+      status: result.stopReason === 'cancelled' ? 'cancelled' : 'complete',
+      stopReason: result.stopReason ?? null,
+    });
+    appendInferenceTraceLog('info', 'generation-complete', 'JS orchestration completed local generation successfully.', {
+      requestId,
+      totalElapsedMs: Date.now() - startedAtMs,
+      finalTextChars: streamedText.length,
+      stopReason: result.stopReason ?? null,
+    });
+
+    return streamedText.trim();
+  } catch (error) {
+    const latestState = useAIStore.getState();
+    const message = error instanceof Error ? error.message : 'Local assistant generation failed.';
+    const isCancelled = typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'generation-cancelled';
+
+    appendGenerationLog({
+      ...metrics,
+      finishedAt: new Date().toISOString(),
+      status: isCancelled ? 'cancelled' : 'error',
+      errorMessage: message,
+    });
+    appendInferenceTraceLog(isCancelled ? 'warn' : 'error', isCancelled ? 'generation-cancelled' : 'generation-failed', 'Local generation failed inside JS orchestration.', {
+      requestId,
+      totalElapsedMs: Date.now() - startedAtMs,
+      errorMessage: message,
+      errorCode: typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code ?? null : null,
+    });
+
+    if (!isCancelled) {
+      latestState.setRuntimeError({
+        code: 'generation-failed',
+        message,
+        recoverable: true,
+      });
+    }
+
+    throw error;
+  } finally {
+    const latestState = useAIStore.getState();
+    if (latestState.runtime.activeGenerationRequestId === requestId) {
+      latestState.setActiveGenerationRequestId(null);
+    }
+    latestState.setActiveStatusLabel(null, null);
+    appendInferenceTraceLog('info', 'generation-finalized', 'JS generation finalizer completed.', {
+      requestId,
+      totalElapsedMs: Date.now() - startedAtMs,
+      runtimeState: latestState.runtime.runtimeState,
+      activeGenerationRequestId: latestState.runtime.activeGenerationRequestId,
+    });
+  }
+}
 
 export const askFinancialAgent = async (
-  userPrompt: string, 
-  apiKey: string, 
-  modelName: string,
-  mode: 'rag' | 'dump',
-  onStatusChange?: (status: string) => void
+  userPrompt: string,
+  _apiKey: string | null,
+  _modelName: string | null,
+  mode: LocalAiMode,
+  onStatusChange?: (status: string) => void,
 ): Promise<string> => {
-
-  const injectionPatterns = [/ignore all previous/i, /forget your instructions/i, /you are now a/i, /system prompt/i];
   for (const pattern of injectionPatterns) {
-    if (pattern.test(userPrompt)) return "🛡️ **GUARDRAIL TRIGGERED:** Potential prompt injection detected. Request blocked.";
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const cleanModelName = modelName.replace('models/', '');
-  const today = new Date();
-
-  // ==========================================
-  // DUMP MODE (FULL CONTEXT INJECTION)
-  // ==========================================
-  if (mode === 'dump') {
-    onStatusChange?.('Dumping entire database into context...');
-    try {
-      const allData = expoDb.getAllSync('SELECT * FROM ai_transactions_view');
-      const stringifiedData = JSON.stringify(allData);
-
-      const dumpSystemInstruction = `You are Silo, a highly precise personal finance assistant. 
-        FORMATTING RULES: 
-        - Talk TO the user (e.g., "You spent"). 
-        - Format all money in Indonesian Rupiah (e.g., Rp 150,000). 
-        - NEVER use dollar signs.
-      === DATABASE DUMP ===
-      ${stringifiedData}
-      =====================`;
-
-      const model = genAI.getGenerativeModel({
-        model: cleanModelName, 
-        systemInstruction: { role: 'system', parts: [{ text: dumpSystemInstruction }] },
-      });
-
-      onStatusChange?.('Synthesizing answer...');
-      const chat = model.startChat();
-      const result = await chat.sendMessage(userPrompt);
-      return result.response.text() || "No response generated.";
-    } catch (error: any) {
-      return `⚠️ **Dump Mode Error:** ${error.message}`;
+    if (pattern.test(userPrompt)) {
+      return '🛡️ **GUARDRAIL TRIGGERED:** Potential prompt injection detected. Request blocked.';
     }
   }
-  
-  // ==========================================
-  // HYBRID RAG MODE
-  // ==========================================
-  const systemInstruction = `You are Silo, a highly precise personal finance assistant.
-  
-  CORE RULES:
-  0. Today's date is ${today.toLocaleDateString('en-US')}.
-  
-  1. TOOL SELECTION HIERARCHY (CRITICAL):
-     - ALWAYS prioritize using 'get_total_balance', 'get_category_spending', or 'get_recent_transactions' if they apply.
-     - ONLY use 'execute_sql_query' if the user asks a complex question that the predefined tools cannot handle (e.g., "What did I buy on Tuesday?" or "Show me only expenses over 50,000").
-  
-  2. SQL FALLBACK RULES: Query 'ai_transactions_view'. Columns: id, merchant_name, total_amount (expenses are negative), type, date, category. Always use LIKE for text matching.
-  
-  3. STOP AND RESPOND: Once a tool returns data, stop calling tools.
-  
-  4. FORMATTING: Talk TO the user (e.g., "You spent"). Format all money in Indonesian Rupiah (e.g., Rp 150,000). NEVER use dollar signs.`;
 
-  const model = genAI.getGenerativeModel({
-    model: cleanModelName, 
-    systemInstruction: { role: 'system', parts: [{ text: systemInstruction }] },
-    tools: [{ 
-      functionDeclarations: [
-        getTotalBalanceDeclaration, 
-        getCategorySpendingDeclaration, 
-        getRecentTransactionsDeclaration, 
-        executeSqlDeclaration, 
-        calculatorDeclaration
-      ] 
-    }],
-  });
+  const shouldRequireNativeRuntime = mode === 'chat';
 
-  const chat = model.startChat();
+  if (shouldRequireNativeRuntime) {
+    await ensureLocalRuntimeReady(onStatusChange);
+    onStatusChange?.('Running local inference...');
+  } else {
+    onStatusChange?.('Retrieving grounded local context...');
+  }
 
-  try {
-    onStatusChange?.('Analyzing intent...');
-    let result = await chat.sendMessage(userPrompt);
-    let calls = result.response.functionCalls();
-    let loopCount = 0;
+  const structuredAnswer = answerStructuredPrompt(userPrompt);
+  if (structuredAnswer) {
+    return structuredAnswer;
+  }
 
-    while (calls && calls.length > 0 && loopCount < 5) {
-      loopCount++;
-      const functionResponses = [];
-
-      for (const call of calls) {
-        let toolResponseData: any = {};
-
-        // ----------------------------------------------------
-        // PRE-DEFINED ROUTER EXECUTIONS
-        // ----------------------------------------------------
-        if (call.name === 'get_total_balance') {
-          onStatusChange?.('Fetching total balance...');
-          const rows = expoDb.getAllSync('SELECT SUM(total_amount) as total FROM ai_transactions_view');
-          toolResponseData = { result: rows[0] };
-
-        } else if (call.name === 'get_category_spending') {
-          const { category } = call.args as any;
-          onStatusChange?.(`Calculating spending for ${category}...`);
-          // We safely parameterize the category lookup inside the app code!
-          const rows = expoDb.getAllSync(`SELECT SUM(total_amount) as total FROM ai_transactions_view WHERE category LIKE '%${category}%'`);
-          toolResponseData = { categoryFilter: category, result: rows[0] };
-
-        } else if (call.name === 'get_recent_transactions') {
-          const { limit } = call.args as any;
-          onStatusChange?.(`Fetching last ${limit} transactions...`);
-          const rows = expoDb.getAllSync(`SELECT merchant_name, total_amount, category, date FROM ai_transactions_view ORDER BY date DESC LIMIT ${limit}`);
-          toolResponseData = { result: rows };
-
-        // ----------------------------------------------------
-        // FALLBACK SQL EXECUTOR
-        // ----------------------------------------------------
-        } else if (call.name === 'execute_sql_query') {
-          onStatusChange?.('Generating custom query...');
-          const { query } = call.args as any;
-          try {
-            const cleanQuery = query.replace(/```sql/ig, '').replace(/```/g, '').trim();
-            if (!cleanQuery.toUpperCase().startsWith('SELECT')) {
-              toolResponseData = { error: "Security Violation: Only SELECT queries are permitted." };
-            } else {
-              const rows = expoDb.getAllSync(cleanQuery);
-              toolResponseData = { message: "Query successful", rowCount: rows.length, data: rows };
-            }
-          } catch (err: any) {
-            toolResponseData = { error: `SQL Execution failed: ${err.message}.` };
-          }
-        
-        // ----------------------------------------------------
-        // CALCULATOR TOOL
-        // ----------------------------------------------------
-        } else if (call.name === 'calculator') {
-          const { operation, a, b } = call.args as any;
-          onStatusChange?.(`Calculating...`);
-          let mathResult: number | string = 0;
-          switch(operation) {
-            case 'add': mathResult = a + b; break;
-            case 'subtract': mathResult = a - b; break;
-            case 'multiply': mathResult = a * b; break;
-            case 'divide': mathResult = b !== 0 ? a / b : "Error: Divide by zero"; break;
-            default: mathResult = "Error: Unknown operation";
-          }
-          toolResponseData = { result: mathResult };
-
-        } else {
-          toolResponseData = { error: `Tool ${call.name} not recognized.` };
-        }
-
-        functionResponses.push({ functionResponse: { name: call.name, response: toolResponseData } });
-      }
-
-      onStatusChange?.('Synthesizing answer...');
-      result = await chat.sendMessage(functionResponses);
-      calls = result.response.functionCalls();
+  if (mode === 'rag') {
+    const retrievedContext = buildRetrievedContext(userPrompt);
+    if (retrievedContext.length === 0) {
+      return 'No grounded local context matched your question yet. Try asking about a merchant, category, balance, or recent transactions already stored on this device.';
     }
 
-    return result.response.text() || "I am not sure how to answer that based on the current context.";
+    if (!canUseNativeLocalInference()) {
+      return formatGroundedResponse(userPrompt, retrievedContext);
+    }
 
-  } catch (error) {
-    console.error("Agent Error:", error);
-    return "Connection failed or the model encountered a severe error. Please check your API limits or try a different model.";
-  }
-};
-
-export const analyzeReceiptImage = async (
-  base64Image: string,
-  apiKey: string, 
-  modelName: string
-): Promise<{ merchantName?: string, totalAmount?: number, category?: string, date?: string } | null> => {
-  
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const cleanModelName = modelName.replace('models/', '');
-  
-  const systemInstruction = `You are an expert receipt data extractor. 
-  Analyze the provided image of a receipt and extract the merchant name, the final total amount, the date, and guess the best category.
-  
-  RULES:
-  1. Return ONLY a valid JSON object. Do not include markdown formatting like \`\`\`json.
-  2. The 'totalAmount' must be a positive number.
-  3. The 'category' must closely match one of standard personal finance categories (e.g., Groceries, Food & Dining, Transport, Bills).
-  4. The 'date' must be in YYYY-MM-DD format. If no date is found, return null.
-  
-  EXPECTED OUTPUT FORMAT:
-  {
-    "merchantName": "Store Name",
-    "totalAmount": 150000,
-    "category": "Groceries",
-    "date": "2026-05-08"
-  }`;
-
-  const model = genAI.getGenerativeModel({
-    model: cleanModelName, 
-    systemInstruction: { role: 'system', parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json" } 
-  });
-
-  try {
-    const result = await model.generateContent([
+    const prompt = buildPromptForMode(userPrompt, mode, useAIStore.getState(), retrievedContext);
+    return runLocalGeneration(
       {
-        inlineData: {
-          data: base64Image,
-          mimeType: "image/jpeg"
-        }
+        prompt,
+        maxTokens: QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS,
+        temperature: QWEN_MODEL_GROUNDED_TEMPERATURE,
+        topP: QWEN_MODEL_GROUNDED_TOP_P,
+        stop: [...QWEN_MODEL_STOP_TOKENS],
       },
-      "Extract the receipt data into JSON based on your system instructions."
-    ]);
-    
-    let text = result.response.text();
-    text = text.replace(/```json/ig, '').replace(/```/g, '').trim();
-    return JSON.parse(text);
-    
-  } catch (error) {
-    console.error("Receipt Vision Parsing Error:", error);
-    return null;
+      mode,
+      onStatusChange,
+    );
   }
+
+  const prompt = buildPromptForMode(userPrompt, mode, useAIStore.getState());
+
+  return runLocalGeneration(
+    {
+      prompt,
+      maxTokens: QWEN_MODEL_MAX_OUTPUT_TOKENS,
+      temperature: QWEN_MODEL_DEFAULT_TEMPERATURE,
+      topP: QWEN_MODEL_DEFAULT_TOP_P,
+      stop: [...QWEN_MODEL_STOP_TOKENS],
+    },
+    mode,
+    onStatusChange,
+  );
 };
 
+export interface ParsedReceiptResult {
+  merchantName?: string;
+  totalAmount?: number;
+  category?: string;
+  lineItemsText?: string;
+  date?: string;
+}
+
+export const analyzeReceiptImage = async (): Promise<ParsedReceiptResult | null> => {
+  return null;
+};

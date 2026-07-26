@@ -70,7 +70,7 @@ export const ReportsScreen = () => {
   const topCategory = chartData.length > 0 ? chartData[0] : null;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       
       {/* === 1. PINNED HEADER AREA === */}
       <View style={[styles.pinnedHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
@@ -106,7 +106,7 @@ export const ReportsScreen = () => {
       </View>
 
       {/* === 2. SCROLLABLE DATA AREA === */}
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 16, paddingBottom: 136 }}>
         
         {/* High-Level Summary Card (Now scrolls out of the way to save space) */}
         <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>

@@ -1,152 +1,312 @@
 import { create } from 'zustand';
-import { db } from '../db/index'; 
-import { transactions, transactionItems, budgets } from '../db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 
-export interface Transaction {
-  id: number;
-  merchantName: string;
-  totalAmount: number;
-  type: string;
-  category: string;
-  date: number; 
-  imageUri?: string | null;
-  description?: string;
-}
+import { db } from '../db/index';
+import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
+import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
+import { buildDummyTransactions } from '../features/transactions/dummyData';
+import {
+  getCategoriesForType,
+  getCategoryTypeForTransaction,
+  getUncategorizedLabel,
+  inferCategoryType,
+  isDuplicateCategory,
+  normalizeCategoryName,
+} from '../features/transactions/categories';
+import { normalizeTransactionInput } from '../features/transactions/factories';
+import { mapTransactionRowToModel } from '../features/transactions/mappers';
+import type { CategoryRecord, CategoryType, Transaction, TransactionInput, TransactionUpdate, TransactionType } from '../features/transactions/types';
 
-const DEFAULT_CATEGORIES = ['Food & Dining', 'Transport', 'Groceries', 'Bills', 'Entertainment', 'Salary', 'Freelance'];
+export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
 
 interface TransactionState {
   transactionsList: Transaction[];
-  categories: string[];
+  categories: CategoryRecord[];
   budgets: Record<string, number>;
   isSaving: boolean;
-  
+
   initDB: () => Promise<void>;
   fetchTransactions: () => Promise<void>;
+  fetchCategories: () => Promise<void>;
   fetchBudgets: () => Promise<void>;
-  addTransaction: (tx: Omit<Transaction, 'id'>) => Promise<void>;
-  updateTransaction: (id: number, tx: Partial<Transaction>) => Promise<void>;
+  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
+  updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
-  addCategory: (category: string) => void;
+  addCategory: (name: string, type: CategoryType) => Promise<string>;
+  renameCategory: (id: number, nextName: string) => Promise<{ ok: boolean; message?: string }>;
+  deleteCategory: (id: number) => Promise<{ ok: boolean; message?: string }>;
+  getCategoriesByType: (type: CategoryType) => CategoryRecord[];
+  normalizeCategoryForType: (category: string, transactionType: TransactionType) => string;
+  getCategoryUsageCount: (name: string, type: CategoryType) => Promise<number>;
   setBudget: (category: string, limitAmount: number) => Promise<void>;
-  
+
   clearAllData: () => Promise<void>;
   injectDummyData: () => Promise<void>;
 }
 
+function normalizeBudgetMap(rows: Array<{ category: string; limitAmount: number }>) {
+  const budgetMap: Record<string, number> = {};
+  rows.forEach((row) => {
+    budgetMap[row.category] = row.limitAmount;
+  });
+  return budgetMap;
+}
+
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactionsList: [],
-  categories: DEFAULT_CATEGORIES,
+  categories: [],
   budgets: {},
   isSaving: false,
 
   initDB: async () => {
-    // DB is initialized synchronously via expoDb openDatabaseSync in src/db/index.ts
+    await get().fetchCategories();
     await get().fetchTransactions();
     await get().fetchBudgets();
   },
 
   fetchTransactions: async () => {
     try {
-      // FIX: Use Drizzle to JOIN the relational tables into the flat array the UI expects
       const rows = await db
         .select({
-          id: transactions.id,
-          merchantName: transactions.merchantName,
-          totalAmount: transactions.totalAmount,
-          type: transactions.type,
-          date: transactions.date,
+          id: aiTransactionsView.transactionId,
+          merchantName: aiTransactionsView.merchantName,
+          totalAmount: aiTransactionsView.totalAmount,
+          type: aiTransactionsView.type,
+          date: aiTransactionsView.date,
           imageUri: transactions.imageUri,
-          category: transactionItems.category,
+          note: aiTransactionsView.note,
+          lineItemsText: aiTransactionsView.lineItemsText,
+          category: aiTransactionsView.category,
         })
-        .from(transactions)
-        .leftJoin(transactionItems, eq(transactions.id, transactionItems.transactionId))
-        .orderBy(desc(transactions.date));
+        .from(aiTransactionsView)
+        .leftJoin(transactions, eq(aiTransactionsView.transactionId, transactions.id))
+        .orderBy(desc(aiTransactionsView.date));
 
-      const mapped: Transaction[] = rows.map(r => ({
-        id: r.id,
-        merchantName: r.merchantName,
-        totalAmount: r.totalAmount,
-        type: r.type,
-        date: r.date,
-        imageUri: r.imageUri,
-        category: r.category || 'Uncategorized',
-      }));
-
-      set({ transactionsList: mapped });
+      set({ transactionsList: rows.map(mapTransactionRowToModel) });
     } catch (error) {
-      console.error("Failed to fetch transactions:", error);
+      console.error('Failed to fetch transactions:', error);
+    }
+  },
+
+  fetchCategories: async () => {
+    try {
+      const rows = await db.select().from(categories).orderBy(categories.type, categories.name);
+      set({
+        categories: rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          type: row.type as CategoryType,
+          isSystem: row.isSystem,
+          createdAt: row.createdAt,
+        })),
+      });
+    } catch (error) {
+      console.error('Failed to fetch categories:', error);
     }
   },
 
   fetchBudgets: async () => {
     try {
+      const expenseCategoryNames = new Set(get().categories.filter((category) => category.type === 'expense').map((category) => category.name));
       const allRows = await db.select().from(budgets);
-      const budgetMap: Record<string, number> = {};
-      allRows.forEach(row => { budgetMap[row.category] = row.limitAmount; });
-      set({ budgets: budgetMap });
+      const filteredRows = allRows.filter((row) => expenseCategoryNames.has(row.category));
+      set({ budgets: normalizeBudgetMap(filteredRows) });
     } catch (error) {
-      console.error("Failed to fetch budgets:", error);
+      console.error('Failed to fetch budgets:', error);
     }
   },
 
-  addTransaction: async (tx) => {
+  getCategoriesByType: (type) => getCategoriesForType(get().categories, type),
+
+  normalizeCategoryForType: (category, transactionType) => {
+    const type = getCategoryTypeForTransaction(transactionType);
+    const normalized = normalizeCategoryName(category);
+    const available = getCategoriesForType(get().categories, type);
+    const exists = available.some((item) => item.name.toLowerCase() === normalized.toLowerCase());
+
+    if (exists) {
+      return available.find((item) => item.name.toLowerCase() === normalized.toLowerCase())?.name ?? normalized;
+    }
+
+    return getUncategorizedLabel(type);
+  },
+
+  getCategoryUsageCount: async (name, type) => {
+    const normalizedName = normalizeCategoryName(name);
+    const transactionUsage = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(transactionItems)
+      .leftJoin(transactions, eq(transactions.id, transactionItems.transactionId))
+      .where(and(eq(transactionItems.category, normalizedName), eq(transactions.type, type)));
+
+    const budgetUsage = type === 'expense'
+      ? await db.select({ count: sql<number>`count(*)` }).from(budgets).where(eq(budgets.category, normalizedName))
+      : [{ count: 0 }];
+
+    return Number(transactionUsage[0]?.count ?? 0) + Number(budgetUsage[0]?.count ?? 0);
+  },
+
+  addCategory: async (name, type) => {
+    const normalizedName = normalizeCategoryName(name);
+    if (!normalizedName) {
+      throw new Error('Category name is required.');
+    }
+
+    if (isDuplicateCategory(get().categories, normalizedName, type)) {
+      throw new Error('A category with this name already exists for this type.');
+    }
+
+    await db.insert(categories).values({
+      name: normalizedName,
+      type,
+      isSystem: false,
+      createdAt: Date.now(),
+    });
+
+    await get().fetchCategories();
+    return normalizedName;
+  },
+
+  renameCategory: async (id, nextName) => {
+    const current = get().categories.find((item) => item.id === id);
+    const normalizedName = normalizeCategoryName(nextName);
+
+    if (!current) {
+      return { ok: false, message: 'Category not found.' };
+    }
+
+    if (!normalizedName) {
+      return { ok: false, message: 'Category name cannot be empty.' };
+    }
+
+    if (isDuplicateCategory(get().categories, normalizedName, current.type, id)) {
+      return { ok: false, message: 'A category with this name already exists for this type.' };
+    }
+
+    await db.update(categories).set({ name: normalizedName }).where(eq(categories.id, id));
+    await db.update(transactionItems).set({ category: normalizedName }).where(eq(transactionItems.category, current.name));
+
+    if (current.type === 'expense') {
+      const matchingBudgetRows = await db.select().from(budgets).where(eq(budgets.category, current.name));
+      if (matchingBudgetRows.length > 0) {
+        await db.update(budgets).set({ category: normalizedName }).where(eq(budgets.category, current.name));
+      }
+    }
+
+    await get().fetchCategories();
+    await get().fetchTransactions();
+    await get().fetchBudgets();
+    return { ok: true };
+  },
+
+  deleteCategory: async (id) => {
+    const current = get().categories.find((item) => item.id === id);
+    if (!current) {
+      return { ok: false, message: 'Category not found.' };
+    }
+
+    if (current.isSystem) {
+      return { ok: false, message: 'System categories cannot be deleted.' };
+    }
+
+    const usageCount = await get().getCategoryUsageCount(current.name, current.type);
+    if (usageCount > 0) {
+      return { ok: false, message: 'This category is already used in transactions or budgets.' };
+    }
+
+    await db.delete(categories).where(eq(categories.id, id));
+    await get().fetchCategories();
+    await get().fetchBudgets();
+    return { ok: true };
+  },
+
+  addTransaction: async (tx, options) => {
     set({ isSaving: true });
     try {
-      // 1. Insert core transaction to get the ID
-      const [newTx] = await db.insert(transactions).values({
-        walletId: 1, // Default wallet ID inserted via schema.ts
-        merchantName: tx.merchantName,
-        totalAmount: tx.totalAmount,
-        type: tx.type,
-        date: tx.date,
-        imageUri: tx.imageUri,
-      }).returning({ id: transactions.id });
+      const normalizedTx = normalizeTransactionInput(tx);
+      const categoryType = getCategoryTypeForTransaction(normalizedTx.type);
+      const normalizedCategory = get().normalizeCategoryForType(normalizedTx.category, normalizedTx.type);
+      const [newTx] = await db
+        .insert(transactions)
+        .values({
+          walletId: DEFAULT_WALLET_ID,
+          merchantName: normalizedTx.merchantName,
+          totalAmount: normalizedTx.totalAmount,
+          type: normalizedTx.type,
+          date: normalizedTx.date,
+          imageUri: normalizedTx.imageUri,
+          note: normalizedTx.note,
+          lineItemsText: normalizedTx.lineItemsText,
+        })
+        .returning({ id: transactions.id });
 
-      // 2. Insert category breakdown into child table
-      if (newTx && newTx.id) {
+      if (newTx?.id) {
         await db.insert(transactionItems).values({
           transactionId: newTx.id,
-          category: tx.category,
-          amount: Math.abs(tx.totalAmount),
+          category: normalizedCategory || getUncategorizedLabel(categoryType),
+          amount: Math.abs(normalizedTx.totalAmount),
         });
       }
 
-      await get().fetchTransactions();
+      if (!options?.skipRefresh) {
+        await get().fetchTransactions();
+      }
     } catch (error) {
-      console.error("Failed to add transaction:", error);
+      console.error('Failed to add transaction:', error);
+      throw error;
     } finally {
-      set({ isSaving: false }); 
+      set({ isSaving: false });
     }
   },
 
   updateTransaction: async (id, tx) => {
     set({ isSaving: true });
     try {
-      // Update core record
-      if (tx.merchantName !== undefined || tx.totalAmount !== undefined || tx.date !== undefined || tx.type !== undefined) {
-        await db.update(transactions)
+      const normalizedTx = normalizeTransactionInput(tx as TransactionInput);
+      const existingTransaction = get().transactionsList.find((item) => item.id === id);
+      const nextType = (tx.type ?? existingTransaction?.type ?? 'expense') as TransactionType;
+      const nextCategory = tx.category !== undefined
+        ? get().normalizeCategoryForType(normalizedTx.category, nextType)
+        : existingTransaction?.category;
+
+      if (
+        tx.merchantName !== undefined ||
+        tx.totalAmount !== undefined ||
+        tx.date !== undefined ||
+        tx.type !== undefined ||
+        tx.imageUri !== undefined ||
+        tx.note !== undefined ||
+        tx.lineItemsText !== undefined
+      ) {
+        await db
+          .update(transactions)
           .set({
-            merchantName: tx.merchantName,
+            merchantName: tx.merchantName !== undefined ? normalizedTx.merchantName : undefined,
             totalAmount: tx.totalAmount,
             type: tx.type,
             date: tx.date,
             imageUri: tx.imageUri,
+            note: tx.note !== undefined ? normalizedTx.note : undefined,
+            lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : undefined,
           })
           .where(eq(transactions.id, id));
       }
 
-      // Update child category
-      if (tx.category !== undefined) {
-        await db.update(transactionItems)
-          .set({ category: tx.category, amount: tx.totalAmount ? Math.abs(tx.totalAmount) : undefined })
+      if (tx.category !== undefined || tx.totalAmount !== undefined || tx.type !== undefined) {
+        await db
+          .update(transactionItems)
+          .set({
+            category: nextCategory,
+            amount: tx.totalAmount !== undefined ? Math.abs(tx.totalAmount) : undefined,
+          })
           .where(eq(transactionItems.transactionId, id));
       }
 
       await get().fetchTransactions();
+      await get().fetchBudgets();
     } catch (error) {
-      console.error("Failed to update transaction:", error);
+      console.error('Failed to update transaction:', error);
+      throw error;
     } finally {
       set({ isSaving: false });
     }
@@ -154,29 +314,23 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
   deleteTransaction: async (id) => {
     try {
-      // MUST delete foreign key dependencies first
       await db.delete(transactionItems).where(eq(transactionItems.transactionId, id));
       await db.delete(transactions).where(eq(transactions.id, id));
       await get().fetchTransactions();
+      await get().fetchBudgets();
     } catch (error) {
-      console.error("Failed to delete transaction:", error);
-    }
-  },
-
-  addCategory: (newCategory) => {
-    const currentCategories = get().categories;
-    if (!currentCategories.includes(newCategory)) {
-      set({ categories: [...currentCategories, newCategory] });
+      console.error('Failed to delete transaction:', error);
     }
   },
 
   setBudget: async (category, limitAmount) => {
     try {
-      await db.delete(budgets).where(eq(budgets.category, category));
-      await db.insert(budgets).values({ category, limitAmount, walletId: 1 });
+      const normalizedCategory = normalizeCategoryName(category);
+      await db.delete(budgets).where(eq(budgets.category, normalizedCategory));
+      await db.insert(budgets).values({ category: normalizedCategory, limitAmount, walletId: DEFAULT_WALLET_ID });
       await get().fetchBudgets();
     } catch (error) {
-      console.error("Failed to set budget:", error);
+      console.error('Failed to set budget:', error);
     }
   },
 
@@ -188,59 +342,33 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await get().fetchTransactions();
       await get().fetchBudgets();
     } catch (error) {
-      console.error("Failed to clear data:", error);
+      console.error('Failed to clear data:', error);
     }
   },
 
-injectDummyData: async () => {
+  injectDummyData: async () => {
     set({ isSaving: true });
     try {
-      const dummyTransactions: Omit<Transaction, 'id'>[] = [];
-      
-      // Helper function to easily generate dates for 2026
-      const getMs = (month: number, day: number, hour: number = 10) => 
-        new Date(2026, month - 1, day, hour, 0, 0).getTime();
+      const existingCategories = get().categories;
+      for (const tx of buildDummyTransactions()) {
+        const normalizedCategoryName = normalizeCategoryName(tx.category);
+        const categoryType = inferCategoryType(normalizedCategoryName, tx.type);
+        const alreadyExists = existingCategories.some(
+          (category) => category.type === categoryType && category.name.toLowerCase() === normalizedCategoryName.toLowerCase()
+        );
 
-      // 1. Generate Recurring Months (January to April)
-      for (let m = 1; m <= 4; m++) {
-        // Income
-        dummyTransactions.push({ merchantName: 'PT Corporate Salary', totalAmount: 18500000, type: 'income', category: 'Salary', date: getMs(m, 25) });
-        
-        // Fixed Bills
-        dummyTransactions.push({ merchantName: 'Apartment Rent', totalAmount: -4000000, type: 'expense', category: 'Bills', date: getMs(m, 1) });
-        dummyTransactions.push({ merchantName: 'IndiHome Internet', totalAmount: -450000, type: 'expense', category: 'Bills', date: getMs(m, 5) });
-        dummyTransactions.push({ merchantName: 'PLN Token', totalAmount: -500000, type: 'expense', category: 'Bills', date: getMs(m, 8) });
-        dummyTransactions.push({ merchantName: 'Netflix', totalAmount: -186000, type: 'expense', category: 'Entertainment', date: getMs(m, 28) });
-        
-        // Variable Expenses (Groceries & Transport)
-        dummyTransactions.push({ merchantName: 'Superindo', totalAmount: -850000, type: 'expense', category: 'Groceries', date: getMs(m, 10) });
-        dummyTransactions.push({ merchantName: 'Superindo', totalAmount: -600000, type: 'expense', category: 'Groceries', date: getMs(m, 22) });
-        dummyTransactions.push({ merchantName: 'Gojek / Grab', totalAmount: -250000, type: 'expense', category: 'Transport', date: getMs(m, 12) });
-        dummyTransactions.push({ merchantName: 'Commuter Line Topup', totalAmount: -150000, type: 'expense', category: 'Transport', date: getMs(m, 26) });
-        
-        // Lifestyle (Food & Dining)
-        dummyTransactions.push({ merchantName: 'Kopi Kenangan', totalAmount: -45000, type: 'expense', category: 'Food & Dining', date: getMs(m, 3, 8) });
-        dummyTransactions.push({ merchantName: 'Kopi Kenangan', totalAmount: -45000, type: 'expense', category: 'Food & Dining', date: getMs(m, 14, 8) });
-        dummyTransactions.push({ merchantName: 'Nasi Padang', totalAmount: -55000, type: 'expense', category: 'Food & Dining', date: getMs(m, 18, 12) });
-        dummyTransactions.push({ merchantName: 'Sushi Tei', totalAmount: -350000, type: 'expense', category: 'Food & Dining', date: getMs(m, 20, 19) });
+        if (!alreadyExists) {
+          await get().addCategory(normalizedCategoryName, categoryType);
+        }
+
+        await get().addTransaction(tx, { skipRefresh: true });
       }
-
-      // 2. Generate May (Up to current date: May 8th)
-      dummyTransactions.push({ merchantName: 'Apartment Rent', totalAmount: -4000000, type: 'expense', category: 'Bills', date: getMs(5, 1) });
-      dummyTransactions.push({ merchantName: 'IndiHome Internet', totalAmount: -450000, type: 'expense', category: 'Bills', date: getMs(5, 5) });
-      dummyTransactions.push({ merchantName: 'Kopi Kenangan', totalAmount: -45000, type: 'expense', category: 'Food & Dining', date: getMs(5, 2, 8) });
-      dummyTransactions.push({ merchantName: 'Gojek / Grab', totalAmount: -100000, type: 'expense', category: 'Transport', date: getMs(5, 4) });
-      dummyTransactions.push({ merchantName: 'Nasi Padang', totalAmount: -60000, type: 'expense', category: 'Food & Dining', date: getMs(5, 7, 12) });
-      
-      // 3. Inject sequentially using the existing action so relational logic applies
-      for (const tx of dummyTransactions) {
-        await get().addTransaction(tx);
-      }
-
+      await get().fetchTransactions();
+      await get().fetchBudgets();
     } catch (error) {
-      console.error("Failed to inject dummy data:", error);
+      console.error('Failed to inject dummy data:', error);
     } finally {
       set({ isSaving: false });
     }
-  }
+  },
 }));

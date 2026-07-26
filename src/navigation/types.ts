@@ -14,10 +14,11 @@ export type RootTabParamList = {
 // 2. Define the Stack Screens
 export type RootStackParamList = {
   // FIX: Tell TypeScript that MainTabs is a navigator that accepts Tab routes!
-  MainTabs: NavigatorScreenParams<RootTabParamList>; 
+  MainTabs: NavigatorScreenParams<RootTabParamList>;
   Chatbot: { initialMessage?: string };
-  AddTransactionStack: { transactionId?: number }; 
+  AddTransactionStack: { transactionId?: number };
   Settings: undefined;
+  SystemLogs: undefined;
 };
 
 export type NavigationProps = CompositeNavigationProp<

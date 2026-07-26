@@ -1,9 +1,10 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { eq } from 'drizzle-orm';
+import { sqliteTable, sqliteView, text, integer, real } from 'drizzle-orm/sqlite-core';
 
 export const wallets = sqliteTable('wallets', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
-  type: text('type').notNull(), // 'bank', 'ewallet', 'cash'
+  type: text('type').notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
 });
 
@@ -20,9 +21,11 @@ export const transactions = sqliteTable('transactions', {
   walletId: integer('wallet_id').references(() => wallets.id).notNull(),
   merchantName: text('merchant_name').notNull(),
   totalAmount: real('total_amount').notNull(),
-  type: text('type').notNull(), // 'expense', 'income', 'transfer'
-  date: integer('date').notNull(), // Unix timestamp
+  type: text('type').notNull(),
+  date: integer('date').notNull(),
   imageUri: text('image_uri'),
+  note: text('note'),
+  lineItemsText: text('line_items_text'),
 });
 
 export const transactionItems = sqliteTable('transaction_items', {
@@ -30,6 +33,34 @@ export const transactionItems = sqliteTable('transaction_items', {
   transactionId: integer('transaction_id').references(() => transactions.id).notNull(),
   category: text('category').notNull(),
   amount: real('amount').notNull(),
+});
+
+export const aiTransactionsView = sqliteView('ai_transactions_view').as((qb) =>
+  qb.select({
+    transactionId: transactions.id,
+    merchantName: transactions.merchantName,
+    totalAmount: transactions.totalAmount,
+    type: transactions.type,
+    date: transactions.date,
+    note: transactions.note,
+    lineItemsText: transactions.lineItemsText,
+    category: transactionItems.category,
+  })
+    .from(transactions)
+    .leftJoin(transactionItems, eq(transactions.id, transactionItems.transactionId))
+);
+
+export const categories = sqliteTable('categories', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  type: text('type').notNull(),
+  isSystem: integer('is_system', { mode: 'boolean' }).default(false).notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
 });
 
 export const sharedSplits = sqliteTable('shared_splits', {
