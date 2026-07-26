@@ -1,13 +1,5 @@
-import type {
-  LocalHealthCheckRequest,
-  LocalModelLoadOptions,
-  LocalRuntimeInfo,
-} from './localInferenceTypes';
+import type { LocalRuntimeInfo } from './localInferenceTypes';
 
-export const LOCAL_INFERENCE_BACKEND = 'llama.cpp-android';
-export const LOCAL_INFERENCE_BACKEND_FAMILY = 'gguf-native';
-export const LOCAL_INFERENCE_PRIMARY_RUNTIME = 'native-android-gguf';
-export const LOCAL_INFERENCE_ONNX_ENABLED = false;
 
 export const QWEN_MODEL_ASSET_VERSION = 'qwen3.5-2b-q5km-v1';
 export const QWEN_MODEL_FILE_NAME = 'Qwen3.5-2B-Q5_K_M.gguf';
@@ -77,25 +69,6 @@ export const AI_STATUS_LABELS: Record<AIProvisioningStatus, string> = {
   'update-available': 'Update available',
 };
 
-export function getDefaultLocalModelLoadOptions(): LocalModelLoadOptions {
-  return {
-    maxContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
-    cpuThreads: QWEN_MODEL_DEFAULT_CPU_THREADS,
-    gpuLayers: QWEN_MODEL_DEFAULT_GPU_LAYERS,
-    useMlock: false,
-    warmupPrompt: QWEN_MODEL_WARMUP_PROMPT,
-    useFlashAttention: QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
-    batchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-  };
-}
-
-export function getDefaultLocalHealthCheckRequest(): LocalHealthCheckRequest {
-  return {
-    prompt: QWEN_MODEL_WARMUP_PROMPT,
-    expectedSubstring: QWEN_MODEL_HEALTHCHECK_EXPECTED_SUBSTRING,
-    maxTokens: 8,
-  };
-}
 
 export function isSupportedLocalModelPath(modelPath: string | null | undefined): modelPath is string {
   if (!modelPath) {

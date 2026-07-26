@@ -1,7 +1,7 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 
 import type { LocalAiMode } from './agent';
-import { askFinancialAgent, buildPromptForMode, buildRetrievedContext, cancelActiveLocalGeneration, ensureLocalRuntimeReady } from './agent';
+import { buildPromptForMode, buildRetrievedContext } from './agent';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -27,7 +27,6 @@ type FileSystemLegacyModule = typeof ExpoFileSystemLegacy & {
 };
 
 const FileSystemModule = ExpoFileSystemLegacy as FileSystemLegacyModule;
-const USE_LLAMA_RN = true;
 const STREAMING_UPDATE_INTERVAL_MS = 80;
 const STREAMING_UPDATE_MIN_CHAR_DELTA = 12;
 const LATENCY_TRACE_ENABLED = typeof __DEV__ !== 'undefined' && __DEV__;
@@ -217,10 +216,6 @@ class GenerationService {
   }
 
   async ensureChatRuntimeReady(): Promise<void> {
-    if (!USE_LLAMA_RN) {
-      return this.ensureLegacyChatRuntimeReady();
-    }
-
     if (this.runtimeInitPromise) {
       return this.runtimeInitPromise;
     }
@@ -257,54 +252,9 @@ class GenerationService {
     return this.runtimeInitPromise;
   }
 
-  private async ensureLegacyChatRuntimeReady(): Promise<void> {
-    const store = useAIStore.getState();
-    const activeGenerationRequestId = store.runtime.activeGenerationRequestId;
-    const canRunNativeChat = store.runtime.availability.available
-      && store.provisioning.status === 'ready'
-      && store.runtimeReady
-      && store.runtime.modelLoaded
-      && store.runtime.generationHealthy
-      && !store.warmupPending;
 
-    if (canRunNativeChat && !activeGenerationRequestId) {
-      this.setState({
-        isPreparingRuntime: false,
-        runtimeStatus: '',
-      });
-      return;
-    }
-
-    if (this.runtimeInitPromise) {
-      return this.runtimeInitPromise;
-    }
-
-    this.runtimeInitPromise = (async () => {
-      this.setState({
-        isPreparingRuntime: true,
-        runtimeStatus: 'Opening local chatbot...',
-      });
-
-      try {
-        await ensureLocalRuntimeReady((status) => {
-          this.setState({ runtimeStatus: status });
-        });
-      } finally {
-        this.runtimeInitPromise = null;
-        this.setState({
-          isPreparingRuntime: false,
-          runtimeStatus: '',
-        });
-      }
-    })();
-
-    return this.runtimeInitPromise;
-  }
 
   async startGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
-    if (!USE_LLAMA_RN) {
-      return this.startLegacyGeneration({ prompt, mode });
-    }
 
     const requestStartedAtMs = Date.now();
     this.setState({
@@ -479,28 +429,9 @@ class GenerationService {
     }
   }
 
-  private async startLegacyGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
-    this.setState({
-      isGenerating: true,
-      generationStatus: mode === 'rag' ? 'Retrieving grounded local context...' : 'Checking local inference runtime...',
-    });
 
-    try {
-      return await askFinancialAgent(prompt, null, null, mode, (status) => {
-        this.setState({ generationStatus: status });
-      });
-    } finally {
-      this.setState({
-        isGenerating: false,
-        generationStatus: '',
-      });
-    }
-  }
 
   async cancelGeneration(reason = 'Generation cancelled by user.'): Promise<boolean> {
-    if (!USE_LLAMA_RN) {
-      return cancelActiveLocalGeneration(reason);
-    }
 
     const state = useAIStore.getState();
     const requestId = state.runtime.activeGenerationRequestId;

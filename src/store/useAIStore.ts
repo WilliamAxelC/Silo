@@ -1,14 +1,13 @@
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 
 import {
   AI_RUNTIME_PHASE_STATUSES,
   AI_STATUS_LABELS,
   AIProvisioningStatus,
-  LOCAL_INFERENCE_BACKEND,
   QWEN_MODEL_ASSET_VERSION,
   QWEN_MODEL_DISPLAY_NAME,
 } from '../services/ai/config';
-import { getNativeLocalInferenceBridge } from '../services/ai/localInferenceBridge';
 import type {
   LocalInferenceAvailability,
   LocalInferenceError,
@@ -102,14 +101,26 @@ export interface AIRuntimeAvailability {
 }
 
 function buildInitialAvailability(): LocalInferenceAvailability {
-  return getNativeLocalInferenceBridge().getAvailability();
+  if (Platform.OS === 'android') {
+    return {
+      available: true,
+      reason: 'android-supported',
+      message: 'llama.rn local inference available on Android.',
+    };
+  }
+
+  return {
+    available: false,
+    reason: 'platform-unsupported',
+    message: 'Local GGUF inference is Android-only in this build.',
+  };
 }
 
 export function createInitialRuntimeSnapshot(): AIRuntimeSnapshot {
   const availability = buildInitialAvailability();
   return {
     backendDetected: availability.available,
-    backendName: availability.available ? LOCAL_INFERENCE_BACKEND : null,
+    backendName: availability.available ? 'llama.rn' : null,
     runtimeState: availability.available ? 'detected' : 'unavailable',
     modelLoaded: false,
     generationHealthy: false,
@@ -330,13 +341,13 @@ export const useAIStore = create<AIStoreState>((set) => ({
   markRuntimeReady: (runtimeReady) => set({ runtimeReady }),
   setWarmupPending: (warmupPending) => set({ warmupPending }),
   refreshRuntimeAvailability: () => {
-    const availability = getNativeLocalInferenceBridge().getAvailability();
+    const availability = buildInitialAvailability();
     set((state) => ({
       runtime: {
         ...state.runtime,
         availability,
         backendDetected: availability.available,
-        backendName: availability.available ? LOCAL_INFERENCE_BACKEND : null,
+        backendName: availability.available ? 'llama.rn' : null,
         runtimeState: availability.available ? (state.runtime.runtimeState === 'unavailable' ? 'detected' : state.runtime.runtimeState) : 'unavailable',
         lastRuntimeError: availability.available
           ? state.runtime.lastRuntimeError

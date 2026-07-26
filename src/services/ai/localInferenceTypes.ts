@@ -101,21 +101,6 @@ export type LocalRuntimeInfo = {
   lastStopReason?: string | null;
 };
 
-export type LocalModelLoadOptions = {
-  maxContextTokens?: number;
-  cpuThreads?: number;
-  gpuLayers?: number;
-  useMlock?: boolean;
-  warmupPrompt?: string;
-  useFlashAttention?: boolean;
-  batchTokens?: number;
-};
-
-export type LocalHealthCheckRequest = {
-  prompt: string;
-  expectedSubstring?: string;
-  maxTokens?: number;
-};
 
 export type LocalHealthCheckResult = {
   ok: boolean;
@@ -148,14 +133,4 @@ export type LocalInferenceRuntimeState =
   | 'busy'
   | 'failed';
 
-export interface LocalInferenceBackendBridge {
-  isAvailable(): boolean;
-  getAvailability(): LocalInferenceAvailability;
-  getRuntimeInfo(): Promise<LocalRuntimeInfo>;
-  loadModel(modelPath: string, options?: LocalModelLoadOptions): Promise<void>;
-  warmup(prompt: string): Promise<void>;
-  runHealthCheck(request: LocalHealthCheckRequest): Promise<LocalHealthCheckResult>;
-  generate(request: LocalGenerationRequest): Promise<LocalGenerationResult>;
-  cancelGeneration(requestId: string): Promise<void>;
-  disposeModel(): Promise<void>;
-}
+

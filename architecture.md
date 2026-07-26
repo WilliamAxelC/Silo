@@ -33,13 +33,13 @@ The system is fundamentally organized into five decoupled layers, separating pre
                                          v
 +-----------------------------------------------------------------------------------+
 |                     4. NATIVE BRIDGE & ADAPTATION LAYER                           |
-|   LlamaRnAdapter, SiloLocalInferenceBridge, Kotlin Native Module Medition         |
+|   LlamaRnAdapter (llama.rn direct JSI binding)                                    |
 +-----------------------------------------------------------------------------------+
                                          |
                                          v
 +-----------------------------------------------------------------------------------+
 |                    5. NATIVE INFERENCE & COMPUTE LAYER                            |
-|   llama.rn / llama.cpp Shared Lib (libsilo_local_inference.so), GGUF Runner       |
+|   llama.rn / llama.cpp Shared Lib                                                 |
 +-----------------------------------------------------------------------------------+
 ```
 
@@ -68,12 +68,12 @@ Centralizes asynchronous runtime state and relational financial data to decouple
 ### 2.4 Native Bridge & Adaptation Layer
 Provides idiomatic TypeScript interfaces for native Android capabilities.
 - **Llama.rn Adapter**: [llamaRnAdapter.ts](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts) wraps the third-party `llama.rn` module, managing native context initialization (`initLlama`), warmup execution (`runWarmup`), completion dispatch, and graceful fallback from GPU to CPU execution.
-- **Legacy Custom Inference Bridge**: [localInferenceBridge.ts](file:///d:/Project/Silo/silo-app/src/services/ai/localInferenceBridge.ts) interfaces with custom native Android modules ([SiloLocalInferenceModule.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferenceModule.kt) and [SiloLocalInferencePackage.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferencePackage.kt)), registered in [MainApplication.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/MainApplication.kt).
+- **Legacy Custom Inference Bridge (Deprecated)**: The legacy JS bridge (`localInferenceBridge.ts`) has been removed in favor of `llama.rn`. The underlying custom Android native modules ([SiloLocalInferenceModule.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferenceModule.kt) and [SiloLocalInferencePackage.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferencePackage.kt)) remain in the native project structure as inactive legacy code scheduled for native pruning.
 
 ### 2.5 Native Inference & Compute Layer
 The high-performance C++/JNI compute engine responsible for LLM execution on ARM64 mobile hardware.
-- **Native JNI Core**: [SiloLocalInferenceJni.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/SiloLocalInferenceJni.cpp) and [gguf_runner.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/gguf_runner.cpp) implement direct GGUF model loading, tokenization, multi-threaded evaluation, and cancellation polling.
-- **Build & Linkage**: Configured via [CMakeLists.txt](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/CMakeLists.txt), producing the `libsilo_local_inference.so` shared library packaged for `arm64-v8a` architectures with optional CPU-specific ARMNEON optimizations.
+- **Llama.rn JSI Core**: Direct C++ bindings to `llama.cpp` via React Native JSI for zero-overhead token streaming and memory-mapped model execution.
+- **Legacy Native JNI Core (Deprecated)**: [SiloLocalInferenceJni.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/SiloLocalInferenceJni.cpp) and [gguf_runner.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/gguf_runner.cpp) are inactive C++ wrappers from the previous bridge implementation.
 
 ---
 

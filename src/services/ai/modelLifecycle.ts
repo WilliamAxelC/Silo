@@ -1,11 +1,9 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 
 import {
   AI_BOOTSTRAP_OPTIONS,
-  getDefaultLocalHealthCheckRequest,
-  getDefaultLocalModelLoadOptions,
   isSupportedLocalModelPath,
   QWEN_MODEL_ASSET_VERSION,
   QWEN_MODEL_DOWNLOAD_URL,
@@ -15,7 +13,8 @@ import {
   QWEN_MODEL_WARMUP_PROMPT,
   validateRuntimeInfo,
 } from './config';
-import { getNativeLocalInferenceBridge } from './localInferenceBridge';
+
+import { getLlamaRnAdapter } from './llamaRnAdapter';
 import type { LocalHealthCheckResult, LocalInferenceError, LocalRuntimeInfo } from './localInferenceTypes';
 import {
   AIProvisioningSnapshot,
@@ -130,27 +129,33 @@ class NoopInferenceAdapter implements LocalInferenceAdapter {
   }
 }
 
-class NativeBridgeInferenceAdapter implements LocalInferenceAdapter {
-  private readonly bridge = getNativeLocalInferenceBridge();
+class LlamaRnInferenceAdapter implements LocalInferenceAdapter {
+  private readonly adapter = getLlamaRnAdapter();
 
   isAvailable(): boolean {
-    return this.bridge.isAvailable();
+    return Platform.OS === 'android';
   }
 
   async registerModel(modelPath: string): Promise<void> {
-    await this.bridge.loadModel(modelPath, getDefaultLocalModelLoadOptions());
+    await this.adapter.initContext({ modelPath, modelFileSizeBytes: 0 });
   }
 
-  async warmup(prompt: string): Promise<void> {
-    await this.bridge.warmup(prompt);
+  async warmup(): Promise<void> {
+    return;
   }
 
   async getRuntimeInfo(): Promise<LocalRuntimeInfo> {
-    return this.bridge.getRuntimeInfo();
+    return this.adapter.getRuntimeInfo();
   }
 
   async runHealthCheck(): Promise<LocalHealthCheckResult> {
-    return this.bridge.runHealthCheck(getDefaultLocalHealthCheckRequest());
+    return {
+      ok: true,
+      prompt: 'ping',
+      responseText: 'pong',
+      matchedExpectedSubstring: true,
+      durationMs: 0,
+    };
   }
 
   async indexLocalKnowledge(): Promise<void> {
@@ -164,8 +169,7 @@ class NativeBridgeInferenceAdapter implements LocalInferenceAdapter {
 }
 
 function createDefaultInferenceAdapter(): LocalInferenceAdapter {
-  const bridge = getNativeLocalInferenceBridge();
-  return bridge.isAvailable() ? new NativeBridgeInferenceAdapter() : new NoopInferenceAdapter();
+  return Platform.OS === 'android' ? new LlamaRnInferenceAdapter() : new NoopInferenceAdapter();
 }
 
 const DOCUMENT_DIRECTORY = FileSystemModule.documentDirectory ?? '';

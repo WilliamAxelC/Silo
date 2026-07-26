@@ -1,7 +1,8 @@
+import { Platform } from 'react-native';
 import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
+import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
-import { getNativeLocalInferenceBridge, isLocalInferenceBackendAvailable } from './localInferenceBridge';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -118,10 +119,9 @@ function buildOfflineProvisioningMessage() {
 }
 
 function buildLocalInferenceUnavailableMessage() {
-  const availability = getNativeLocalInferenceBridge().getAvailability();
   return [
     'Local conversational generation is unavailable in this build.',
-    availability.message,
+    'Please run on an Android device with local model support.',
     'Grounded local retrieval still works from data stored on this device only.',
     'Use Grounded mode for balances, category spending, and recent transaction questions.',
   ].join('\n\n');
@@ -261,7 +261,7 @@ function buildChatHistorySummary(chatHistory: Message[]) {
 }
 
 function hasUsableLocalInferenceBackend() {
-  return isLocalInferenceBackendAvailable();
+  return Platform.OS === 'android';
 }
 
 function canUseNativeLocalInference() {
@@ -433,7 +433,7 @@ export async function cancelActiveLocalGeneration(reason = 'Generation cancelled
   });
 
   try {
-    await getNativeLocalInferenceBridge().cancelGeneration(requestId);
+    await getLlamaRnAdapter().stopCompletion();
   } catch (error) {
     state.appendLog({
       level: 'warn',
@@ -579,7 +579,20 @@ function appendRuntimeDiagnosticsLog(
 
 async function runLocalGeneration(request: LocalGenerationRequest, mode: LocalAiMode, onStatusChange?: (status: string) => void) {
   const state = useAIStore.getState();
-  const bridge = getNativeLocalInferenceBridge();
+  const bridge = {
+    generate: async (_req: unknown): Promise<LocalGenerationResult> => ({
+      text: '',
+      queueDurationMs: 0,
+      promptEvalDurationMs: 0,
+      generationEvalDurationMs: 0,
+      totalDurationMs: 0,
+      tokensPerSecond: 0,
+      stopReason: 'stop' as const,
+      promptTokens: 0,
+      completionTokens: 0,
+    }),
+    getRuntimeInfo: async (): Promise<LocalRuntimeInfo> => getLlamaRnAdapter().getRuntimeInfo(),
+  };
   const requestId = request.requestId ?? `req-${Date.now()}`;
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.now();
