@@ -15,7 +15,13 @@ import {
 } from './config';
 
 import { getLlamaRnAdapter } from './llamaRnAdapter';
-import type { LocalHealthCheckResult, LocalInferenceError, LocalRuntimeInfo } from './localInferenceTypes';
+import {
+  LocalInferenceException,
+  getErrorMessage,
+  type LocalHealthCheckResult,
+  type LocalInferenceError,
+  type LocalRuntimeInfo,
+} from './localInferenceTypes';
 import {
   AIProvisioningSnapshot,
   AITransferSnapshot,
@@ -1211,34 +1217,28 @@ export class QModelLifecycleManager {
   }
 
   private normalizeRuntimeError(error: unknown, modelPath?: string): LocalInferenceError {
+    if (error instanceof LocalInferenceException && (!modelPath || error.details?.modelPath === modelPath)) {
+      return error;
+    }
+
     if (error && typeof error === 'object' && 'code' in error && 'message' in error) {
       const typedError = error as LocalInferenceError;
-      return {
-        code: typedError.code ?? 'unknown',
-        message: typedError.message,
-        details: {
+      return new LocalInferenceException(
+        typedError.code ?? 'unknown',
+        typedError.message,
+        {
           modelPath,
           ...typedError.details,
         },
-        recoverable: typedError.recoverable ?? true,
-      };
+        typedError.recoverable ?? true,
+      );
     }
 
     if (error instanceof Error) {
-      return {
-        code: 'load-failed',
-        message: error.message,
-        details: modelPath ? { modelPath } : undefined,
-        recoverable: true,
-      };
+      return new LocalInferenceException('load-failed', error.message, modelPath ? { modelPath } : undefined, true);
     }
 
-    return {
-      code: 'unknown',
-      message: 'Unknown local inference runtime failure.',
-      details: modelPath ? { modelPath } : undefined,
-      recoverable: true,
-    };
+    return new LocalInferenceException('unknown', getErrorMessage(error, 'Unknown local inference runtime failure.'), modelPath ? { modelPath } : undefined, true);
   }
 
   private async clearInvalidInstalledState(message: string, details?: Record<string, unknown>) {

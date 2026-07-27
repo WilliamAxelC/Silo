@@ -16,11 +16,12 @@ import {
   QWEN_MODEL_RETRIEVAL_ITEM_LIMIT,
   QWEN_MODEL_STOP_TOKENS,
 } from './config';
-import type {
-  LocalGenerationMetrics,
-  LocalGenerationRequest,
-  LocalGenerationResult,
-  LocalRuntimeInfo,
+import {
+  getErrorMessage,
+  type LocalGenerationMetrics,
+  type LocalGenerationRequest,
+  type LocalGenerationResult,
+  type LocalRuntimeInfo,
 } from './localInferenceTypes';
 
 export type LocalAiMode = 'rag' | 'chat';
@@ -438,7 +439,7 @@ export async function cancelActiveLocalGeneration(reason = 'Generation cancelled
     state.appendLog({
       level: 'warn',
       event: 'generation-cancel-bridge-error',
-      message: error instanceof Error ? error.message : 'Native cancelGeneration() failed.',
+      message: getErrorMessage(error, 'Native cancelGeneration() failed.'),
       details: { requestId },
     });
   } finally {
@@ -707,7 +708,7 @@ async function runLocalGeneration(request: LocalGenerationRequest, mode: LocalAi
     return streamedText.trim();
   } catch (error) {
     const latestState = useAIStore.getState();
-    const message = error instanceof Error ? error.message : 'Local assistant generation failed.';
+    const message = getErrorMessage(error, 'Local assistant generation failed.');
     const isCancelled = typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'generation-cancelled';
 
     appendGenerationLog({

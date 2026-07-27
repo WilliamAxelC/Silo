@@ -133,4 +133,38 @@ export type LocalInferenceRuntimeState =
   | 'busy'
   | 'failed';
 
+export class LocalInferenceException extends Error implements LocalInferenceError {
+  code: LocalInferenceErrorCode;
+  details?: Record<string, unknown>;
+  recoverable?: boolean;
 
+  constructor(
+    code: LocalInferenceErrorCode,
+    message: string,
+    details?: Record<string, unknown>,
+    recoverable = true,
+  ) {
+    super(message);
+    this.name = 'LocalInferenceException';
+    this.code = code;
+    this.details = details;
+    this.recoverable = recoverable;
+    Object.setPrototypeOf(this, LocalInferenceException.prototype);
+  }
+}
+
+export function getErrorMessage(error: unknown, fallbackMessage = 'An unexpected error occurred.'): string {
+  if (error instanceof Error && typeof error.message === 'string' && error.message.trim().length > 0) {
+    return error.message;
+  }
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+    const msg = (error as Record<string, unknown>).message as string;
+    if (msg.trim().length > 0) {
+      return msg;
+    }
+  }
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error;
+  }
+  return fallbackMessage;
+}

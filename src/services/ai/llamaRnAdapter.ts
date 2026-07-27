@@ -9,10 +9,11 @@ import {
   QWEN_MODEL_WARMUP_PROMPT,
   isSupportedLocalModelPath,
 } from './config';
-import type {
-  LocalGenerationResult,
-  LocalInferenceError,
-  LocalRuntimeInfo,
+import {
+  LocalInferenceException,
+  type LocalGenerationResult,
+  type LocalInferenceError,
+  type LocalRuntimeInfo,
 } from './localInferenceTypes';
 import {
   buildMemoryBudget,
@@ -51,12 +52,12 @@ const FileSystemModule = ExpoFileSystemLegacy as FileSystemLegacyModule;
 const LLAMA_RN_WARMUP_TIMEOUT_MS = 8_000;
 
 function toRuntimeError(code: LocalInferenceError['code'], message: string, details?: Record<string, unknown>): LocalInferenceError {
-  return {
+  return new LocalInferenceException(
     code,
     message,
     details,
-    recoverable: code !== 'unsupported-device' && code !== 'backend-unavailable',
-  };
+    code !== 'unsupported-device' && code !== 'backend-unavailable',
+  );
 }
 
 async function safeGetInfo(path: string): Promise<FileInfoResult> {
@@ -177,7 +178,7 @@ class LlamaRnAdapter {
       const fileInfo = await safeGetInfo(normalizedModelPath);
       const resolvedModelFileSizeBytes = fileInfo.size ?? modelFileSizeBytes;
       if (!fileInfo.exists || !resolvedModelFileSizeBytes || resolvedModelFileSizeBytes <= 0) {
-        throw toRuntimeError('model-file-missing', 'Configured llama.rn model file could not be found or has an invalid size.', {
+        throw toRuntimeError('model-file-missing', 'Local AI model is not installed yet. Please tap "Retry setup" above or download the model in Settings to enable offline AI.', {
           modelPath: normalizedModelPath,
           exists: fileInfo.exists,
           reportedSizeBytes: fileInfo.size ?? null,

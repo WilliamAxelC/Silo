@@ -12,6 +12,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import type { LocalAiMode } from '../services/ai/agent';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../services/ai/generationService';
+import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { getChatRuntimePreloadService } from '../services/ai/chatRuntimePreloadService';
 
 export const ChatbotScreen = () => {
@@ -242,7 +243,7 @@ export const ChatbotScreen = () => {
         await manager.retryProvisioning();
       }
     } catch (error) {
-      Alert.alert('AI Setup', error instanceof Error ? error.message : 'Unable to continue model setup.');
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to continue model setup.'));
     }
   };
 
@@ -250,7 +251,7 @@ export const ChatbotScreen = () => {
     try {
       await getModelLifecycleManager().cancelDownload();
     } catch (error) {
-      Alert.alert('AI Setup', error instanceof Error ? error.message : 'Unable to cancel setup.');
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to cancel setup.'));
     }
   };
 
@@ -284,7 +285,7 @@ export const ChatbotScreen = () => {
       assistantMessageStartedAtRef.current[assistantMessageId] = durationMs;
       pendingAssistantMessageIdRef.current = null;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Local AI failed unexpectedly.';
+      const message = getErrorMessage(error, 'Local AI failed unexpectedly.');
       const isCancelled = message.toLowerCase().includes('cancel');
       const durationMs = Date.now() - startedAt;
       updateChatMessage(assistantMessageId, {
@@ -313,7 +314,7 @@ export const ChatbotScreen = () => {
         pendingAssistantMessageIdRef.current = null;
       }
     } catch (error) {
-      Alert.alert('Cancel generation', error instanceof Error ? error.message : 'Unable to cancel generation.');
+      Alert.alert('Cancel generation', getErrorMessage(error, 'Unable to cancel generation.'));
     }
   };
 

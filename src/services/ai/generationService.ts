@@ -14,7 +14,12 @@ import {
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore } from '../../store/useAIStore';
-import type { LocalInferenceError, LocalRuntimeInfo } from './localInferenceTypes';
+import {
+  LocalInferenceException,
+  getErrorMessage,
+  type LocalInferenceError,
+  type LocalRuntimeInfo,
+} from './localInferenceTypes';
 
 type FileInfoResult = {
   exists: boolean;
@@ -153,29 +158,25 @@ function traceLatency(event: string, details: Record<string, unknown>) {
 }
 
 function normalizeRuntimeError(error: unknown): LocalInferenceError {
+  if (error instanceof LocalInferenceException) {
+    return error;
+  }
+
   if (error && typeof error === 'object' && 'code' in error && 'message' in error) {
     const typedError = error as LocalInferenceError;
-    return {
-      code: typedError.code ?? 'unknown',
-      message: typedError.message,
-      details: typedError.details,
-      recoverable: typedError.recoverable ?? true,
-    };
+    return new LocalInferenceException(
+      typedError.code ?? 'unknown',
+      typedError.message,
+      typedError.details,
+      typedError.recoverable ?? true,
+    );
   }
 
   if (error instanceof Error) {
-    return {
-      code: 'generation-failed',
-      message: error.message,
-      recoverable: true,
-    };
+    return new LocalInferenceException('generation-failed', error.message, undefined, true);
   }
 
-  return {
-    code: 'unknown',
-    message: 'Unknown local inference runtime failure.',
-    recoverable: true,
-  };
+  return new LocalInferenceException('unknown', getErrorMessage(error, 'Unknown local inference runtime failure.'), undefined, true);
 }
 
 class GenerationService {

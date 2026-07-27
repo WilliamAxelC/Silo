@@ -14,6 +14,7 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord, CategoryType, ThemeMode } from '../features/transactions/types';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
+import { getErrorMessage } from '../services/ai/localInferenceTypes';
 
 const THEME_OPTIONS: ThemeMode[] = ['system', 'light', 'dark'];
 const CURRENCY_OPTIONS = ['IDR', 'USD', 'EUR'];
@@ -126,7 +127,7 @@ export const SettingsScreen = () => {
 
       closeModal();
     } catch (error) {
-      Alert.alert('Category Error', error instanceof Error ? error.message : 'Unable to save category.');
+      Alert.alert('Category Error', getErrorMessage(error, 'Unable to save category.'));
     }
   };
 
@@ -203,7 +204,7 @@ export const SettingsScreen = () => {
         await manager.retryProvisioning();
       }
     } catch (error) {
-      Alert.alert('AI Setup', error instanceof Error ? error.message : 'Unable to continue model setup.');
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to continue model setup.'));
     } finally {
       setIsAiActionLoading(false);
     }
@@ -214,7 +215,7 @@ export const SettingsScreen = () => {
     try {
       await getModelLifecycleManager().cancelDownload();
     } catch (error) {
-      Alert.alert('AI Setup', error instanceof Error ? error.message : 'Unable to cancel setup.');
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to cancel setup.'));
     } finally {
       setIsAiActionLoading(false);
     }

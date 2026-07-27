@@ -15,6 +15,7 @@ import { analyzeReceiptImage } from '../services/ai/agent';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAIStore } from '../store/useAIStore';
+import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
 
 type ReceiptLineItemDraft = {
@@ -341,7 +342,7 @@ export const AddTransactionScreen = () => {
         setCustomCategory('');
         setCategoryModalVisible(false);
       } catch (error) {
-        Alert.alert('Category Error', error instanceof Error ? error.message : 'Failed to add category.');
+        Alert.alert('Category Error', getErrorMessage(error, 'Failed to add category.'));
       }
     }
   };

@@ -87,9 +87,9 @@ android {
     buildToolsVersion = rootProject.ext.buildToolsVersion
     compileSdk = rootProject.ext.compileSdkVersion
 
-    namespace = 'com.LCSdev.silo'
+    namespace "com.LCSdev.silo"
     defaultConfig {
-        applicationId = 'com.LCSdev.silo'
+        applicationId "com.LCSdev.silo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode = 1
