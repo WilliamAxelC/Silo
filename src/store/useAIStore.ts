@@ -62,6 +62,31 @@ export interface AIProvisioningSnapshot {
   transfer: AITransferSnapshot;
 }
 
+export interface AIStorageHealthSnapshot {
+  freeBytes: number | null;
+  totalBytes: number | null;
+  status: 'ok' | 'warning' | 'critical' | 'unknown';
+  lastCheckedAt: string | null;
+  message: string | null;
+}
+
+export interface AIMemoryTelemetrySnapshot {
+  pssBytes: number | null;
+  totalRamBytes: number | null;
+  recommendedQuantization: string;
+  activeQuantization: string;
+  fallbackTriggered: boolean;
+  lastUpdated: string | null;
+}
+
+export interface AIContextWindowSnapshot {
+  currentTokens: number;
+  maxTokens: number;
+  summarizationActive: boolean;
+  windowTurnCount: number;
+  summaryText: string | null;
+}
+
 export interface AIEventLog {
   id: string;
   level: 'info' | 'warn' | 'error';
@@ -202,11 +227,17 @@ export interface AIStoreState {
   selectedMode: 'rag' | 'chat';
   chatHistory: Message[];
   provisioning: AIProvisioningSnapshot;
+  storageHealth: AIStorageHealthSnapshot;
+  memoryTelemetry: AIMemoryTelemetrySnapshot;
+  contextWindow: AIContextWindowSnapshot;
   logs: AIEventLog[];
   runtime: AIRuntimeSnapshot;
   runtimeReady: boolean;
   warmupPending: boolean;
   setSelectedMode: (mode: 'rag' | 'chat') => void;
+  updateStorageHealth: (health: Partial<AIStorageHealthSnapshot>) => void;
+  updateMemoryTelemetry: (telemetry: Partial<AIMemoryTelemetrySnapshot>) => void;
+  updateContextWindow: (context: Partial<AIContextWindowSnapshot>) => void;
   addChatMessage: (msg: Message) => void;
   updateChatMessage: (messageId: string, updater: Partial<Message> | ((message: Message) => Message)) => void;
   removeChatMessage: (messageId: string) => void;
@@ -264,12 +295,40 @@ const MAX_EVENT_LOGS = 60;
 
 export const getProvisioningStatusLabel = (status: AIProvisioningStatus): string => AI_STATUS_LABELS[status];
 
+export const createInitialStorageHealthSnapshot = (): AIStorageHealthSnapshot => ({
+  freeBytes: null,
+  totalBytes: null,
+  status: 'unknown',
+  lastCheckedAt: null,
+  message: null,
+});
+
+export const createInitialMemoryTelemetrySnapshot = (): AIMemoryTelemetrySnapshot => ({
+  pssBytes: null,
+  totalRamBytes: null,
+  recommendedQuantization: 'Q5_K_M',
+  activeQuantization: 'Q5_K_M',
+  fallbackTriggered: false,
+  lastUpdated: null,
+});
+
+export const createInitialContextWindowSnapshot = (): AIContextWindowSnapshot => ({
+  currentTokens: 0,
+  maxTokens: 1024,
+  summarizationActive: false,
+  windowTurnCount: 0,
+  summaryText: null,
+});
+
 export const useAIStore = create<AIStoreState>((set) => ({
   localModelId: QWEN_MODEL_ASSET_VERSION,
   localModelDisplayName: QWEN_MODEL_DISPLAY_NAME,
   selectedMode: 'rag',
   chatHistory: [],
   provisioning: createInitialProvisioningSnapshot(),
+  storageHealth: createInitialStorageHealthSnapshot(),
+  memoryTelemetry: createInitialMemoryTelemetrySnapshot(),
+  contextWindow: createInitialContextWindowSnapshot(),
   logs: [],
   runtime: createInitialRuntimeSnapshot(),
   runtimeReady: false,
@@ -457,6 +516,29 @@ export const useAIStore = create<AIStoreState>((set) => ({
         lastRuntimeError: null,
         activeStatusLabel: null,
         activePhaseStartedAt: null,
+      },
+    })),
+  updateStorageHealth: (health) =>
+    set((state) => ({
+      storageHealth: {
+        ...state.storageHealth,
+        ...health,
+        lastCheckedAt: health.lastCheckedAt ?? new Date().toISOString(),
+      },
+    })),
+  updateMemoryTelemetry: (telemetry) =>
+    set((state) => ({
+      memoryTelemetry: {
+        ...state.memoryTelemetry,
+        ...telemetry,
+        lastUpdated: telemetry.lastUpdated ?? new Date().toISOString(),
+      },
+    })),
+  updateContextWindow: (context) =>
+    set((state) => ({
+      contextWindow: {
+        ...state.contextWindow,
+        ...context,
       },
     })),
 }));
