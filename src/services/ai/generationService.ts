@@ -73,13 +73,34 @@ function getConfiguredModelPath() {
   return provisioningPath ?? `file:///data/user/0/com.LCSdev.silo/files/ai/models/${QWEN_MODEL_FILE_NAME}`;
 }
 
-const STREAM_SANITIZER_TOKENS = ['<|im_start|>', '<|im_end|>', '<|endoftext|>'] as const;
+const STREAM_SANITIZER_TOKENS = [
+  '<|im_start|>',
+  '<|im_end|>',
+  '<|endoftext|>',
+  '<|assistant|>',
+  '<|user|>',
+  '<think>',
+  '</think>',
+] as const;
 
 function removeGeneratedControlTokens(value: string) {
-  return STREAM_SANITIZER_TOKENS.reduce(
-    (text, token) => text.split(token).join(''),
-    value.replace(/\u0000/g, ''),
-  );
+  let text = value.replace(/\u0000/g, '');
+  STREAM_SANITIZER_TOKENS.forEach((token) => {
+    if (token !== '<think>' && token !== '</think>') {
+      text = text.split(token).join('');
+    }
+  });
+  text = text.replace(/<\|im_start\|>[a-z0-9_-]*/gi, '');
+  text = text.replace(/<\|[a-z0-9_-]+\|>/gi, '');
+  return text;
+}
+
+function stripThinkingBlocks(value: string): string {
+  let cleaned = value.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  if (cleaned.toLowerCase().includes('<think>')) {
+    cleaned = cleaned.replace(/<think>[\s\S]*$/i, '').trim();
+  }
+  return cleaned;
 }
 
 function getControlTokenPrefixRemainder(value: string) {
@@ -98,30 +119,20 @@ function getControlTokenPrefixRemainder(value: string) {
 }
 
 function sanitizeGeneratedText(value: string) {
-  return removeGeneratedControlTokens(value).trim();
+  const withoutControlTokens = removeGeneratedControlTokens(value);
+  return stripThinkingBlocks(withoutControlTokens);
 }
 
 function sanitizeStreamingGeneratedText(
-  previousRawText: string,
+  _previousRawText: string,
   nextRawText: string,
-  previousCleanText: string,
-  pendingRemainder: string,
+  _previousCleanText: string,
+  _pendingRemainder: string,
 ) {
-  if (!nextRawText.startsWith(previousRawText)) {
-    return {
-      cleanText: sanitizeGeneratedText(nextRawText),
-      pendingRemainder: '',
-    };
-  }
-
-  const nextDelta = nextRawText.slice(previousRawText.length);
-  const combinedDelta = pendingRemainder + nextDelta;
-  const nextRemainder = getControlTokenPrefixRemainder(combinedDelta);
-  const safeDelta = nextRemainder ? combinedDelta.slice(0, -nextRemainder.length) : combinedDelta;
-  const cleanDelta = removeGeneratedControlTokens(safeDelta);
-
+  const nextRemainder = getControlTokenPrefixRemainder(nextRawText);
+  const safeText = nextRemainder ? nextRawText.slice(0, -nextRemainder.length) : nextRawText;
   return {
-    cleanText: previousCleanText + cleanDelta,
+    cleanText: sanitizeGeneratedText(safeText),
     pendingRemainder: nextRemainder,
   };
 }
