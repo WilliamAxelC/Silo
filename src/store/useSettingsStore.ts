@@ -4,8 +4,9 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
-import { EXTERNAL_API_PRESETS } from '../features/transactions/constants';
+import { EXTERNAL_API_PRESETS, GGUF_QUANTIZATION_PRESETS } from '../features/transactions/constants';
 import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, GGUFQuantizationTier } from '../features/transactions/types';
+import { useAIStore } from './useAIStore';
 
 interface SettingsState extends AppSettings {
   isLoaded: boolean;
@@ -61,6 +62,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       isDarkMode: deriveIsDarkMode(parsed.themeMode),
       isLoaded: true,
     });
+    const preset = GGUF_QUANTIZATION_PRESETS[parsed.aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
+    useAIStore.getState().setLocalModelTarget(preset.version, preset.label);
   },
 
   setThemeMode: async (themeMode) => {
@@ -101,6 +104,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAiModelQuantization: async (aiModelQuantization) => {
     await saveSetting('aiModelQuantization', aiModelQuantization);
     set({ aiModelQuantization });
+    const preset = GGUF_QUANTIZATION_PRESETS[aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
+    useAIStore.getState().setLocalModelTarget(preset.version, preset.label);
   },
 
   setAiWifiOnlyDownload: async (aiWifiOnlyDownload) => {

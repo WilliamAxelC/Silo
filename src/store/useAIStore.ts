@@ -234,6 +234,7 @@ export interface AIStoreState {
   runtime: AIRuntimeSnapshot;
   runtimeReady: boolean;
   warmupPending: boolean;
+  setLocalModelTarget: (localModelId: string, localModelDisplayName: string) => void;
   setSelectedMode: (mode: 'rag' | 'chat') => void;
   updateStorageHealth: (health: Partial<AIStorageHealthSnapshot>) => void;
   updateMemoryTelemetry: (telemetry: Partial<AIMemoryTelemetrySnapshot>) => void;
@@ -333,6 +334,15 @@ export const useAIStore = create<AIStoreState>((set) => ({
   runtime: createInitialRuntimeSnapshot(),
   runtimeReady: false,
   warmupPending: false,
+  setLocalModelTarget: (localModelId, localModelDisplayName) =>
+    set((state) => ({
+      localModelId,
+      localModelDisplayName,
+      provisioning: {
+        ...state.provisioning,
+        version: localModelId,
+      },
+    })),
   setSelectedMode: (selectedMode) => set({ selectedMode }),
   addChatMessage: (msg) =>
     set((state) => ({
