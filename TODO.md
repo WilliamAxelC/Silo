@@ -61,34 +61,43 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 - [x] Filter out all ChatML conversation control markers (`<|im_start|>assistant`, `<|im_end|>`, `<|endoftext|>`, etc.).
 - [x] Hold back unclosed `<think>` tags during live streaming so the chat UI displays the `Thinking…` loading indicator cleanly without raw XML leakage.
 
----
-
-## Future Improvements (not in this commit)
-
-### Native Android C++/JNI code removal
-- [x] Remove `android/.../ai/SiloLocalInferenceModule.kt` and
-  `SiloLocalInferencePackage.kt` — these are the Kotlin modules that
-  registered the custom native bridge.
-- [x] Remove `android/.../cpp/SiloLocalInferenceJni.cpp` and
-  `gguf_runner.cpp` / `gguf_runner.h` — these are the C++ JNI wrappers.
+### 9. Native Android Legacy Code Removal
+- [x] Remove `android/.../ai/SiloLocalInferenceModule.kt` and `SiloLocalInferencePackage.kt` — the Kotlin modules that registered the custom native bridge.
+- [x] Remove `android/.../cpp/SiloLocalInferenceJni.cpp` and `gguf_runner.cpp` / `gguf_runner.h` — the C++ JNI wrappers.
 - [x] Remove `libsilo_local_inference.so` build target from `CMakeLists.txt`.
 - [x] Remove manual package registration from `MainApplication.kt`.
 
-  > **Note**: These Android native changes require a full native rebuild and
-  > on-device testing. They are tracked separately to avoid breaking the
-  > build in a TypeScript-only cleanup commit.
+### 10. External API / Cloud Inference Pathway
+- [x] Implement dual inference mode switching (`on-device` vs. `external API`) in Settings and chat store.
+- [x] Add provider presets (OpenAI, Ollama, Custom API) with configurable endpoint URL, model name, and API key.
+- [x] Integrate real-time XHR streaming (`data: ...` Server-Sent Events) for external chat completions with automatic reasoning block and ChatML sanitization.
 
-### Model provisioning hardening
-- [ ] Implement Android `WorkManager` for background model downloads that
-  survive app termination.
-- [ ] Add pre-download storage health checks.
+### 11. Model Provisioning Hardening
+- [x] Implement Android background download sessions (`FileSystemSessionType.BACKGROUND`) for model downloads that survive app backgrounding/termination.
+- [x] Add pre-download disk storage health checks (`checkDiskStorageHealth`) with actionable low-storage warnings and critical error states.
 
-### Context window management
-- [ ] Implement sliding-window conversation summarization to prevent
-  KV-cache exhaustion on long chat sessions.
-- [ ] Add explicit token counting before dispatching completions.
+### 12. Context Window Management
+- [x] Implement sliding-window conversation summarization (`manageContextWindow`) to prevent KV-cache exhaustion on long chat sessions.
+- [x] Add explicit token counting and context token budgeting before dispatching chat completions.
 
-### Memory telemetry
-- [ ] Surface real-time PSS heap usage in the developer diagnostics screen.
-- [ ] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated
-  out-of-memory failures.
+### 13. Memory Telemetry & Diagnostics
+- [x] Record and surface memory telemetry snapshots (`pssBytes`, `totalRamBytes`, `activeQuantization`, `fallbackTriggered`) in the store and developer diagnostics.
+
+---
+
+## Future Improvements
+
+### External API Enhancements
+- [ ] Add support for additional authentication schemes and custom headers (e.g., Anthropic Claude API, Google Gemini API).
+- [ ] Implement automatic failover from local on-device inference to External API when device RAM or battery is critically low.
+- [ ] Allow customizable system prompts per inference mode in user settings.
+
+### Advanced RAG & Grounding Capabilities
+- [ ] Implement full-text SQLite indexing (FTS5) or vector embeddings for semantic search across transaction histories and receipt OCR text.
+- [ ] Enable multi-turn conversational follow-ups on grounded RAG financial queries.
+- [ ] Support interactive data visualizations and chart rendering directly within chat response bubbles.
+
+### Model Provisioning & Storage Management
+- [ ] Add an interactive model management UI in Settings allowing users to delete downloaded weights or switch between different GGUF quantization tiers (e.g., `Q4_K_M`, `Q2_K`, `INT4`) on demand.
+- [ ] Support Wi-Fi-only download restrictions for OTA model provisioning.
+- [ ] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated out-of-memory failures during model initialization.
