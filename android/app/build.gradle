@@ -99,12 +99,6 @@ android {
         resValue "string", "build_developer_name", '"LCS Dev"'
         manifestPlaceholders = [appDeveloperName: "LCS Dev"]
 
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17 -O2 -frtti -fexceptions"
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
 
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
@@ -136,11 +130,6 @@ android {
         jniLibs {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
             useLegacyPackaging = enableLegacyPackaging.toBoolean()
-        }
-    }
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
         }
     }
     androidResources {

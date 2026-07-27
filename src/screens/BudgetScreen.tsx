@@ -53,7 +53,8 @@ export const BudgetScreen = () => {
   const theme = useAppTheme();
   const fontScale = useSettingsStore((state) => state.fontScale);
   const { budgets, setBudget, getCategoriesByType } = useTransactionStore();
-  const { currentMonthExpenses } = useMonthlySummary(new Date());
+  const [currentDate] = useState(() => new Date());
+  const { currentMonthExpenses } = useMonthlySummary(currentDate);
   const expenseCategories = getCategoriesByType('expense');
 
   const titleScale = useMemo(() => ({ fontSize: 24 * fontScale }), [fontScale]);

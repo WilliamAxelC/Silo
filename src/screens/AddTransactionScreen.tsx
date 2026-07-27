@@ -160,11 +160,21 @@ export const AddTransactionScreen = () => {
     } else {
       resetForm();
     }
-  }, [editingId, categories]);
+  }, [editingId]);
 
   useEffect(() => {
+    if (availableCategories.length === 0) {
+      const fallback = normalizeCategoryForType('', type);
+      if (category !== fallback) {
+        setCategory(fallback);
+      }
+      return;
+    }
     if (!category || !availableCategories.some((item) => item.name === category)) {
-      setCategory(availableCategories[0]?.name ?? normalizeCategoryForType('', type));
+      const nextCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
+      if (category !== nextCategory) {
+        setCategory(nextCategory);
+      }
     }
   }, [availableCategories, category, normalizeCategoryForType, type]);
 

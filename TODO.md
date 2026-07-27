@@ -66,13 +66,13 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 ## Future Improvements (not in this commit)
 
 ### Native Android C++/JNI code removal
-- [ ] Remove `android/.../ai/SiloLocalInferenceModule.kt` and
+- [x] Remove `android/.../ai/SiloLocalInferenceModule.kt` and
   `SiloLocalInferencePackage.kt` — these are the Kotlin modules that
   registered the custom native bridge.
-- [ ] Remove `android/.../cpp/SiloLocalInferenceJni.cpp` and
+- [x] Remove `android/.../cpp/SiloLocalInferenceJni.cpp` and
   `gguf_runner.cpp` / `gguf_runner.h` — these are the C++ JNI wrappers.
-- [ ] Remove `libsilo_local_inference.so` build target from `CMakeLists.txt`.
-- [ ] Remove manual package registration from `MainApplication.kt`.
+- [x] Remove `libsilo_local_inference.so` build target from `CMakeLists.txt`.
+- [x] Remove manual package registration from `MainApplication.kt`.
 
   > **Note**: These Android native changes require a full native rebuild and
   > on-device testing. They are tracked separately to avoid breaking the
