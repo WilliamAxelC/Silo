@@ -12,7 +12,8 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
-import type { CategoryRecord, CategoryType, ThemeMode } from '../features/transactions/types';
+import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
+import { EXTERNAL_API_PRESETS } from '../features/transactions/constants';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 
@@ -32,12 +33,22 @@ export const SettingsScreen = () => {
     dateFormat,
     showIncomeInReportsFirst,
     fontScale,
+    aiInferenceMode,
+    externalApiProvider,
+    externalApiUrl,
+    externalApiModel,
+    externalApiKey,
     setThemeMode,
     setCurrencyCode,
     setUseThousandsSeparator,
     setDateFormat,
     setShowIncomeInReportsFirst,
     setFontScale,
+    setAiInferenceMode,
+    setExternalApiProvider,
+    setExternalApiUrl,
+    setExternalApiModel,
+    setExternalApiKey,
   } = useSettingsStore();
   const {
     provisioning,
@@ -439,89 +450,208 @@ export const SettingsScreen = () => {
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.row}>
             <View style={styles.rowLeft}>
-              <Ionicons name="hardware-chip-outline" size={18} color={theme.text} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Model</Text>
+              <Ionicons name="git-network-outline" size={18} color={theme.text} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Inference Mode</Text>
             </View>
-            <Text style={[styles.statusText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>{localModelDisplayName}</Text>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {(['local', 'external'] as const).map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[
+                    styles.optionChip,
+                    { marginBottom: 0, marginRight: 0 },
+                    aiInferenceMode === mode
+                      ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                      : { backgroundColor: theme.background, borderColor: theme.border },
+                  ]}
+                  onPress={() => setAiInferenceMode(mode)}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      { color: aiInferenceMode === mode ? '#fff' : theme.textMuted },
+                    ]}
+                  >
+                    {mode === 'local' ? 'On-Device' : 'External API'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="cloud-download-outline" size={18} color={theme.text} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Provisioning</Text>
-            </View>
-            <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>
-              {hasUsableLocalInferenceBackend ? getProvisioningStatusLabel(provisioning.status) : 'Disabled'}
-              {hasUsableLocalInferenceBackend && progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}
-            </Text>
-          </View>
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="flash-outline" size={18} color={theme.text} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Runtime</Text>
-            </View>
-            <Text style={[styles.subText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>
-              {hasUsableLocalInferenceBackend ? (runtimePhaseActive ? 'Initializing' : runtimeReady ? 'Ready' : 'Unavailable') : 'Unavailable'}
-            </Text>
-          </View>
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="speedometer-outline" size={18} color={theme.text} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Transfer</Text>
-            </View>
-            <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>
-              {hasUsableLocalInferenceBackend ? throughputLabel ?? 'Waiting for transfer data' : 'Not applicable'}
-            </Text>
-          </View>
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.rowBlock}>
-            <Text style={[styles.helperText, { color: hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense }, captionScale]}>
-              {hasUsableLocalInferenceBackend
-                ? runtimePhaseActive
-                  ? 'The model file is installed and the local runtime is finishing registration, warmup, and index initialization.'
-                  : 'Progress is reconciled conservatively so incomplete downloads are cleared instead of being treated as installed.'
-                : localInferenceStatusMessage}
-            </Text>
-          </View>
-          {hasUsableLocalInferenceBackend && provisioning.lastError ? (
+
+          {aiInferenceMode === 'external' ? (
             <>
+              <View style={styles.rowBlock}>
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>API Provider Preset</Text>
+                <View style={[styles.optionRowCompact, { marginTop: 8 }]}>
+                  {(Object.keys(EXTERNAL_API_PRESETS) as ExternalAPIProvider[]).map((providerKey) => {
+                    const preset = EXTERNAL_API_PRESETS[providerKey];
+                    const isSelected = externalApiProvider === providerKey;
+                    return (
+                      <TouchableOpacity
+                        key={providerKey}
+                        style={[
+                          styles.optionChip,
+                          isSelected
+                            ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                            : { backgroundColor: theme.background, borderColor: theme.border },
+                        ]}
+                        onPress={() => setExternalApiProvider(providerKey)}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            { color: isSelected ? '#fff' : theme.text },
+                          ]}
+                        >
+                          {preset.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.rowBlock}>
-                <Text style={[styles.helperText, { color: theme.expense }, captionScale]}>{provisioning.lastError}</Text>
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Endpoint URL</Text>
+                <TextInput
+                  style={[styles.modalInput, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text, marginTop: 6 }, textScale]}
+                  placeholder="https://api.openai.com/v1"
+                  placeholderTextColor={theme.textMuted}
+                  value={externalApiUrl}
+                  onChangeText={setExternalApiUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
               </View>
-            </>
-          ) : null}
-          {hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
-            <>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.rowBlock}>
-                <Text style={[styles.helperText, { color: theme.textMuted }, captionScale]}>{provisioning.pausedReason}</Text>
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Model Name</Text>
+                <TextInput
+                  style={[styles.modalInput, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text, marginTop: 6 }, textScale]}
+                  placeholder="gpt-4o-mini"
+                  placeholderTextColor={theme.textMuted}
+                  value={externalApiModel}
+                  onChangeText={setExternalApiModel}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.rowBlock}>
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>API Key (Optional for Ollama/Custom)</Text>
+                <TextInput
+                  style={[styles.modalInput, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text, marginTop: 6 }, textScale]}
+                  placeholder="sk-..."
+                  placeholderTextColor={theme.textMuted}
+                  value={externalApiKey}
+                  onChangeText={setExternalApiKey}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="flash-outline" size={18} color={theme.text} />
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Status</Text>
+                </View>
+                <Text style={[styles.subText, { color: canRunNativeChat ? theme.primary : theme.expense }, captionScale]}>
+                  {canRunNativeChat ? 'Ready (External API)' : 'Missing URL or Model Name'}
+                </Text>
               </View>
             </>
-          ) : null}
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <View style={styles.aiActionRow}>
-            {showPrimaryProvisionAction ? (
-              <TouchableOpacity
-                style={[styles.aiPrimaryAction, { backgroundColor: theme.primary, opacity: isAiActionLoading ? 0.7 : 1 }]}
-                onPress={handleAiPrimaryAction}
-                disabled={isAiActionLoading}
-              >
-                {isAiActionLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.aiPrimaryActionText}>Retry setup</Text>
-                )}
-              </TouchableOpacity>
-            ) : null}
-            {hasUsableLocalInferenceBackend && (isAiActionLoading || provisioning.downloadedBytes > 0 || provisioning.status === 'downloading' || provisioning.status === 'queued') ? (
-              <TouchableOpacity style={[styles.aiSecondaryAction, { borderColor: theme.border, backgroundColor: theme.background }]} onPress={handleAiCancel} disabled={isAiActionLoading}>
-                <Text style={[styles.aiSecondaryActionText, { color: theme.expense }]}>Cancel</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
+          ) : (
+            <>
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="hardware-chip-outline" size={18} color={theme.text} />
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Model</Text>
+                </View>
+                <Text style={[styles.statusText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>{localModelDisplayName}</Text>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="cloud-download-outline" size={18} color={theme.text} />
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Provisioning</Text>
+                </View>
+                <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>
+                  {hasUsableLocalInferenceBackend ? getProvisioningStatusLabel(provisioning.status) : 'Disabled'}
+                  {hasUsableLocalInferenceBackend && progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}
+                </Text>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="flash-outline" size={18} color={theme.text} />
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Runtime</Text>
+                </View>
+                <Text style={[styles.subText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>
+                  {hasUsableLocalInferenceBackend ? (runtimePhaseActive ? 'Initializing' : runtimeReady ? 'Ready' : 'Unavailable') : 'Unavailable'}
+                </Text>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="speedometer-outline" size={18} color={theme.text} />
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Transfer</Text>
+                </View>
+                <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>
+                  {hasUsableLocalInferenceBackend ? throughputLabel ?? 'Waiting for transfer data' : 'Not applicable'}
+                </Text>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.rowBlock}>
+                <Text style={[styles.helperText, { color: hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense }, captionScale]}>
+                  {hasUsableLocalInferenceBackend
+                    ? runtimePhaseActive
+                      ? 'The model file is installed and the local runtime is finishing registration, warmup, and index initialization.'
+                      : 'Progress is reconciled conservatively so incomplete downloads are cleared instead of being treated as installed.'
+                    : localInferenceStatusMessage}
+                </Text>
+              </View>
+              {hasUsableLocalInferenceBackend && provisioning.lastError ? (
+                <>
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                  <View style={styles.rowBlock}>
+                    <Text style={[styles.helperText, { color: theme.expense }, captionScale]}>{provisioning.lastError}</Text>
+                  </View>
+                </>
+              ) : null}
+              {hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
+                <>
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                  <View style={styles.rowBlock}>
+                    <Text style={[styles.helperText, { color: theme.textMuted }, captionScale]}>{provisioning.pausedReason}</Text>
+                  </View>
+                </>
+              ) : null}
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.aiActionRow}>
+                {showPrimaryProvisionAction ? (
+                  <TouchableOpacity
+                    style={[styles.aiPrimaryAction, { backgroundColor: theme.primary, opacity: isAiActionLoading ? 0.7 : 1 }]}
+                    onPress={handleAiPrimaryAction}
+                    disabled={isAiActionLoading}
+                  >
+                    {isAiActionLoading ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.aiPrimaryActionText}>Retry setup</Text>
+                    )}
+                  </TouchableOpacity>
+                ) : null}
+                {hasUsableLocalInferenceBackend && (isAiActionLoading || provisioning.downloadedBytes > 0 || provisioning.status === 'downloading' || provisioning.status === 'queued') ? (
+                  <TouchableOpacity style={[styles.aiSecondaryAction, { borderColor: theme.border, backgroundColor: theme.background }]} onPress={handleAiCancel} disabled={isAiActionLoading}>
+                    <Text style={[styles.aiSecondaryActionText, { color: theme.expense }]}>Cancel</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </>
+          )}
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
           <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('SystemLogs')}>
             <View style={styles.rowLeft}>

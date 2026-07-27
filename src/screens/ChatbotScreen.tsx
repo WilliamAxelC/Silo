@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 
 import { NavigationProps, ChatbotScreenRouteProp } from '../navigation/types';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { LocalAiMode } from '../services/ai/agent';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
@@ -20,6 +21,7 @@ export const ChatbotScreen = () => {
   const route = useRoute<ChatbotScreenRouteProp>();
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { aiInferenceMode, externalApiProvider, externalApiModel } = useSettingsStore();
 
   const {
     chatHistory,
@@ -101,23 +103,23 @@ export const ChatbotScreen = () => {
     localInferenceStatusMessage,
   } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
   const canSendMessage = aiMode === 'rag' ? canRunGroundedQueries : canRunNativeChat;
-  const canStartOrRetryProvisioning = hasUsableLocalInferenceBackend && ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
-  const isBusyProvisioning = hasUsableLocalInferenceBackend && ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(provisioning.status);
-  const showPrimaryProvisionAction = hasUsableLocalInferenceBackend && !canRunNativeChat && canStartOrRetryProvisioning;
-  const isPreparingChatRuntime = serviceSnapshot.isPreparingRuntime;
+  const canStartOrRetryProvisioning = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
+  const isBusyProvisioning = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(provisioning.status);
+  const showPrimaryProvisionAction = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !canRunNativeChat && canStartOrRetryProvisioning;
+  const isPreparingChatRuntime = aiInferenceMode === 'local' ? serviceSnapshot.isPreparingRuntime : false;
   const chatRuntimeStatus = serviceSnapshot.runtimeStatus;
   const isLoading = serviceSnapshot.isGenerating;
   const loadingStatus = serviceSnapshot.generationStatus;
 
   useEffect(() => {
-    if (selectedMode !== 'chat') {
+    if (selectedMode !== 'chat' || aiInferenceMode !== 'local') {
       chatRuntimePreloadService.clearRequest();
       return;
     }
 
     setChatRuntimeRequested(true);
     void chatRuntimePreloadService.requestPreload();
-  }, [chatRuntimePreloadService, selectedMode]);
+  }, [chatRuntimePreloadService, selectedMode, aiInferenceMode]);
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
@@ -195,7 +197,7 @@ export const ChatbotScreen = () => {
     }
 
     if (isLoading) {
-      return loadingStatus || 'Generating a local response on-device...';
+      return loadingStatus || (aiInferenceMode === 'external' ? 'Generating response from external API...' : 'Generating a local response on-device...');
     }
 
     if (provisioning.status === 'queued') {
@@ -220,10 +222,10 @@ export const ChatbotScreen = () => {
       return 'Finalizing on-device AI setup and preparing local knowledge caches.';
     }
     if (runtime.activeGenerationRequestId) {
-      return 'Generating a response locally on your device.';
+      return aiInferenceMode === 'external' ? 'Generating response from external API...' : 'Generating a response locally on your device.';
     }
     return null;
-  }, [chatRuntimeStatus, isLoading, isPreparingChatRuntime, loadingStatus, progressPercent, provisioning.status, runtime.activeGenerationRequestId, runtime.activeStatusLabel]);
+  }, [aiInferenceMode, chatRuntimeStatus, isLoading, isPreparingChatRuntime, loadingStatus, progressPercent, provisioning.status, runtime.activeGenerationRequestId, runtime.activeStatusLabel]);
 
   const compactStatusTone = runtime.activeGenerationRequestId || isLoading || isPreparingChatRuntime || isBusyProvisioning ? theme.primary : theme.textMuted;
 
@@ -321,9 +323,14 @@ export const ChatbotScreen = () => {
   const showChatRuntimeGate = aiMode === 'chat' && chatRuntimeRequested && (!canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning);
   const chatRuntimeActionLabel = canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
-  const inlineModelStatusLabel = hasUsableLocalInferenceBackend
+  const inlineModelStatusLabel = aiInferenceMode === 'external'
+    ? 'External API'
+    : hasUsableLocalInferenceBackend
     ? `${getProvisioningStatusLabel(provisioning.status)}${progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}`
     : 'Unavailable';
+  const displayModelSubtitle = aiInferenceMode === 'external'
+    ? `${externalApiProvider.toUpperCase()} · ${externalApiModel}`
+    : localModelDisplayName;
   const showCompactLoader = Boolean(stageStatusMessage) && (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
 
   return (
@@ -341,7 +348,7 @@ export const ChatbotScreen = () => {
                 <Text style={[styles.inlineStatusChipText, { color: canRunNativeChat ? theme.primary : theme.textMuted }]}>{inlineModelStatusLabel}</Text>
               </View>
             </View>
-            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]} numberOfLines={1}>{localModelDisplayName}</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]} numberOfLines={1}>{displayModelSubtitle}</Text>
           </View>
           <TouchableOpacity onPress={clearChatHistory} style={styles.backButton}>
             <Ionicons name="trash-outline" size={20} color={theme.expense} />
@@ -377,16 +384,16 @@ export const ChatbotScreen = () => {
               ) : null}
             </View>
           ) : null}
-          {hasUsableLocalInferenceBackend && transferRateLabel && !showCompactLoader ? (
+          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && transferRateLabel && !showCompactLoader ? (
             <Text style={[styles.metaLine, { color: theme.textMuted }]}>Transfer rate: {transferRateLabel}</Text>
           ) : null}
-          {hasUsableLocalInferenceBackend && provisioning.lastError ? (
+          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && provisioning.lastError ? (
             <Text style={[styles.metaLine, { color: theme.expense }]}>{provisioning.lastError}</Text>
           ) : null}
-          {hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
+          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
             <Text style={[styles.metaLine, { color: theme.textMuted }]}>{provisioning.pausedReason}</Text>
           ) : null}
-          {hasUsableLocalInferenceBackend && !provisioning.lastError && !provisioning.pausedReason && !canRunNativeChat && !showCompactLoader ? (
+          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !provisioning.lastError && !provisioning.pausedReason && !canRunNativeChat && !showCompactLoader ? (
             <Text style={[styles.metaLine, { color: theme.textMuted }]}>
               {runtimePhaseActive
                 ? 'The local model file is installed and the runtime is finishing registration, warmup, and index initialization.'
