@@ -255,11 +255,70 @@ function sanitizeModelText(value: string) {
     .trim();
 }
 
+export function estimateTokenCount(text: string | null | undefined): number {
+  if (!text) return 0;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return 0;
+  const wordCount = trimmed.split(/\s+/).length;
+  const charBasedEstimate = Math.ceil(trimmed.length / 3.8);
+  return Math.max(wordCount, charBasedEstimate);
+}
+
+export function manageContextWindow(chatHistory: Message[], maxContextTokens = 1024): {
+  activeTurns: Message[];
+  summaryText: string | null;
+  totalTokens: number;
+  summarizationActive: boolean;
+} {
+  if (chatHistory.length === 0) {
+    return { activeTurns: [], summaryText: null, totalTokens: 0, summarizationActive: false };
+  }
+
+  const activeTurns = chatHistory.slice(-QWEN_MODEL_HISTORY_TURN_LIMIT);
+  const olderTurns = chatHistory.slice(0, -QWEN_MODEL_HISTORY_TURN_LIMIT);
+  
+  let summaryText: string | null = null;
+  let summarizationActive = false;
+  
+  if (olderTurns.length > 0) {
+    summarizationActive = true;
+    const summaryPoints = olderTurns.map((msg) => {
+      const role = msg.role === 'user' ? 'User' : 'AI';
+      const snippet = trimCollapsedText(msg.text, 80);
+      return `${role}: ${snippet}`;
+    });
+    summaryText = `Previous conversation summary (${olderTurns.length} earlier messages):\n${summaryPoints.join(' | ')}`;
+  }
+
+  const turnsTokenCount = activeTurns.reduce((acc, msg) => acc + estimateTokenCount(msg.text), 0);
+  const summaryTokenCount = estimateTokenCount(summaryText);
+  let totalTokens = turnsTokenCount + summaryTokenCount;
+
+  if (totalTokens > maxContextTokens && summaryText) {
+    const allowedSummaryChars = Math.max(100, (maxContextTokens - turnsTokenCount) * 3);
+    summaryText = trimCollapsedText(summaryText, allowedSummaryChars);
+    totalTokens = turnsTokenCount + estimateTokenCount(summaryText);
+  }
+
+  try {
+    useAIStore.getState().updateContextWindow({
+      currentTokens: totalTokens,
+      maxTokens: maxContextTokens,
+      summarizationActive,
+      windowTurnCount: activeTurns.length,
+      summaryText,
+    });
+  } catch {
+    // Ignore store update errors during initialization
+  }
+
+  return { activeTurns, summaryText, totalTokens, summarizationActive };
+}
+
 function buildChatHistorySummary(chatHistory: Message[]) {
-  return chatHistory
-    .slice(-QWEN_MODEL_HISTORY_TURN_LIMIT)
-    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${trimCollapsedText(message.text, 220)}`)
-    .join('\n');
+  const { activeTurns, summaryText } = manageContextWindow(chatHistory);
+  const turnLines = activeTurns.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${trimCollapsedText(message.text, 220)}`);
+  return [summaryText, ...turnLines].filter(Boolean).join('\n');
 }
 
 function hasUsableLocalInferenceBackend() {
@@ -356,10 +415,11 @@ function supportsQwenChatTemplate(runtimeInfo: LocalRuntimeInfo | null | undefin
 }
 
 function buildQwenChatPrompt(userPrompt: string, chatHistory: Message[], systemPrompt: string) {
-  const historyTurns = chatHistory.slice(-QWEN_MODEL_HISTORY_TURN_LIMIT);
-  const segments = [`<|im_start|>system\n${escapeChatSegment(systemPrompt)}<|im_end|>`];
+  const { activeTurns, summaryText } = manageContextWindow(chatHistory);
+  const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
+  const segments = [`<|im_start|>system\n${escapeChatSegment(effectiveSystemPrompt)}<|im_end|>`];
 
-  historyTurns.forEach((message) => {
+  activeTurns.forEach((message) => {
     const role = message.role === 'user' ? 'user' : 'assistant';
     segments.push(`<|im_start|>${role}\n${escapeChatSegment(message.text)}<|im_end|>`);
   });
@@ -452,9 +512,10 @@ export function buildExternalMessagesForMode(
     });
     messages.push({ role: 'user', content: userPrompt });
   } else {
-    messages.push({ role: 'system', content: systemPrompt });
-    const historyTurns = state.chatHistory.slice(-QWEN_MODEL_HISTORY_TURN_LIMIT);
-    historyTurns.forEach((msg) => {
+    const { activeTurns, summaryText } = manageContextWindow(state.chatHistory);
+    const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
+    messages.push({ role: 'system', content: effectiveSystemPrompt });
+    activeTurns.forEach((msg) => {
       messages.push({
         role: msg.role === 'user' ? 'user' : 'assistant',
         content: msg.text,
