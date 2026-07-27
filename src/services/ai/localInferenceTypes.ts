@@ -73,6 +73,8 @@ export type LocalRuntimeInfo = {
   loadedModelPath?: string | null;
   loadedModelFamily?: string | null;
   loadedModelQuantization?: string | null;
+  loadedModelSizeBytes?: number | null;
+  fileSizeBytes?: number | null;
   isModelLoaded?: boolean;
   abi?: string | null;
   configuredContextTokens?: number;

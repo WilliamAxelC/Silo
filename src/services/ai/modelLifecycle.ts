@@ -15,6 +15,7 @@ import {
 } from './config';
 
 import { getLlamaRnAdapter } from './llamaRnAdapter';
+import { recordMemoryTelemetry } from './hardware';
 import {
   LocalInferenceException,
   getErrorMessage,
@@ -323,16 +324,49 @@ async function clearTransferManifest() {
   await safeDelete(AI_TRANSFER_MANIFEST_FILE);
 }
 
-async function ensureFreeSpace(requiredBytes: number) {
+export async function checkDiskStorageHealth(requiredBytes = QWEN_MODEL_MIN_FREE_SPACE_BYTES): Promise<{
+  ok: boolean;
+  status: 'ok' | 'warning' | 'critical' | 'unknown';
+  freeBytes: number | null;
+  totalBytes: number | null;
+  message: string | null;
+}> {
   if (!FileSystemModule.getFreeDiskStorageAsync) {
-    return { ok: true as const, freeBytes: null as number | null };
+    const res = { ok: true, status: 'unknown' as const, freeBytes: null, totalBytes: null, message: null };
+    useAIStore.getState().updateStorageHealth(res);
+    return res;
   }
 
   const freeBytes = await FileSystemModule.getFreeDiskStorageAsync();
-  return {
-    ok: freeBytes > requiredBytes,
-    freeBytes,
-  };
+  let totalBytes: number | null = null;
+  if (FileSystemModule.getTotalDiskCapacityAsync) {
+    try {
+      totalBytes = await FileSystemModule.getTotalDiskCapacityAsync();
+    } catch {
+      // ignore
+    }
+  }
+
+  let status: 'ok' | 'warning' | 'critical' = 'ok';
+  let message: string | null = null;
+  const ok = freeBytes >= requiredBytes;
+
+  if (!ok) {
+    status = 'critical';
+    const requiredGb = (requiredBytes / (1024 * 1024 * 1024)).toFixed(1);
+    const freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
+    message = `Critical Storage: Only ${freeGb} GB free. At least ${requiredGb} GB required for AI model installation.`;
+  } else if (freeBytes < requiredBytes * 1.3) {
+    status = 'warning';
+    const freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
+    message = `Low Storage Warning: ${freeGb} GB free. AI model downloads may fail if device storage drops further.`;
+  } else {
+    status = 'ok';
+  }
+
+  const health = { ok, status, freeBytes, totalBytes, message };
+  useAIStore.getState().updateStorageHealth(health);
+  return health;
 }
 
 async function sha256ForFile(fileUri: string) {
@@ -525,12 +559,12 @@ export class QModelLifecycleManager {
         throw new Error('Document storage is unavailable on this device.');
       }
 
-      const freeSpace = await ensureFreeSpace(QWEN_MODEL_MIN_FREE_SPACE_BYTES);
+      const freeSpace = await checkDiskStorageHealth(QWEN_MODEL_MIN_FREE_SPACE_BYTES);
       if (!freeSpace.ok) {
         this.updateProvisioning({
           status: 'failed',
           pausedReason: null,
-          lastError: `Insufficient free storage for local AI model download. Free at least ${Math.round(QWEN_MODEL_MIN_FREE_SPACE_BYTES / 1024 / 1024 / 1024)} GB and retry.`,
+          lastError: freeSpace.message ?? `Insufficient free storage for local AI model download. Free at least ${Math.round(QWEN_MODEL_MIN_FREE_SPACE_BYTES / 1024 / 1024 / 1024)} GB and retry.`,
           canResume: false,
         });
         this.log('warn', 'low-storage', 'Insufficient free storage for local AI model download.', { freeBytes: freeSpace.freeBytes ?? undefined });
@@ -636,16 +670,32 @@ export class QModelLifecycleManager {
       throw new Error('Download API unavailable in current runtime. Use a custom dev client or production build.');
     }
 
-    const sessionId = useAIStore.getState().provisioning.transfer.sessionId ?? createSessionId();
-    const startedAt = useAIStore.getState().provisioning.transfer.startedAt ?? nowIso();
+    const health = await checkDiskStorageHealth(QWEN_MODEL_MIN_FREE_SPACE_BYTES);
+    if (!health.ok) {
+      this.updateProvisioning({
+        status: 'failed',
+        pausedReason: null,
+        lastError: health.message ?? 'Insufficient storage for model download.',
+        canResume: false,
+      });
+      this.log('warn', 'low-storage-download', 'Aborted download due to low storage.', { freeBytes: health.freeBytes ?? undefined });
+      return;
+    }
+
+    const sessionId = _manifest?.sessionId ?? useAIStore.getState().provisioning.transfer.sessionId ?? createSessionId();
+    const startedAt = _manifest?.startedAt ?? useAIStore.getState().provisioning.transfer.startedAt ?? nowIso();
+    const backgroundSessionType = FileSystemModule.FileSystemSessionType?.BACKGROUND ?? 1;
 
     this.downloadResumable = downloadResumableFactory(
       QWEN_MODEL_DOWNLOAD_URL,
       TEMP_DOWNLOAD_PATH,
-      {},
+      {
+        sessionType: backgroundSessionType,
+      },
       (progress) => {
         void this.handleProgressUpdate(progress, sessionId, startedAt);
       },
+      _resumeData ?? undefined,
     );
 
     this.log(
@@ -988,6 +1038,7 @@ export class QModelLifecycleManager {
       }
       state.setRuntimeInfo(runtimeInfo);
       state.setRuntimeModelLoaded(Boolean(runtimeInfo.isModelLoaded ?? true), runtimeInfo);
+      void recordMemoryTelemetry(runtimeInfo.fileSizeBytes ?? null);
 
       this.updateProvisioning({ status: 'warming', pausedReason: null, lastError: null });
       state.setRuntimeState('warming');
@@ -1151,6 +1202,27 @@ export class QModelLifecycleManager {
         transfer: createTransferSnapshot(transferManifest),
       });
       await this.resumeVerification(transferManifest.tempPath);
+      return;
+    }
+
+    if ((transferManifest.status === 'downloading' || transferManifest.status === 'paused' || transferManifest.status === 'queued') && transferManifest.resumeData) {
+      this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
+        tempPath: transferManifest.tempPath,
+        downloadedBytes: transferManifest.downloadedBytes,
+      });
+      state.replaceProvisioning({
+        status: 'downloading',
+        progress: transferManifest.progress,
+        downloadedBytes: transferManifest.downloadedBytes,
+        totalBytes: transferManifest.totalBytes,
+        version: transferManifest.version,
+        tempPath: transferManifest.tempPath,
+        canResume: true,
+        pausedReason: null,
+        lastError: null,
+        transfer: createTransferSnapshot(transferManifest),
+      });
+      this.inFlightDownloadPromise = this.runResumableDownload(transferManifest.resumeData, transferManifest);
       return;
     }
 
