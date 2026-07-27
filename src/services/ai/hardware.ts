@@ -1,4 +1,5 @@
 import DeviceInfo from 'react-native-device-info';
+import { useAIStore } from '../../store/useAIStore';
 
 export const LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES = 4 * 1024 * 1024 * 1024;
 export const MODEL_MEMORY_MULTIPLIER = 1.5;
@@ -6,6 +7,34 @@ export const MAX_MODEL_RAM_FRACTION = 0.6;
 export const FALLBACK_CPU_THREAD_COUNT = 4;
 export const MIN_CPU_THREAD_COUNT = 2;
 export const MAX_CPU_THREAD_COUNT = 6;
+
+export interface QuantizationProfile {
+  name: string;
+  label: string;
+  fileSizeBytes: number;
+  minRamBudgetBytes: number;
+}
+
+export const QUANTIZATION_PROFILES: Record<string, QuantizationProfile> = {
+  Q5_K_M: {
+    name: 'Q5_K_M',
+    label: '5-bit Medium (High Quality)',
+    fileSizeBytes: 1_700_000_000,
+    minRamBudgetBytes: 2_550_000_000,
+  },
+  Q4_K_M: {
+    name: 'Q4_K_M',
+    label: '4-bit Medium (Balanced)',
+    fileSizeBytes: 1_400_000_000,
+    minRamBudgetBytes: 2_100_000_000,
+  },
+  Q3_K_S: {
+    name: 'Q3_K_S',
+    label: '3-bit Small (Low Memory)',
+    fileSizeBytes: 1_100_000_000,
+    minRamBudgetBytes: 1_650_000_000,
+  },
+};
 
 export type HardwareMemoryBudget = {
   totalMemoryBytes: number;
@@ -18,6 +47,71 @@ export type HardwareMemoryBudget = {
 export async function getTotalDeviceMemoryBytes(): Promise<number> {
   const totalMemoryBytes = await DeviceInfo.getTotalMemory();
   return Number.isFinite(totalMemoryBytes) && totalMemoryBytes > 0 ? totalMemoryBytes : 0;
+}
+
+export async function getDevicePssMemoryBytes(): Promise<number> {
+  try {
+    const usedMemoryBytes = await DeviceInfo.getUsedMemory();
+    return Number.isFinite(usedMemoryBytes) && usedMemoryBytes > 0 ? usedMemoryBytes : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function resolveOptimalQuantization(activeModelSizeBytes?: number | null): Promise<{
+  recommendedQuantization: string;
+  activeQuantization: string;
+  fallbackTriggered: boolean;
+  pssBytes: number;
+  totalRamBytes: number;
+}> {
+  const totalRamBytes = await getTotalDeviceMemoryBytes();
+  const pssBytes = await getDevicePssMemoryBytes();
+  
+  const targetSizeBytes = activeModelSizeBytes ?? QUANTIZATION_PROFILES.Q5_K_M.fileSizeBytes;
+  const budgetBytes = buildMemoryBudget(totalRamBytes, targetSizeBytes).allowedBudgetBytes;
+  const availableMemory = totalRamBytes > 0 && pssBytes > 0 ? Math.max(0, totalRamBytes - pssBytes) : budgetBytes;
+  
+  const effectiveMemory = Math.min(budgetBytes, availableMemory);
+  
+  let recommendedQuantization = 'Q5_K_M';
+  let fallbackTriggered = false;
+  
+  if (effectiveMemory < QUANTIZATION_PROFILES.Q3_K_S.minRamBudgetBytes) {
+    recommendedQuantization = 'Q3_K_S';
+    fallbackTriggered = true;
+  } else if (effectiveMemory < QUANTIZATION_PROFILES.Q4_K_M.minRamBudgetBytes) {
+    recommendedQuantization = 'Q4_K_M';
+    fallbackTriggered = true;
+  } else if (effectiveMemory < QUANTIZATION_PROFILES.Q5_K_M.minRamBudgetBytes) {
+    recommendedQuantization = 'Q4_K_M';
+    fallbackTriggered = true;
+  }
+  
+  const activeQuantization = 'Q5_K_M';
+  
+  return {
+    recommendedQuantization,
+    activeQuantization,
+    fallbackTriggered,
+    pssBytes,
+    totalRamBytes,
+  };
+}
+
+export async function recordMemoryTelemetry(activeModelSizeBytes?: number | null): Promise<void> {
+  try {
+    const telemetry = await resolveOptimalQuantization(activeModelSizeBytes);
+    useAIStore.getState().updateMemoryTelemetry({
+      pssBytes: telemetry.pssBytes,
+      totalRamBytes: telemetry.totalRamBytes,
+      recommendedQuantization: telemetry.recommendedQuantization,
+      activeQuantization: telemetry.activeQuantization,
+      fallbackTriggered: telemetry.fallbackTriggered,
+    });
+  } catch (error) {
+    console.warn('[hardware] Failed to record memory telemetry:', error);
+  }
 }
 
 export function estimateRequiredRamBytes(modelFileSizeBytes: number): number {
