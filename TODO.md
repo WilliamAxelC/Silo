@@ -18,7 +18,7 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 
 ---
 
-## Cleanup Steps (implemented in this commit)
+## Completed Architecture & Cleanup Steps
 
 ### 1. Remove legacy `localInferenceBridge.ts`
 - [x] Delete `src/services/ai/localInferenceBridge.ts` — the entire
@@ -55,6 +55,11 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 ### 7. Clean up `localInferenceTypes.ts`
 - [x] Remove `LocalInferenceBackendBridge` interface — it described the
   contract for the legacy bridge that no longer exists.
+
+### 8. Output Formatting & Stream Sanitization
+- [x] Strip internal chain-of-thought reasoning blocks (`<think>...</think>`) from instruct/reasoning models (such as Qwen 2.5/3.5) during both live token streaming and completion.
+- [x] Filter out all ChatML conversation control markers (`<|im_start|>assistant`, `<|im_end|>`, `<|endoftext|>`, etc.).
+- [x] Hold back unclosed `<think>` tags during live streaming so the chat UI displays the `Thinking…` loading indicator cleanly without raw XML leakage.
 
 ---
 

@@ -46,12 +46,13 @@ The system is fundamentally organized into five decoupled layers, separating pre
 ### 2.1 Presentation & UI Layer
 Responsible for screen composition, navigation, responsive layout, and visual feedback during CPU/GPU intensive tasks.
 - **Entry & Navigation**: Bootstrapped via [index.ts](file:///d:/Project/Silo/silo-app/index.ts) and [App.tsx](file:///d:/Project/Silo/silo-app/App.tsx), routing through [AppNavigator.tsx](file:///d:/Project/Silo/silo-app/src/navigation/AppNavigator.tsx) using React Navigation bottom tabs and native stacks.
-- **Chat & AI Interaction**: [ChatbotScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/ChatbotScreen.tsx) manages conversational interfaces, rendering optimistic message bubbles, pseudo-streaming text playback, and compact model provisioning progress bars.
+- **Chat & AI Interaction**: [ChatbotScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/ChatbotScreen.tsx) manages conversational interfaces, rendering optimistic message bubbles, real-time token streaming with automatic spinner display during chain-of-thought reasoning (`Thinking…`), compact model provisioning progress bars, and user-actionable error/status states.
 - **Settings & Diagnostics**: [SettingsScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/SettingsScreen.tsx) and [SystemLogsScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/SystemLogsScreen.tsx) expose runtime health, active backend status (`llama.rn` vs CPU fallback), and real-time event logs.
 
 ### 2.2 Application Service & Orchestration Layer
 Acts as the control plane between user intent and low-level data/inference engines.
-- **AI Orchestration & Generation**: [generationService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/generationService.ts) and [agent.ts](file:///d:/Project/Silo/silo-app/src/services/ai/agent.ts) coordinate chat readiness, mode switching (general chat vs. grounded financial Q&A), prompt synthesis, and token sanitization (removing control tokens like `<|im_start|>`, `<|im_end|>`, and `<|endoftext|>`).
+- **AI Orchestration & Generation**: [generationService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/generationService.ts) and [agent.ts](file:///d:/Project/Silo/silo-app/src/services/ai/agent.ts) coordinate chat readiness, mode switching (general chat vs. grounded financial Q&A), prompt synthesis, and token sanitization (stripping internal chain-of-thought reasoning blocks `<think>...</think>` and ChatML control tokens like `<|im_start|>`, `<|im_end|>`, `<|endoftext|>`, `<|user|>`, and `<|assistant|>`).
+- **Runtime Preloading**: [chatRuntimePreloadService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/chatRuntimePreloadService.ts) manages background preloading and initialization of the native chat runtime so that when the user enters the chat screen, the model is warmed up and ready without blocking the UI thread.
 - **Model Lifecycle & OTA Provisioning**: [modelLifecycle.ts](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts) (`QModelLifecycleManager`) handles on-demand Over-The-Air (OTA) downloading of model weights, resumable transfer persistence, checksum integrity verification, active directory placement, and warmup execution.
 - **Hardware Profile & Budgets**: [hardware.ts](file:///d:/Project/Silo/silo-app/src/services/ai/hardware.ts) evaluates device RAM, computes safe memory budgets (`buildMemoryBudget`), and resolves recommended CPU threads and GPU layer offloading rules.
 - **Domain Services**: Coordinates transaction calculation, category mapping ([mappers.ts](file:///d:/Project/Silo/silo-app/src/features/transactions/mappers.ts)), and receipt image OCR processing.
@@ -83,7 +84,7 @@ The high-performance C++/JNI compute engine responsible for LLM execution on ARM
 To ensure sub-second app launch times and avoid unnecessary RAM consumption, the LLM runtime is **never eagerly loaded** at application startup.
 1. Application boots into [App.tsx](file:///d:/Project/Silo/silo-app/App.tsx) and initializes SQLite and general settings.
 2. [QModelLifecycleManager](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts) performs a lightweight background check for existing model manifests and resumable transfers.
-3. When the user opens [ChatbotScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/ChatbotScreen.tsx), `GenerationService.ensureChatRuntimeReady()` is invoked.
+3. When the user opens [ChatbotScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/ChatbotScreen.tsx), `GenerationService.ensureChatRuntimeReady()` and [chatRuntimePreloadService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/chatRuntimePreloadService.ts) coordinate to initialize the runtime on demand.
 4. If `USE_LLAMA_RN` is active, [LlamaRnAdapter](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts) evaluates device RAM against `buildMemoryBudget()`.
 5. The GGUF model is loaded into native memory (attempting GPU layer offload first, falling back to CPU threads if VRAM/initialization fails), followed by an automatic warmup completion prompt (`QWEN_MODEL_WARMUP_PROMPT`).
 
@@ -103,7 +104,7 @@ When a user asks a domain-specific question (e.g., *"How much did I spend on gro
 1. **Context Retrieval**: [agent.ts](file:///d:/Project/Silo/silo-app/src/services/ai/agent.ts) queries local SQLite via Drizzle ORM to extract relevant financial records, category budgets, and recent transaction summaries.
 2. **Prompt Synthesis**: The retrieved facts are formatted into a structured prompt (`buildRetrievedContext`) bounded by `QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS` and system instructions.
 3. **Inference Execution**: The prompt is dispatched to [LlamaRnAdapter](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts).
-4. **Stream Sanitization & Playback**: As generation completes, `sanitizeStreamingGeneratedText()` strips Qwen conversation control markers (`<|im_start|>`, `<|im_end|>`). The UI renders tokens smoothly via pseudo-streaming or real-time callbacks into [useAIStore](file:///d:/Project/Silo/silo-app/src/store/useAIStore.ts).
+4. **Stream Sanitization & Playback**: During live token streaming and upon completion, `sanitizeStreamingGeneratedText()` and `sanitizeGeneratedText()` filter out Qwen conversation control markers (`<|im_start|>`, `<|im_end|>`, etc.) and strip internal chain-of-thought reasoning blocks (`<think>...</think>`). When an unclosed `<think>` tag is detected during live reasoning, streaming text is held back so the UI cleanly displays the loading indicator (`Thinking…`) without leaking raw XML tags into the chat bubble.
 
 ---
 
