@@ -79,6 +79,9 @@ export function getInitialAppSettings(): AppSettings {
     showIncomeInReportsFirst: DEFAULT_APP_SETTINGS.showIncomeInReportsFirst,
     fontScale: DEFAULT_APP_SETTINGS.fontScale,
     aiInferenceMode: DEFAULT_APP_SETTINGS.aiInferenceMode,
+    aiModelQuantization: DEFAULT_APP_SETTINGS.aiModelQuantization,
+    aiWifiOnlyDownload: DEFAULT_APP_SETTINGS.aiWifiOnlyDownload,
+    aiAutoQuantizationFallback: DEFAULT_APP_SETTINGS.aiAutoQuantizationFallback,
     externalApiProvider: DEFAULT_APP_SETTINGS.externalApiProvider,
     externalApiUrl: DEFAULT_APP_SETTINGS.externalApiUrl,
     externalApiModel: DEFAULT_APP_SETTINGS.externalApiModel,
@@ -117,6 +120,17 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         if (row.value === 'local' || row.value === 'external') {
           base.aiInferenceMode = row.value;
         }
+        break;
+      case APP_SETTING_KEYS.aiModelQuantization:
+        if (row.value === 'Q5_K_M' || row.value === 'Q4_K_M' || row.value === 'Q2_K' || row.value === 'INT4') {
+          base.aiModelQuantization = row.value;
+        }
+        break;
+      case APP_SETTING_KEYS.aiWifiOnlyDownload:
+        base.aiWifiOnlyDownload = row.value === 'true';
+        break;
+      case APP_SETTING_KEYS.aiAutoQuantizationFallback:
+        base.aiAutoQuantizationFallback = row.value !== 'false';
         break;
       case APP_SETTING_KEYS.externalApiProvider:
         if (row.value === 'openai' || row.value === 'deepseek' || row.value === 'groq' || row.value === 'ollama' || row.value === 'together' || row.value === 'custom') {
