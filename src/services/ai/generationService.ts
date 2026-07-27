@@ -1,7 +1,7 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 
 import type { LocalAiMode } from './agent';
-import { buildPromptForMode, buildRetrievedContext } from './agent';
+import { buildPromptForMode, buildRetrievedContext, buildExternalMessagesForMode } from './agent';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -14,6 +14,7 @@ import {
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore } from '../../store/useAIStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import {
   LocalInferenceException,
   getErrorMessage,
@@ -201,6 +202,7 @@ class GenerationService {
   private readonly listeners = new Set<GenerationServiceListener>();
   private runtimeInitPromise: Promise<void> | null = null;
   private completionStopPromise: Promise<void> | null = null;
+  private activeExternalXhr: XMLHttpRequest | null = null;
   private readonly llamaRnAdapter = getLlamaRnAdapter();
 
   private applyLlamaRuntimeLoading(runtimeInfo?: LocalRuntimeInfo | null) {
@@ -267,6 +269,10 @@ class GenerationService {
 
 
   async startGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
+    const settings = useSettingsStore.getState();
+    if (settings.aiInferenceMode === 'external') {
+      return this.startExternalGeneration({ prompt, mode });
+    }
 
     const requestStartedAtMs = Date.now();
     this.setState({
@@ -419,6 +425,191 @@ class GenerationService {
     }
   }
 
+  private async startExternalGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
+    const requestStartedAtMs = Date.now();
+    this.setState({
+      isGenerating: true,
+      generationStatus: mode === 'rag' ? 'Retrieving grounded local context...' : 'Connecting to external API...',
+    });
+
+    const store = useAIStore.getState();
+    const settings = useSettingsStore.getState();
+    const requestId = `ext-api-${requestStartedAtMs}`;
+    const url = settings.externalApiUrl.trim().replace(/\/$/, '');
+    const model = settings.externalApiModel.trim() || 'gpt-4o-mini';
+    const apiKey = settings.externalApiKey.trim();
+
+    store.setActiveGenerationRequestId(requestId);
+    store.setStreamingResponseText('');
+    store.setActiveStatusLabel(mode === 'rag' ? 'Retrieving grounded local context...' : `Running inference via ${model}...`);
+    store.setRuntimeError(null);
+    store.setRuntimeState('busy');
+
+    const retrievedContext = mode === 'rag' ? buildRetrievedContext(prompt) : undefined;
+    const messages = buildExternalMessagesForMode(prompt, mode, store, retrievedContext);
+
+    let lastStreamUpdateAtMs = 0;
+    let lastRawStreamText = '';
+    let lastStreamedText = '';
+    let pendingStreamingSanitizerRemainder = '';
+    let generationStatusPublished = false;
+    let fullContent = '';
+    let processedLineCount = 0;
+
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      this.activeExternalXhr = xhr;
+      const endpoint = `${url}/chat/completions`;
+
+      xhr.open('POST', endpoint, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (apiKey) {
+        xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
+      }
+
+      xhr.onprogress = () => {
+        if (store.runtime.activeGenerationRequestId !== requestId) {
+          xhr.abort();
+          return;
+        }
+
+        const lines = (xhr.responseText || '').split('\n');
+        const completeLinesCount = lines.length - 1;
+
+        while (processedLineCount < completeLinesCount) {
+          const line = lines[processedLineCount].trim();
+          processedLineCount += 1;
+
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const json = JSON.parse(line.slice(6));
+              const delta = json.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                fullContent += delta;
+                const now = Date.now();
+                const shouldPublish =
+                  now - lastStreamUpdateAtMs >= STREAMING_UPDATE_INTERVAL_MS ||
+                  fullContent.length - lastRawStreamText.length >= STREAMING_UPDATE_MIN_CHAR_DELTA;
+                if (shouldPublish) {
+                  const streamUpdate = sanitizeStreamingGeneratedText(
+                    lastRawStreamText,
+                    fullContent,
+                    lastStreamedText,
+                    pendingStreamingSanitizerRemainder,
+                  );
+                  store.setStreamingResponseText(streamUpdate.cleanText);
+                  lastStreamUpdateAtMs = now;
+                  lastRawStreamText = fullContent;
+                  lastStreamedText = streamUpdate.cleanText;
+                  pendingStreamingSanitizerRemainder = streamUpdate.pendingRemainder;
+
+                  if (!generationStatusPublished) {
+                    store.setActiveStatusLabel(`Generating response via ${model}...`);
+                    this.setState({ generationStatus: `Generating response via ${model}...` });
+                    generationStatusPublished = true;
+                  }
+                }
+              }
+            } catch {
+              // ignore malformed JSON chunk
+            }
+          }
+        }
+      };
+
+      xhr.onload = () => {
+        this.activeExternalXhr = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const lines = (xhr.responseText || '').split('\n');
+          while (processedLineCount < lines.length) {
+            const line = lines[processedLineCount].trim();
+            processedLineCount += 1;
+            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+              try {
+                const json = JSON.parse(line.slice(6));
+                const delta = json.choices?.[0]?.delta?.content || '';
+                if (delta) fullContent += delta;
+              } catch {
+                // ignore
+              }
+            }
+          }
+
+          if (!fullContent && xhr.responseText) {
+            try {
+              const json = JSON.parse(xhr.responseText);
+              fullContent = json.choices?.[0]?.message?.content || fullContent;
+            } catch {
+              // ignore
+            }
+          }
+
+          const cleanedText = sanitizeGeneratedText(fullContent);
+          store.setRuntimeState('healthy');
+          store.setStreamingResponseText(cleanedText);
+          store.setActiveStatusLabel('Response ready', null);
+          this.setState({ isGenerating: false, generationStatus: '' });
+          if (store.runtime.activeGenerationRequestId === requestId) {
+            store.setActiveGenerationRequestId(null);
+          }
+          resolve(cleanedText.trim());
+        } else {
+          let errorMsg = `External API error (${xhr.status})`;
+          try {
+            const errJson = JSON.parse(xhr.responseText);
+            errorMsg = errJson.error?.message || errJson.message || errorMsg;
+          } catch {
+            // ignore
+          }
+          const error = new LocalInferenceException('external-api-error', errorMsg, { status: xhr.status }, true);
+          store.setRuntimeError(error);
+          store.setRuntimeState('failed');
+          store.setActiveStatusLabel(null, null);
+          this.setState({ isGenerating: false, generationStatus: '' });
+          if (store.runtime.activeGenerationRequestId === requestId) {
+            store.setActiveGenerationRequestId(null);
+          }
+          reject(error);
+        }
+      };
+
+      xhr.onerror = () => {
+        this.activeExternalXhr = null;
+        const error = new LocalInferenceException('external-api-error', 'Network error connecting to external API.', undefined, true);
+        store.setRuntimeError(error);
+        store.setRuntimeState('failed');
+        store.setActiveStatusLabel(null, null);
+        this.setState({ isGenerating: false, generationStatus: '' });
+        if (store.runtime.activeGenerationRequestId === requestId) {
+          store.setActiveGenerationRequestId(null);
+        }
+        reject(error);
+      };
+
+      xhr.onabort = () => {
+        this.activeExternalXhr = null;
+        const error = new LocalInferenceException('generation-cancelled', 'Generation cancelled by user.', undefined, true);
+        store.setActiveStatusLabel('Cancelled', null);
+        store.setRuntimeError(error);
+        this.setState({ isGenerating: false, generationStatus: '' });
+        if (store.runtime.activeGenerationRequestId === requestId) {
+          store.setActiveGenerationRequestId(null);
+        }
+        reject(error);
+      };
+
+      xhr.send(
+        JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          temperature: mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE,
+          top_p: mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P,
+        }),
+      );
+    });
+  }
+
   private async preparePrompt({ userPrompt, mode }: PreparePromptParams): Promise<string> {
     const adapterRuntimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
     const state = useAIStore.getState();
@@ -441,14 +632,27 @@ class GenerationService {
     }
   }
 
-
-
   async cancelGeneration(reason = 'Generation cancelled by user.'): Promise<boolean> {
-
     const state = useAIStore.getState();
     const requestId = state.runtime.activeGenerationRequestId;
     if (!requestId) {
       return false;
+    }
+
+    if (this.activeExternalXhr) {
+      this.activeExternalXhr.abort();
+      this.activeExternalXhr = null;
+      state.setActiveStatusLabel('Cancelled', null);
+      state.setRuntimeError({
+        code: 'generation-cancelled',
+        message: reason,
+        recoverable: true,
+      });
+      this.setState({ isGenerating: false, generationStatus: '' });
+      if (state.runtime.activeGenerationRequestId === requestId) {
+        state.setActiveGenerationRequestId(null);
+      }
+      return true;
     }
 
     state.appendLog({
@@ -472,6 +676,10 @@ class GenerationService {
 
   async dispose(): Promise<void> {
     this.runtimeInitPromise = null;
+    if (this.activeExternalXhr) {
+      this.activeExternalXhr.abort();
+      this.activeExternalXhr = null;
+    }
     if (this.completionStopPromise) {
       await this.completionStopPromise.catch(() => undefined);
       this.completionStopPromise = null;

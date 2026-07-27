@@ -28,6 +28,9 @@ export interface Transaction {
   lineItemsText?: string;
 }
 
+export type AIInferenceMode = 'local' | 'external';
+export type ExternalAPIProvider = 'openai' | 'deepseek' | 'groq' | 'ollama' | 'together' | 'custom';
+
 export interface AppSettings {
   themeMode: ThemeMode;
   currencyCode: string;
@@ -35,6 +38,11 @@ export interface AppSettings {
   dateFormat: string;
   showIncomeInReportsFirst: boolean;
   fontScale: number;
+  aiInferenceMode: AIInferenceMode;
+  externalApiProvider: ExternalAPIProvider;
+  externalApiUrl: string;
+  externalApiModel: string;
+  externalApiKey: string;
 }
 
 export type TransactionInput = Omit<Transaction, 'id'>;

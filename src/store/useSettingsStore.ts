@@ -4,7 +4,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
-import type { AppSettings, ThemeMode } from '../features/transactions/types';
+import { EXTERNAL_API_PRESETS } from '../features/transactions/constants';
+import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider } from '../features/transactions/types';
 
 interface SettingsState extends AppSettings {
   isLoaded: boolean;
@@ -16,6 +17,11 @@ interface SettingsState extends AppSettings {
   setDateFormat: (dateFormat: string) => Promise<void>;
   setShowIncomeInReportsFirst: (enabled: boolean) => Promise<void>;
   setFontScale: (fontScale: number) => Promise<void>;
+  setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
+  setExternalApiProvider: (provider: ExternalAPIProvider) => Promise<void>;
+  setExternalApiUrl: (url: string) => Promise<void>;
+  setExternalApiModel: (model: string) => Promise<void>;
+  setExternalApiKey: (apiKey: string) => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
@@ -82,5 +88,37 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setFontScale: async (fontScale) => {
     await saveSetting('fontScale', fontScale);
     set({ fontScale });
+  },
+
+  setAiInferenceMode: async (aiInferenceMode) => {
+    await saveSetting('aiInferenceMode', aiInferenceMode);
+    set({ aiInferenceMode });
+  },
+
+  setExternalApiProvider: async (externalApiProvider) => {
+    await saveSetting('externalApiProvider', externalApiProvider);
+    const preset = EXTERNAL_API_PRESETS[externalApiProvider];
+    if (preset && externalApiProvider !== 'custom') {
+      await saveSetting('externalApiUrl', preset.url);
+      await saveSetting('externalApiModel', preset.model);
+      set({ externalApiProvider, externalApiUrl: preset.url, externalApiModel: preset.model });
+    } else {
+      set({ externalApiProvider });
+    }
+  },
+
+  setExternalApiUrl: async (externalApiUrl) => {
+    await saveSetting('externalApiUrl', externalApiUrl);
+    set({ externalApiUrl });
+  },
+
+  setExternalApiModel: async (externalApiModel) => {
+    await saveSetting('externalApiModel', externalApiModel);
+    set({ externalApiModel });
+  },
+
+  setExternalApiKey: async (externalApiKey) => {
+    await saveSetting('externalApiKey', externalApiKey);
+    set({ externalApiKey });
   },
 }));

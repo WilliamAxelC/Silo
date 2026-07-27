@@ -12,6 +12,7 @@ export type LocalInferenceErrorCode =
   | 'unsupported-device'
   | 'insufficient-memory'
   | 'context-too-large'
+  | 'external-api-error'
   | 'unknown';
 
 export type LocalInferenceError = {
@@ -100,7 +101,6 @@ export type LocalRuntimeInfo = {
   lastTotalDurationMs?: number;
   lastStopReason?: string | null;
 };
-
 
 export type LocalHealthCheckResult = {
   ok: boolean;

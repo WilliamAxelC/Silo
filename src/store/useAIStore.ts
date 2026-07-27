@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
+import { useSettingsStore } from './useSettingsStore';
 import {
   AI_RUNTIME_PHASE_STATUSES,
   AI_STATUS_LABELS,
@@ -140,6 +141,21 @@ export function createInitialRuntimeSnapshot(): AIRuntimeSnapshot {
 export function getAIRuntimeAvailability(
   state: Pick<AIStoreState, 'provisioning' | 'runtimeReady' | 'warmupPending' | 'runtime'>,
 ): AIRuntimeAvailability {
+  const settings = useSettingsStore.getState();
+  if (settings?.aiInferenceMode === 'external') {
+    return {
+      runtimePhaseActive: false,
+      canRunGroundedQueries: true,
+      canRunNativeChat: Boolean(settings.externalApiUrl && settings.externalApiModel),
+      hasUsableLocalInferenceBackend: true,
+      localInferenceStatusMessage: `Using external API (${settings.externalApiProvider.toUpperCase()}): ${settings.externalApiModel} at ${settings.externalApiUrl}`,
+      runtimeState: 'healthy',
+      modelLoaded: true,
+      generationHealthy: true,
+      lastRuntimeError: state.runtime.lastRuntimeError,
+    };
+  }
+
   const runtimePhaseActive = state.warmupPending || AI_RUNTIME_PHASE_STATUSES.includes(state.provisioning.status);
   const availability = state.runtime.availability;
   const hasUsableLocalInferenceBackend = availability.available;

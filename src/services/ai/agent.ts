@@ -3,6 +3,7 @@ import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -262,6 +263,10 @@ function buildChatHistorySummary(chatHistory: Message[]) {
 }
 
 function hasUsableLocalInferenceBackend() {
+  const settings = useSettingsStore.getState();
+  if (settings.aiInferenceMode === 'external') {
+    return true;
+  }
   return Platform.OS === 'android';
 }
 
@@ -281,6 +286,12 @@ function canUseNativeLocalInference() {
 }
 
 export async function ensureLocalRuntimeReady(onStatusChange?: (status: string) => void) {
+  const settings = useSettingsStore.getState();
+  if (settings.aiInferenceMode === 'external') {
+    onStatusChange?.('External API mode ready.');
+    return;
+  }
+
   if (!hasUsableLocalInferenceBackend()) {
     onStatusChange?.('Local inference backend unavailable.');
     throw new Error(buildLocalInferenceUnavailableMessage());
@@ -406,6 +417,53 @@ export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state:
   return supportsQwenChatTemplate(runtimeInfo)
     ? trimPreservedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS)
     : trimCollapsedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS);
+}
+
+export interface ExternalChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export function buildExternalMessagesForMode(
+  userPrompt: string,
+  mode: LocalAiMode,
+  state: ReturnType<typeof useAIStore.getState>,
+  retrievedContext?: RetrievedContextItem[],
+): ExternalChatMessage[] {
+  const systemPrompt = [
+    'You are Silo AI, a helpful and intelligent personal finance assistant.',
+    'Be concise, practical, and honest about uncertainty.',
+    'Do not invent balances, transactions, or categories that are not present in the provided app data.',
+  ].join(' ');
+
+  const messages: ExternalChatMessage[] = [];
+
+  if (mode === 'rag' && retrievedContext) {
+    const contextBlock = trimCollapsedText(
+      retrievedContext
+        .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT)
+        .map((item) => `- ${trimCollapsedText(item.content, 320)}`)
+        .join('\n'),
+      QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
+    );
+    messages.push({
+      role: 'system',
+      content: `${systemPrompt}\n\nAnswer only from the grounded local finance facts below. If the facts are insufficient, say that you do not have enough evidence.\n\nGrounded finance facts:\n${contextBlock}`,
+    });
+    messages.push({ role: 'user', content: userPrompt });
+  } else {
+    messages.push({ role: 'system', content: systemPrompt });
+    const historyTurns = state.chatHistory.slice(-QWEN_MODEL_HISTORY_TURN_LIMIT);
+    historyTurns.forEach((msg) => {
+      messages.push({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.text,
+      });
+    });
+    messages.push({ role: 'user', content: userPrompt });
+  }
+
+  return messages;
 }
 
 function publishGenerationText(text: string, requestId: string, onStatusChange?: (status: string) => void) {

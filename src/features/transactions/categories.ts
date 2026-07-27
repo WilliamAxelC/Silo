@@ -78,6 +78,11 @@ export function getInitialAppSettings(): AppSettings {
     dateFormat: DEFAULT_APP_SETTINGS.dateFormat,
     showIncomeInReportsFirst: DEFAULT_APP_SETTINGS.showIncomeInReportsFirst,
     fontScale: DEFAULT_APP_SETTINGS.fontScale,
+    aiInferenceMode: DEFAULT_APP_SETTINGS.aiInferenceMode,
+    externalApiProvider: DEFAULT_APP_SETTINGS.externalApiProvider,
+    externalApiUrl: DEFAULT_APP_SETTINGS.externalApiUrl,
+    externalApiModel: DEFAULT_APP_SETTINGS.externalApiModel,
+    externalApiKey: DEFAULT_APP_SETTINGS.externalApiKey,
   };
 }
 
@@ -108,6 +113,25 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         base.fontScale = Number.isFinite(nextScale) ? Math.min(Math.max(nextScale, 0.9), 1.3) : DEFAULT_APP_SETTINGS.fontScale;
         break;
       }
+      case APP_SETTING_KEYS.aiInferenceMode:
+        if (row.value === 'local' || row.value === 'external') {
+          base.aiInferenceMode = row.value;
+        }
+        break;
+      case APP_SETTING_KEYS.externalApiProvider:
+        if (row.value === 'openai' || row.value === 'deepseek' || row.value === 'groq' || row.value === 'ollama' || row.value === 'together' || row.value === 'custom') {
+          base.externalApiProvider = row.value;
+        }
+        break;
+      case APP_SETTING_KEYS.externalApiUrl:
+        base.externalApiUrl = row.value || DEFAULT_APP_SETTINGS.externalApiUrl;
+        break;
+      case APP_SETTING_KEYS.externalApiModel:
+        base.externalApiModel = row.value || DEFAULT_APP_SETTINGS.externalApiModel;
+        break;
+      case APP_SETTING_KEYS.externalApiKey:
+        base.externalApiKey = row.value ?? DEFAULT_APP_SETTINGS.externalApiKey;
+        break;
       default:
         break;
     }
