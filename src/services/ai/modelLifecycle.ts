@@ -1,18 +1,16 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
+import * as Network from 'expo-network';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 
 import {
   AI_BOOTSTRAP_OPTIONS,
+  getActiveModelConfig,
   isSupportedLocalModelPath,
-  QWEN_MODEL_ASSET_VERSION,
-  QWEN_MODEL_DOWNLOAD_URL,
-  QWEN_MODEL_FILE_NAME,
-  QWEN_MODEL_MIN_FREE_SPACE_BYTES,
-  QWEN_MODEL_SHA256,
   QWEN_MODEL_WARMUP_PROMPT,
   validateRuntimeInfo,
 } from './config';
+import { useSettingsStore } from '../../store/useSettingsStore';
 
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { recordMemoryTelemetry } from './hardware';
@@ -108,6 +106,7 @@ export interface LocalInferenceAdapter {
   getRuntimeInfo(): Promise<LocalRuntimeInfo>;
   runHealthCheck(): Promise<LocalHealthCheckResult>;
   indexLocalKnowledge(): Promise<void>;
+  dispose?(): Promise<void>;
 }
 
 class NoopInferenceAdapter implements LocalInferenceAdapter {
@@ -132,6 +131,10 @@ class NoopInferenceAdapter implements LocalInferenceAdapter {
   }
 
   async indexLocalKnowledge(): Promise<void> {
+    return;
+  }
+
+  async dispose(): Promise<void> {
     return;
   }
 }
@@ -173,6 +176,10 @@ class LlamaRnInferenceAdapter implements LocalInferenceAdapter {
     });
     return;
   }
+
+  async dispose(): Promise<void> {
+    await this.adapter.dispose();
+  }
 }
 
 function createDefaultInferenceAdapter(): LocalInferenceAdapter {
@@ -185,12 +192,25 @@ const AI_MODELS_DIRECTORY = `${AI_ROOT_DIRECTORY}models/`;
 const AI_TEMP_DIRECTORY = `${AI_ROOT_DIRECTORY}tmp/`;
 const AI_MANIFEST_FILE = `${AI_ROOT_DIRECTORY}model-manifest.json`;
 const AI_TRANSFER_MANIFEST_FILE = `${AI_ROOT_DIRECTORY}download-manifest.json`;
-const ACTIVE_MODEL_DIRECTORY = `${AI_MODELS_DIRECTORY}${QWEN_MODEL_ASSET_VERSION}/`;
-const ACTIVE_MODEL_PATH = `${ACTIVE_MODEL_DIRECTORY}${QWEN_MODEL_FILE_NAME}`;
-const TEMP_DOWNLOAD_PATH = `${AI_TEMP_DIRECTORY}${QWEN_MODEL_FILE_NAME}.part`;
+
+function getModelPaths() {
+  const config = getActiveModelConfig();
+  const activeModelDirectory = `${AI_MODELS_DIRECTORY}${config.assetVersion}/`;
+  const activeModelPath = `${activeModelDirectory}${config.fileName}`;
+  const tempDownloadPath = `${AI_TEMP_DIRECTORY}${config.fileName}.part`;
+  const rollbackPath = `${activeModelDirectory}${config.fileName}.rollback`;
+  const shouldVerifyChecksum = config.sha256.trim().length > 0;
+  return {
+    config,
+    activeModelDirectory,
+    activeModelPath,
+    tempDownloadPath,
+    rollbackPath,
+    shouldVerifyChecksum,
+  };
+}
 
 const nowIso = () => new Date().toISOString();
-const SHOULD_VERIFY_CHECKSUM = QWEN_MODEL_SHA256.trim().length > 0;
 const MAX_JS_SAFE_CHECKSUM_BYTES = 16 * 1024 * 1024;
 
 async function safeGetInfo(path: string): Promise<FileInfoResult> {
@@ -221,7 +241,7 @@ function normalizeCandidatePath(path: string | null | undefined): string | null 
 function deriveModelPathCandidates(preferredPath?: string | null): string[] {
   const candidates = new Set<string>();
   const normalizedPreferred = normalizeCandidatePath(preferredPath);
-  const normalizedActive = normalizeCandidatePath(ACTIVE_MODEL_PATH);
+  const normalizedActive = normalizeCandidatePath(getModelPaths().activeModelPath);
 
   if (normalizedPreferred && isSupportedLocalModelPath(normalizedPreferred)) {
     candidates.add(normalizedPreferred);
@@ -324,13 +344,14 @@ async function clearTransferManifest() {
   await safeDelete(AI_TRANSFER_MANIFEST_FILE);
 }
 
-export async function checkDiskStorageHealth(requiredBytes = QWEN_MODEL_MIN_FREE_SPACE_BYTES): Promise<{
+export async function checkDiskStorageHealth(requiredBytes?: number): Promise<{
   ok: boolean;
   status: 'ok' | 'warning' | 'critical' | 'unknown';
   freeBytes: number | null;
   totalBytes: number | null;
   message: string | null;
 }> {
+  const reqBytes = requiredBytes ?? getActiveModelConfig().minFreeSpaceBytes;
   if (!FileSystemModule.getFreeDiskStorageAsync) {
     const res = { ok: true, status: 'unknown' as const, freeBytes: null, totalBytes: null, message: null };
     useAIStore.getState().updateStorageHealth(res);
@@ -349,14 +370,14 @@ export async function checkDiskStorageHealth(requiredBytes = QWEN_MODEL_MIN_FREE
 
   let status: 'ok' | 'warning' | 'critical' = 'ok';
   let message: string | null = null;
-  const ok = freeBytes >= requiredBytes;
+  const ok = freeBytes >= reqBytes;
 
   if (!ok) {
     status = 'critical';
-    const requiredGb = (requiredBytes / (1024 * 1024 * 1024)).toFixed(1);
+    const requiredGb = (reqBytes / (1024 * 1024 * 1024)).toFixed(1);
     const freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
     message = `Critical Storage: Only ${freeGb} GB free. At least ${requiredGb} GB required for AI model installation.`;
-  } else if (freeBytes < requiredBytes * 1.3) {
+  } else if (freeBytes < reqBytes * 1.3) {
     status = 'warning';
     const freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
     message = `Low Storage Warning: ${freeGb} GB free. AI model downloads may fail if device storage drops further.`;
@@ -553,18 +574,46 @@ export class QModelLifecycleManager {
     }
   }
 
+  async deleteInstalledModel() {
+    await this.cancelDownload('User requested model deletion.');
+    if (typeof this.inferenceAdapter.dispose === 'function') {
+      await this.inferenceAdapter.dispose();
+    }
+    const paths = getModelPaths();
+    await safeDelete(paths.activeModelPath);
+    await safeDelete(paths.rollbackPath);
+    await clearManifest();
+    await this.resetProvisioningArtifacts({ preserveInstalledModel: false });
+    useAIStore.getState().setRuntimeModelLoaded(false, null);
+    useAIStore.getState().setRuntimeHealth(false, null);
+    useAIStore.getState().setRuntimeInfo(null);
+    useAIStore.getState().setRuntimeState('detected');
+    useAIStore.getState().setRuntimeError(null);
+    this.updateProvisioning({
+      modelPath: null,
+      checksumVerified: false,
+      initializedAt: null,
+      lastVerifiedAt: null,
+      updateAvailable: false,
+      lastError: null,
+      status: 'not-installed',
+    });
+    this.log('info', 'model-deleted', 'User deleted local AI model weights.');
+  }
+
   private async provision() {
     try {
       if (!DOCUMENT_DIRECTORY) {
         throw new Error('Document storage is unavailable on this device.');
       }
 
-      const freeSpace = await checkDiskStorageHealth(QWEN_MODEL_MIN_FREE_SPACE_BYTES);
+      const paths = getModelPaths();
+      const freeSpace = await checkDiskStorageHealth(paths.config.minFreeSpaceBytes);
       if (!freeSpace.ok) {
         this.updateProvisioning({
           status: 'failed',
           pausedReason: null,
-          lastError: freeSpace.message ?? `Insufficient free storage for local AI model download. Free at least ${Math.round(QWEN_MODEL_MIN_FREE_SPACE_BYTES / 1024 / 1024 / 1024)} GB and retry.`,
+          lastError: freeSpace.message ?? `Insufficient free storage for local AI model download. Free at least ${Math.round(paths.config.minFreeSpaceBytes / 1024 / 1024 / 1024)} GB and retry.`,
           canResume: false,
         });
         this.log('warn', 'low-storage', 'Insufficient free storage for local AI model download.', { freeBytes: freeSpace.freeBytes ?? undefined });
@@ -590,10 +639,10 @@ export class QModelLifecycleManager {
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
       }
 
-      const tempInfo = await safeGetInfo(TEMP_DOWNLOAD_PATH);
+      const tempInfo = await safeGetInfo(paths.tempDownloadPath);
       if (tempInfo.exists && (transferManifest || useAIStore.getState().provisioning.downloadedBytes > 0)) {
         this.log('warn', 'partial-download-reset', 'Found a partial model download without resumable state. Clearing stale artifacts before restarting download.', {
-          tempPath: TEMP_DOWNLOAD_PATH,
+          tempPath: paths.tempDownloadPath,
           downloadedBytes: transferManifest?.downloadedBytes ?? useAIStore.getState().provisioning.downloadedBytes,
         });
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
@@ -610,10 +659,11 @@ export class QModelLifecycleManager {
     this.lastPersistedProgressAt = 0;
     const sessionId = createSessionId();
     const startedAt = nowIso();
+    const paths = getModelPaths();
 
     useAIStore.getState().updateTransfer({
-      downloadUrl: QWEN_MODEL_DOWNLOAD_URL,
-      resumableUri: TEMP_DOWNLOAD_PATH,
+      downloadUrl: paths.config.downloadUrl,
+      resumableUri: paths.tempDownloadPath,
       resumeData: null,
       startedAt,
       updatedAt: startedAt,
@@ -624,7 +674,7 @@ export class QModelLifecycleManager {
 
     this.updateProvisioning({
       status: 'queued',
-      tempPath: TEMP_DOWNLOAD_PATH,
+      tempPath: paths.tempDownloadPath,
       pausedReason: null,
       lastError: null,
       totalBytes: null,
@@ -632,8 +682,8 @@ export class QModelLifecycleManager {
       progress: 0,
       canResume: false,
       transfer: {
-        downloadUrl: QWEN_MODEL_DOWNLOAD_URL,
-        resumableUri: TEMP_DOWNLOAD_PATH,
+        downloadUrl: paths.config.downloadUrl,
+        resumableUri: paths.tempDownloadPath,
         resumeData: null,
         startedAt,
         updatedAt: startedAt,
@@ -670,7 +720,27 @@ export class QModelLifecycleManager {
       throw new Error('Download API unavailable in current runtime. Use a custom dev client or production build.');
     }
 
-    const health = await checkDiskStorageHealth(QWEN_MODEL_MIN_FREE_SPACE_BYTES);
+    const settings = useSettingsStore.getState();
+    if (settings.aiWifiOnlyDownload) {
+      try {
+        const networkState = await Network.getNetworkStateAsync();
+        if (networkState.type !== Network.NetworkStateType.WIFI) {
+          this.updateProvisioning({
+            status: 'paused',
+            pausedReason: 'Download paused: Wi-Fi connection required by settings.',
+            lastError: null,
+            canResume: true,
+          });
+          this.log('warn', 'wifi-required', 'Aborted download due to non-WiFi connection.');
+          return;
+        }
+      } catch (err) {
+        this.log('warn', 'network-check-failed', 'Failed to check network state, proceeding with download.');
+      }
+    }
+
+    const paths = getModelPaths();
+    const health = await checkDiskStorageHealth(paths.config.minFreeSpaceBytes);
     if (!health.ok) {
       this.updateProvisioning({
         status: 'failed',
@@ -687,8 +757,8 @@ export class QModelLifecycleManager {
     const backgroundSessionType = FileSystemModule.FileSystemSessionType?.BACKGROUND ?? 1;
 
     this.downloadResumable = downloadResumableFactory(
-      QWEN_MODEL_DOWNLOAD_URL,
-      TEMP_DOWNLOAD_PATH,
+      paths.config.downloadUrl,
+      paths.tempDownloadPath,
       {
         sessionType: backgroundSessionType,
       },
@@ -703,18 +773,18 @@ export class QModelLifecycleManager {
       'download-started',
       'Starting atomic OTA model download.',
       {
-        version: QWEN_MODEL_ASSET_VERSION,
-        url: QWEN_MODEL_DOWNLOAD_URL,
+        version: paths.config.assetVersion,
+        url: paths.config.downloadUrl,
         resumed: false,
       },
     );
 
-    this.updateProvisioning({ status: 'downloading', pausedReason: null, lastError: null, canResume: false, tempPath: TEMP_DOWNLOAD_PATH });
+    this.updateProvisioning({ status: 'downloading', pausedReason: null, lastError: null, canResume: false, tempPath: paths.tempDownloadPath });
 
     try {
       const result = await this.downloadResumable.downloadAsync();
       this.downloadResumable = null;
-      await this.handleDownloadFinished(result?.uri ?? TEMP_DOWNLOAD_PATH);
+      await this.handleDownloadFinished(result?.uri ?? paths.tempDownloadPath);
     } catch (error) {
       this.downloadResumable = null;
       const message = error instanceof Error ? error.message : 'Model download failed.';
@@ -747,10 +817,11 @@ export class QModelLifecycleManager {
     const computedBytesPerSecond = elapsedMs ? Math.max(0, ((downloadedBytes - lastDownloadedBytes) / elapsedMs) * 1000) : current.transfer.bytesPerSecond;
     const bytesPerSecond = Number.isFinite(computedBytesPerSecond ?? NaN) ? computedBytesPerSecond ?? null : null;
     const timestamp = new Date(nowMs).toISOString();
+    const paths = getModelPaths();
 
     useAIStore.getState().updateTransfer({
-      downloadUrl: QWEN_MODEL_DOWNLOAD_URL,
-      resumableUri: TEMP_DOWNLOAD_PATH,
+      downloadUrl: paths.config.downloadUrl,
+      resumableUri: paths.tempDownloadPath,
       startedAt,
       sessionId,
       lastProgressAt: timestamp,
@@ -762,7 +833,7 @@ export class QModelLifecycleManager {
       totalBytes,
       downloadedBytes,
       progress: percent,
-      tempPath: TEMP_DOWNLOAD_PATH,
+      tempPath: paths.tempDownloadPath,
       canResume: false,
     });
 
@@ -825,14 +896,15 @@ export class QModelLifecycleManager {
   }
 
   private async verifyAndFinalizeInstalledModel(sourcePath: string, moveIntoActiveDirectory = false) {
+    const paths = getModelPaths();
     const fileInfo = await safeGetInfo(sourcePath);
-    this.log('info', 'verify-started', 'Verifying local Qwen model artifact integrity.', {
+    this.log('info', 'verify-started', 'Verifying local AI model artifact integrity.', {
       sourcePath,
       resolvedSourceUri: fileInfo.uri ?? sourcePath,
       fileSize: fileInfo.size ?? null,
       moveIntoActiveDirectory,
-      checksumEnabled: SHOULD_VERIFY_CHECKSUM,
-      activeModelPath: ACTIVE_MODEL_PATH,
+      checksumEnabled: paths.shouldVerifyChecksum,
+      activeModelPath: paths.activeModelPath,
       documentDirectory: DOCUMENT_DIRECTORY,
       cacheDirectory: FileSystemModule.cacheDirectory ?? null,
     });
@@ -841,9 +913,9 @@ export class QModelLifecycleManager {
     }
 
     try {
-      if (SHOULD_VERIFY_CHECKSUM) {
+      if (paths.shouldVerifyChecksum) {
         const hash = await sha256ForFile(sourcePath);
-        if (hash !== QWEN_MODEL_SHA256) {
+        if (hash !== paths.config.sha256) {
           await safeDelete(sourcePath);
           await clearTransferManifest();
           useAIStore.getState().resetTransfer();
@@ -858,25 +930,25 @@ export class QModelLifecycleManager {
         canResume: false,
       });
 
-      await ensureDirectory(ACTIVE_MODEL_DIRECTORY);
+      await ensureDirectory(paths.activeModelDirectory);
 
       if (moveIntoActiveDirectory) {
         this.updateProvisioning({ status: 'unpacking' });
-        const previousInfo = await safeGetInfo(ACTIVE_MODEL_PATH);
-        const rollbackPath = `${ACTIVE_MODEL_DIRECTORY}${QWEN_MODEL_FILE_NAME}.rollback`;
+        const previousInfo = await safeGetInfo(paths.activeModelPath);
+        const rollbackPath = paths.rollbackPath;
 
         if (previousInfo.exists) {
           await safeDelete(rollbackPath);
-          await safeMove(ACTIVE_MODEL_PATH, rollbackPath);
+          await safeMove(paths.activeModelPath, rollbackPath);
         }
 
         try {
-          await safeMove(sourcePath, ACTIVE_MODEL_PATH);
-          const installedInfo = await safeGetInfo(ACTIVE_MODEL_PATH);
+          await safeMove(sourcePath, paths.activeModelPath);
+          const installedInfo = await safeGetInfo(paths.activeModelPath);
           this.log('info', 'install-move-complete', 'Moved verified GGUF model into active directory.', {
             sourcePath,
-            activeModelPath: ACTIVE_MODEL_PATH,
-            activeModelUri: installedInfo.uri ?? ACTIVE_MODEL_PATH,
+            activeModelPath: paths.activeModelPath,
+            activeModelUri: installedInfo.uri ?? paths.activeModelPath,
             activeModelExists: installedInfo.exists,
             activeModelSize: installedInfo.size ?? null,
           });
@@ -884,15 +956,15 @@ export class QModelLifecycleManager {
         } catch (error) {
           const rollbackInfo = await safeGetInfo(rollbackPath);
           if (rollbackInfo.exists) {
-            await safeMove(rollbackPath, ACTIVE_MODEL_PATH);
+            await safeMove(rollbackPath, paths.activeModelPath);
           }
           throw error;
         }
       }
 
-      const installedModelPath = await findExistingModelPath(ACTIVE_MODEL_PATH);
+      const installedModelPath = await findExistingModelPath(paths.activeModelPath);
       if (!installedModelPath) {
-        throw new Error(`GGUF model file does not exist at path: ${ACTIVE_MODEL_PATH}`);
+        throw new Error(`GGUF model file does not exist at path: ${paths.activeModelPath}`);
       }
       await this.registerWarmupAndIndex(installedModelPath);
     } catch (error) {
@@ -910,25 +982,25 @@ export class QModelLifecycleManager {
           canResume: false,
         });
 
-        await ensureDirectory(ACTIVE_MODEL_DIRECTORY);
+        await ensureDirectory(paths.activeModelDirectory);
 
         if (moveIntoActiveDirectory) {
           this.updateProvisioning({ status: 'unpacking' });
-          const previousInfo = await safeGetInfo(ACTIVE_MODEL_PATH);
-          const rollbackPath = `${ACTIVE_MODEL_DIRECTORY}${QWEN_MODEL_FILE_NAME}.rollback`;
+          const previousInfo = await safeGetInfo(paths.activeModelPath);
+          const rollbackPath = paths.rollbackPath;
 
           if (previousInfo.exists) {
             await safeDelete(rollbackPath);
-            await safeMove(ACTIVE_MODEL_PATH, rollbackPath);
+            await safeMove(paths.activeModelPath, rollbackPath);
           }
 
           try {
-            await safeMove(sourcePath, ACTIVE_MODEL_PATH);
-            const installedInfo = await safeGetInfo(ACTIVE_MODEL_PATH);
+            await safeMove(sourcePath, paths.activeModelPath);
+            const installedInfo = await safeGetInfo(paths.activeModelPath);
             this.log('info', 'install-move-complete', 'Moved verified GGUF model into active directory.', {
               sourcePath,
-              activeModelPath: ACTIVE_MODEL_PATH,
-              activeModelUri: installedInfo.uri ?? ACTIVE_MODEL_PATH,
+              activeModelPath: paths.activeModelPath,
+              activeModelUri: installedInfo.uri ?? paths.activeModelPath,
               activeModelExists: installedInfo.exists,
               activeModelSize: installedInfo.size ?? null,
             });
@@ -936,15 +1008,15 @@ export class QModelLifecycleManager {
           } catch (moveError) {
             const rollbackInfo = await safeGetInfo(rollbackPath);
             if (rollbackInfo.exists) {
-              await safeMove(rollbackPath, ACTIVE_MODEL_PATH);
+              await safeMove(rollbackPath, paths.activeModelPath);
             }
             throw moveError;
           }
         }
 
-        const installedModelPath = await findExistingModelPath(ACTIVE_MODEL_PATH);
+        const installedModelPath = await findExistingModelPath(paths.activeModelPath);
         if (!installedModelPath) {
-          throw new Error(`GGUF model file does not exist at path: ${ACTIVE_MODEL_PATH}`);
+          throw new Error(`GGUF model file does not exist at path: ${paths.activeModelPath}`);
         }
         await this.registerWarmupAndIndex(installedModelPath);
         return;
@@ -954,6 +1026,15 @@ export class QModelLifecycleManager {
       }
       throw error;
     }
+  }
+
+  private isOomError(error: unknown): boolean {
+    if (!error) return false;
+    if (typeof error === 'object' && 'code' in error && (error as any).code === 'insufficient-memory') {
+      return true;
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    return /memory|oom|alloc|insufficient/i.test(msg);
   }
 
   private async registerWarmupAndIndex(modelPath: string, preserveInstalledReadyState = false) {
@@ -1018,7 +1099,7 @@ export class QModelLifecycleManager {
 
       const resolvedModelInfo = await safeGetInfo(resolvedModelPath);
       const registerStartedAt = Date.now();
-      this.log('info', 'register-started', 'Registering local Qwen model with inference runtime.', {
+      this.log('info', 'register-started', 'Registering local AI model with inference runtime.', {
         requestedModelPath: modelPath,
         resolvedModelPath,
         runtimeAccessiblePath: resolvedModelInfo.uri ?? resolvedModelPath,
@@ -1064,7 +1145,7 @@ export class QModelLifecycleManager {
       }
 
       await writeManifest({
-        version: QWEN_MODEL_ASSET_VERSION,
+        version: getActiveModelConfig().assetVersion,
         modelPath: finalModelPath,
         checksumVerified: true,
         initializedAt,
@@ -1087,13 +1168,38 @@ export class QModelLifecycleManager {
         canResume: false,
         tempPath: null,
       });
-      this.log('info', 'provisioning-ready', 'Local Qwen model is ready for offline use.', {
+      this.log('info', 'provisioning-ready', 'Local AI model is ready for offline use.', {
         modelPath: finalModelPath,
         backend: runtimeInfo.backend,
         maxContextTokens: runtimeInfo.maxContextTokens,
       });
     } catch (error) {
       const runtimeError = this.normalizeRuntimeError(error, modelPath);
+      const settings = useSettingsStore.getState();
+
+      if (settings.aiAutoQuantizationFallback && this.isOomError(runtimeError)) {
+        this.log('warn', 'oom-detected', 'Out-of-memory error detected during model initialization. Attempting auto-fallback to lower quantization tier.');
+        const currentTier = settings.aiModelQuantization;
+        const downgradeMap: Record<string, 'Q4_K_M' | 'INT4' | 'Q2_K'> = {
+          Q5_K_M: 'Q4_K_M',
+          Q4_K_M: 'INT4',
+          INT4: 'Q2_K',
+        };
+
+        const nextTier = downgradeMap[currentTier];
+        if (nextTier) {
+          this.log('warn', 'auto-downgrade-tier', `Downgrading from ${currentTier} to ${nextTier} due to OOM.`);
+          void settings.setAiModelQuantization(nextTier);
+          state.setWarmupPending(false);
+          state.markRuntimeReady(false);
+          state.setRuntimeState('unavailable');
+          void this.provision();
+          return;
+        } else {
+          this.log('error', 'auto-downgrade-exhausted', 'Cannot downgrade further; lowest quantization tier reached.');
+        }
+      }
+
       state.setWarmupPending(false);
       state.markRuntimeReady(false);
       state.setRuntimeHealth(false, null);
@@ -1153,7 +1259,7 @@ export class QModelLifecycleManager {
           checksumVerified: manifest.checksumVerified,
           initializedAt: manifest.initializedAt,
           lastVerifiedAt: manifest.lastVerifiedAt,
-          updateAvailable: manifest.version !== QWEN_MODEL_ASSET_VERSION,
+          updateAvailable: manifest.version !== getActiveModelConfig().assetVersion,
           canResume: false,
           lastError: null,
           pausedReason: null,
@@ -1174,7 +1280,7 @@ export class QModelLifecycleManager {
 
     const transferManifest = await readTransferManifest();
     if (!transferManifest) {
-      const tempInfo = await safeGetInfo(TEMP_DOWNLOAD_PATH);
+      const tempInfo = await safeGetInfo(getModelPaths().tempDownloadPath);
       if (tempInfo.exists) {
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
       }
@@ -1263,13 +1369,14 @@ export class QModelLifecycleManager {
   private async persistTransferManifest(overrides: Partial<TransferManifest>) {
     const provisioning = useAIStore.getState().provisioning;
     const transfer = provisioning.transfer;
+    const paths = getModelPaths();
 
     const manifest: TransferManifest = {
       version: provisioning.version,
       status: overrides.status ?? provisioning.status,
-      downloadUrl: overrides.downloadUrl ?? transfer.downloadUrl ?? QWEN_MODEL_DOWNLOAD_URL,
-      targetPath: overrides.targetPath ?? transfer.resumableUri ?? TEMP_DOWNLOAD_PATH,
-      tempPath: overrides.tempPath ?? provisioning.tempPath ?? TEMP_DOWNLOAD_PATH,
+      downloadUrl: overrides.downloadUrl ?? transfer.downloadUrl ?? paths.config.downloadUrl,
+      targetPath: overrides.targetPath ?? transfer.resumableUri ?? paths.tempDownloadPath,
+      tempPath: overrides.tempPath ?? provisioning.tempPath ?? paths.tempDownloadPath,
       totalBytes: overrides.totalBytes ?? provisioning.totalBytes,
       downloadedBytes: overrides.downloadedBytes ?? provisioning.downloadedBytes,
       progress: overrides.progress ?? provisioning.progress,
@@ -1344,7 +1451,7 @@ export class QModelLifecycleManager {
     this.inFlightVerificationPromise = null;
     this.lastPersistedProgressAt = 0;
 
-    await safeDelete(TEMP_DOWNLOAD_PATH);
+    await safeDelete(getModelPaths().tempDownloadPath);
     await clearTransferManifest();
     useAIStore.getState().resetTransfer();
     useAIStore.getState().markRuntimeReady(false);

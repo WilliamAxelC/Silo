@@ -98,6 +98,6 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 - [ ] Support interactive data visualizations and chart rendering directly within chat response bubbles.
 
 ### Model Provisioning & Storage Management
-- [ ] Add an interactive model management UI in Settings allowing users to delete downloaded weights or switch between different GGUF quantization tiers (e.g., `Q4_K_M`, `Q2_K`, `INT4`) on demand.
-- [ ] Support Wi-Fi-only download restrictions for OTA model provisioning.
-- [ ] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated out-of-memory failures during model initialization.
+- [x] Add an interactive model management UI in Settings allowing users to delete downloaded weights or switch between different GGUF quantization tiers (e.g., `Q4_K_M`, `Q2_K`, `INT4`) on demand.
+- [x] Support Wi-Fi-only download restrictions for OTA model provisioning.
+- [x] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated out-of-memory failures during model initialization.

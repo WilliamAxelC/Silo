@@ -63,7 +63,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       isLoaded: true,
     });
     const preset = GGUF_QUANTIZATION_PRESETS[parsed.aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
-    useAIStore.getState().setLocalModelTarget(preset.version, preset.label);
+    useAIStore.getState().setLocalModelTarget(preset.assetVersion, preset.label);
   },
 
   setThemeMode: async (themeMode) => {
@@ -105,7 +105,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     await saveSetting('aiModelQuantization', aiModelQuantization);
     set({ aiModelQuantization });
     const preset = GGUF_QUANTIZATION_PRESETS[aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
-    useAIStore.getState().setLocalModelTarget(preset.version, preset.label);
+    useAIStore.getState().setLocalModelTarget(preset.assetVersion, preset.label);
   },
 
   setAiWifiOnlyDownload: async (aiWifiOnlyDownload) => {

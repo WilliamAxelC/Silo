@@ -69,12 +69,12 @@ Centralizes asynchronous runtime state and relational financial data to decouple
 ### 2.4 Native Bridge & Adaptation Layer
 Provides idiomatic TypeScript interfaces for native Android capabilities.
 - **Llama.rn Adapter**: [llamaRnAdapter.ts](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts) wraps the third-party `llama.rn` module, managing native context initialization (`initLlama`), warmup execution (`runWarmup`), completion dispatch, and graceful fallback from GPU to CPU execution.
-- **Legacy Custom Inference Bridge (Deprecated)**: The legacy JS bridge (`localInferenceBridge.ts`) has been removed in favor of `llama.rn`. The underlying custom Android native modules ([SiloLocalInferenceModule.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferenceModule.kt) and [SiloLocalInferencePackage.kt](file:///d:/Project/Silo/silo-app/android/app/src/main/java/com/will/silo/ai/SiloLocalInferencePackage.kt)) remain in the native project structure as inactive legacy code scheduled for native pruning.
+- **Legacy Custom Inference Bridge (Pruned)**: All legacy JS, Kotlin, and C++ bridge files have been completely removed from the project in favor of `llama.rn`.
 
 ### 2.5 Native Inference & Compute Layer
 The high-performance C++/JNI compute engine responsible for LLM execution on ARM64 mobile hardware.
 - **Llama.rn JSI Core**: Direct C++ bindings to `llama.cpp` via React Native JSI for zero-overhead token streaming and memory-mapped model execution.
-- **Legacy Native JNI Core (Deprecated)**: [SiloLocalInferenceJni.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/SiloLocalInferenceJni.cpp) and [gguf_runner.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/gguf_runner.cpp) are inactive C++ wrappers from the previous bridge implementation.
+- **Hardware Acceleration**: Automatically evaluates Vulkan/GPU availability and falls back to CPU multi-threading with ARMNEON optimizations when VRAM is constrained.
 
 ---
 
@@ -83,21 +83,24 @@ The high-performance C++/JNI compute engine responsible for LLM execution on ARM
 ### 3.1 Lazy App Boot & Runtime Initialization
 To ensure sub-second app launch times and avoid unnecessary RAM consumption, the LLM runtime is **never eagerly loaded** at application startup.
 1. Application boots into [App.tsx](file:///d:/Project/Silo/silo-app/App.tsx) and initializes SQLite and general settings.
-2. [QModelLifecycleManager](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts) performs a lightweight background check for existing model manifests and resumable transfers.
+2. [QModelLifecycleManager](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts) performs a lightweight background check for existing model manifests and resumable transfers based on the active quantization config (`getActiveModelConfig()`).
 3. When the user opens [ChatbotScreen.tsx](file:///d:/Project/Silo/silo-app/src/screens/ChatbotScreen.tsx), `GenerationService.ensureChatRuntimeReady()` and [chatRuntimePreloadService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/chatRuntimePreloadService.ts) coordinate to initialize the runtime on demand.
-4. If `USE_LLAMA_RN` is active, [LlamaRnAdapter](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts) evaluates device RAM against `buildMemoryBudget()`.
+4. [LlamaRnAdapter](file:///d:/Project/Silo/silo-app/src/services/ai/llamaRnAdapter.ts) evaluates device RAM against `buildMemoryBudget()`.
 5. The GGUF model is loaded into native memory (attempting GPU layer offload first, falling back to CPU threads if VRAM/initialization fails), followed by an automatic warmup completion prompt (`QWEN_MODEL_WARMUP_PROMPT`).
+6. **OOM Auto-Fallback**: If native model registration or warmup encounters an Out-Of-Memory (OOM) exception and `aiAutoQuantizationFallback` is enabled, the system automatically downgrades to the next lighter tier (e.g., `Q5_K_M` → `Q4_K_M` → `INT4` → `Q2_K`) and triggers provisioning for the smaller weights.
 
-### 3.2 Over-The-Air (OTA) Model Provisioning Lifecycle
-Because 2B INT4 GGUF models are 1.5GB–2.5GB in size, bundling them directly into the APK is impractical. Silo implements an atomic OTA provisioning state machine in [modelLifecycle.ts](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts):
+### 3.2 Over-The-Air (OTA) Model Provisioning & Management Lifecycle
+To accommodate varying mobile hardware capacities, Silo supports dynamic GGUF quantization tiers ranging from 1.1GB (`Q2_K`) to 1.9GB (`Q5_K_M`). Silo implements an atomic OTA provisioning state machine in [modelLifecycle.ts](file:///d:/Project/Silo/silo-app/src/services/ai/modelLifecycle.ts):
 ```
 [not-installed] ---> [queued] ---> [downloading] <---> [paused / interrupted]
                                         |
                                         v
 [ready] <--- [indexing/warming] <--- [registering] <--- [verifying & unpacking]
 ```
+- **Wi-Fi Only Provisioning**: When `aiWifiOnlyDownload` is enabled in settings, the transfer manager checks active network connections via `expo-network` and pauses/defers downloads when on cellular data.
 - **Resumable Transfers**: Progress and session identifiers are persisted to `AI_TRANSFER_MANIFEST_FILE`. If the app is closed or backgrounded, `restorePersistedState()` reconciles partial downloads upon relaunch.
 - **Atomic Placement & Rollback**: Downloaded artifacts are placed in a temporary directory during verification. Only after passing integrity checks are they atomically moved to the active model root, preventing corrupt partial files from breaking inference.
+- **Model Deletion Management**: Users can delete downloaded model weights directly from Settings (`deleteInstalledModel()`), which cancels any in-flight downloads, disposes the native runtime, and wipes model directories to reclaim storage.
 
 ### 3.3 Grounded RAG Financial Query Flow
 When a user asks a domain-specific question (e.g., *"How much did I spend on groceries this month?"*):
@@ -108,13 +111,11 @@ When a user asks a domain-specific question (e.g., *"How much did I spend on gro
 
 ---
 
-## 4. Dual Inference Pathway Architecture
+## 4. Hybrid & Dynamic AI Inference Architecture
 
-Silo currently contains two distinct native inference integrations:
-1. **Modern Pathway (`llama.rn`)**: Enabled via `USE_LLAMA_RN = true` in [generationService.ts](file:///d:/Project/Silo/silo-app/src/services/ai/generationService.ts). Leverages the `@llama.rn` third-party module for robust context management, hardware acceleration, and standard GGUF handling.
-2. **Legacy Custom Bridge (`SiloLocalInferenceModule`)**: A bespoke Kotlin/JNI/C++ pipeline ([gguf_runner.cpp](file:///d:/Project/Silo/silo-app/android/app/src/main/cpp/gguf_runner.cpp)) originally engineered for on-device inference before the adoption of `llama.rn`.
-
-*(Note: See [TODO.md](file:///d:/Project/Silo/silo-app/TODO.md) for architectural consolidation plans regarding these pathways.)*
+Silo provides a flexible inference architecture that adapts to user preferences and device capabilities:
+1. **On-Device Local Inference (`llama.rn`)**: The default, offline-first engine powered by direct React Native JSI bindings to `llama.cpp`. Supports user-selectable quantization tiers (`Q5_K_M`, `Q4_K_M`, `INT4`, `Q2_K`) with automatic OOM downgrading and memory-aware hardware offloading.
+2. **Cloud / External API Providers**: For users preferring zero-storage footprint or cloud-scale reasoning models, Silo supports switching to external providers (OpenAI, DeepSeek, Groq, Together AI, Ollama, or Custom API endpoints) in Settings. Incorporates real-time Server-Sent Events (SSE) streaming via XHR with automated stream sanitization to strip internal reasoning blocks (`<think>`) and ChatML tags.
 
 ---
 
