@@ -5,7 +5,7 @@ import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
 import { EXTERNAL_API_PRESETS } from '../features/transactions/constants';
-import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider } from '../features/transactions/types';
+import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, GGUFQuantizationTier } from '../features/transactions/types';
 
 interface SettingsState extends AppSettings {
   isLoaded: boolean;
@@ -18,6 +18,9 @@ interface SettingsState extends AppSettings {
   setShowIncomeInReportsFirst: (enabled: boolean) => Promise<void>;
   setFontScale: (fontScale: number) => Promise<void>;
   setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
+  setAiModelQuantization: (quantization: GGUFQuantizationTier) => Promise<void>;
+  setAiWifiOnlyDownload: (enabled: boolean) => Promise<void>;
+  setAiAutoQuantizationFallback: (enabled: boolean) => Promise<void>;
   setExternalApiProvider: (provider: ExternalAPIProvider) => Promise<void>;
   setExternalApiUrl: (url: string) => Promise<void>;
   setExternalApiModel: (model: string) => Promise<void>;
@@ -93,6 +96,21 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAiInferenceMode: async (aiInferenceMode) => {
     await saveSetting('aiInferenceMode', aiInferenceMode);
     set({ aiInferenceMode });
+  },
+
+  setAiModelQuantization: async (aiModelQuantization) => {
+    await saveSetting('aiModelQuantization', aiModelQuantization);
+    set({ aiModelQuantization });
+  },
+
+  setAiWifiOnlyDownload: async (aiWifiOnlyDownload) => {
+    await saveSetting('aiWifiOnlyDownload', aiWifiOnlyDownload);
+    set({ aiWifiOnlyDownload });
+  },
+
+  setAiAutoQuantizationFallback: async (aiAutoQuantizationFallback) => {
+    await saveSetting('aiAutoQuantizationFallback', aiAutoQuantizationFallback);
+    set({ aiAutoQuantizationFallback });
   },
 
   setExternalApiProvider: async (externalApiProvider) => {

@@ -12,8 +12,8 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
-import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
-import { EXTERNAL_API_PRESETS } from '../features/transactions/constants';
+import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider, GGUFQuantizationTier } from '../features/transactions/types';
+import { EXTERNAL_API_PRESETS, GGUF_QUANTIZATION_PRESETS } from '../features/transactions/constants';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 
@@ -38,6 +38,9 @@ export const SettingsScreen = () => {
     externalApiUrl,
     externalApiModel,
     externalApiKey,
+    aiModelQuantization,
+    aiWifiOnlyDownload,
+    aiAutoQuantizationFallback,
     setThemeMode,
     setCurrencyCode,
     setUseThousandsSeparator,
@@ -49,6 +52,9 @@ export const SettingsScreen = () => {
     setExternalApiUrl,
     setExternalApiModel,
     setExternalApiKey,
+    setAiModelQuantization,
+    setAiWifiOnlyDownload,
+    setAiAutoQuantizationFallback,
   } = useSettingsStore();
   const {
     provisioning,
@@ -573,6 +579,58 @@ export const SettingsScreen = () => {
                 <Text style={[styles.statusText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>{localModelDisplayName}</Text>
               </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.rowBlock}>
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Quantization Tier</Text>
+                <View style={[styles.optionRowCompact, { marginTop: 8, flexWrap: 'wrap', gap: 6 }]}>
+                  {(Object.keys(GGUF_QUANTIZATION_PRESETS) as GGUFQuantizationTier[]).map((tierKey) => {
+                    const preset = GGUF_QUANTIZATION_PRESETS[tierKey];
+                    const isSelected = aiModelQuantization === tierKey;
+                    return (
+                      <TouchableOpacity
+                        key={tierKey}
+                        style={[
+                          styles.optionChip,
+                          { marginBottom: 4, marginRight: 0 },
+                          isSelected
+                            ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                            : { backgroundColor: theme.background, borderColor: theme.border },
+                        ]}
+                        onPress={() => setAiModelQuantization(tierKey)}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            { color: isSelected ? '#fff' : theme.text },
+                          ]}
+                        >
+                          {preset.shortLabel} (~{Math.round((preset.sizeBytesEstimate / (1024 * 1024 * 1024)) * 10) / 10} GB)
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowContent}>
+                  <View style={styles.rowLeft}>
+                    <Ionicons name="wifi-outline" size={18} color={theme.text} />
+                    <Text style={[styles.rowText, { color: theme.text }, textScale]}>Wi-Fi Only Downloads</Text>
+                  </View>
+                </View>
+                <Switch value={aiWifiOnlyDownload} onValueChange={setAiWifiOnlyDownload} trackColor={{ false: '#767577', true: theme.primary }} />
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.row}>
+                <View style={styles.rowContent}>
+                  <View style={styles.rowLeft}>
+                    <Ionicons name="shield-checkmark-outline" size={18} color={theme.text} />
+                    <Text style={[styles.rowText, { color: theme.text }, textScale]}>Auto-Downgrade on OOM</Text>
+                  </View>
+                </View>
+                <Switch value={aiAutoQuantizationFallback} onValueChange={setAiAutoQuantizationFallback} trackColor={{ false: '#767577', true: theme.primary }} />
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.row}>
                 <View style={styles.rowLeft}>
                   <Ionicons name="cloud-download-outline" size={18} color={theme.text} />
@@ -647,6 +705,32 @@ export const SettingsScreen = () => {
                 {hasUsableLocalInferenceBackend && (isAiActionLoading || provisioning.downloadedBytes > 0 || provisioning.status === 'downloading' || provisioning.status === 'queued') ? (
                   <TouchableOpacity style={[styles.aiSecondaryAction, { borderColor: theme.border, backgroundColor: theme.background }]} onPress={handleAiCancel} disabled={isAiActionLoading}>
                     <Text style={[styles.aiSecondaryActionText, { color: theme.expense }]}>Cancel</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {hasUsableLocalInferenceBackend && (provisioning.status === 'ready' || provisioning.downloadedBytes > 0) && !isAiActionLoading ? (
+                  <TouchableOpacity
+                    style={[styles.aiSecondaryAction, { borderColor: theme.border, backgroundColor: theme.background }]}
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete Downloaded Model',
+                        'Are you sure you want to delete the offline model weights? You will need to re-download the model to use on-device AI.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: async () => {
+                              const manager = getModelLifecycleManager() as any;
+                              if (typeof manager.deleteInstalledModel === 'function') {
+                                await manager.deleteInstalledModel();
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={[styles.aiSecondaryActionText, { color: theme.expense }]}>Delete Model</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
