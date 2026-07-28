@@ -187,27 +187,27 @@ function migrateToVersion6() {
 function migrateToVersion7() {
   expoDb.execSync(`
     CREATE VIRTUAL TABLE IF NOT EXISTS transactions_fts USING fts5(
-      merchantName,
+      merchant_name,
       note,
-      lineItemsText,
+      line_items_text,
       content='transactions',
       content_rowid='id'
     );
     
     CREATE TRIGGER IF NOT EXISTS transactions_ai AFTER INSERT ON transactions BEGIN
-      INSERT INTO transactions_fts(rowid, merchantName, note, lineItemsText)
+      INSERT INTO transactions_fts(rowid, merchant_name, note, line_items_text)
       VALUES (new.id, new.merchant_name, new.note, new.line_items_text);
     END;
     
     CREATE TRIGGER IF NOT EXISTS transactions_ad AFTER DELETE ON transactions BEGIN
-      INSERT INTO transactions_fts(transactions_fts, rowid, merchantName, note, lineItemsText)
+      INSERT INTO transactions_fts(transactions_fts, rowid, merchant_name, note, line_items_text)
       VALUES ('delete', old.id, old.merchant_name, old.note, old.line_items_text);
     END;
     
     CREATE TRIGGER IF NOT EXISTS transactions_au AFTER UPDATE ON transactions BEGIN
-      INSERT INTO transactions_fts(transactions_fts, rowid, merchantName, note, lineItemsText)
+      INSERT INTO transactions_fts(transactions_fts, rowid, merchant_name, note, line_items_text)
       VALUES ('delete', old.id, old.merchant_name, old.note, old.line_items_text);
-      INSERT INTO transactions_fts(rowid, merchantName, note, lineItemsText)
+      INSERT INTO transactions_fts(rowid, merchant_name, note, line_items_text)
       VALUES (new.id, new.merchant_name, new.note, new.line_items_text);
     END;
     
