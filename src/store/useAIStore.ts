@@ -6,8 +6,6 @@ import {
   AI_RUNTIME_PHASE_STATUSES,
   AI_STATUS_LABELS,
   AIProvisioningStatus,
-  QWEN_MODEL_ASSET_VERSION,
-  QWEN_MODEL_DISPLAY_NAME,
 } from '../services/ai/config';
 import type {
   LocalInferenceAvailability,
@@ -279,7 +277,7 @@ export const createInitialProvisioningSnapshot = (): AIProvisioningSnapshot => (
   progress: 0,
   downloadedBytes: 0,
   totalBytes: null,
-  version: QWEN_MODEL_ASSET_VERSION,
+  version: 'qwen3.5-2b',
   modelPath: null,
   tempPath: null,
   checksumVerified: false,
@@ -324,8 +322,8 @@ export const createInitialContextWindowSnapshot = (): AIContextWindowSnapshot =>
 });
 
 export const useAIStore = create<AIStoreState>((set) => ({
-  localModelId: QWEN_MODEL_ASSET_VERSION,
-  localModelDisplayName: QWEN_MODEL_DISPLAY_NAME,
+  localModelId: 'qwen3.5-2b',
+  localModelDisplayName: 'Qwen 3.5 2B',
   selectedMode: 'rag',
   chatHistory: [],
   provisioning: createInitialProvisioningSnapshot(),

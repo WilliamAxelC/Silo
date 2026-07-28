@@ -30,7 +30,26 @@ export interface Transaction {
 
 export type AIInferenceMode = 'local' | 'external';
 export type ExternalAPIProvider = 'openai' | 'deepseek' | 'groq' | 'ollama' | 'together' | 'custom';
-export type GGUFQuantizationTier = 'Q5_K_M' | 'Q4_K_M' | 'Q2_K' | 'INT4';
+export type ModelCapability = 'text' | 'multimodal';
+
+export interface ModelCatalogEntry {
+  id: string;
+  displayName: string;
+  family: 'qwen' | 'gemma';
+  parameterSize: string;
+  quantization: 'Q4_K_M';
+  capabilities: ModelCapability[];
+  fileName: string;
+  downloadUrl: string;
+  sha256: string;
+  fileSizeBytes: number;
+  minFreeSpaceBytes: number;
+  recommendedRamBytes: number;
+  requiredRamBytes: number;
+  description: string;
+}
+
+export type OcrEngineId = 'mlkit' | 'paddleocr' | 'external';
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -40,9 +59,9 @@ export interface AppSettings {
   showIncomeInReportsFirst: boolean;
   fontScale: number;
   aiInferenceMode: AIInferenceMode;
-  aiModelQuantization: GGUFQuantizationTier;
+  activeModelId: string;
+  ocrEngineId: OcrEngineId;
   aiWifiOnlyDownload: boolean;
-  aiAutoQuantizationFallback: boolean;
   externalApiProvider: ExternalAPIProvider;
   externalApiUrl: string;
   externalApiModel: string;

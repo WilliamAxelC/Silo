@@ -204,6 +204,7 @@ class GenerationService {
   private completionStopPromise: Promise<void> | null = null;
   private activeExternalXhr: XMLHttpRequest | null = null;
   private readonly llamaRnAdapter = getLlamaRnAdapter();
+  private unloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   private applyLlamaRuntimeLoading(runtimeInfo?: LocalRuntimeInfo | null) {
     const state = useAIStore.getState();
@@ -230,6 +231,11 @@ class GenerationService {
   }
 
   async ensureChatRuntimeReady(): Promise<void> {
+    if (this.unloadTimer) {
+      clearTimeout(this.unloadTimer);
+      this.unloadTimer = null;
+    }
+
     if (this.runtimeInitPromise) {
       return this.runtimeInitPromise;
     }
@@ -267,6 +273,24 @@ class GenerationService {
   }
 
 
+  async scheduleModelUnload(delayMs: number): Promise<void> {
+    if (this.unloadTimer) {
+      clearTimeout(this.unloadTimer);
+    }
+    
+    this.unloadTimer = setTimeout(async () => {
+      this.unloadTimer = null;
+      try {
+        await this.llamaRnAdapter.releaseContext();
+        const store = useAIStore.getState();
+        store.setRuntimeModelLoaded(false, await this.llamaRnAdapter.getRuntimeInfo());
+        store.setRuntimeState('model-unloaded'); // or idle/unloaded
+        store.markRuntimeReady(false);
+      } catch (err) {
+        console.error('Failed to automatically unload model context', err);
+      }
+    }, delayMs);
+  }
 
   async startGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
     const settings = useSettingsStore.getState();

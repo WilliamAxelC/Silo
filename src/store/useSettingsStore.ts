@@ -4,8 +4,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
-import { EXTERNAL_API_PRESETS, GGUF_QUANTIZATION_PRESETS } from '../features/transactions/constants';
-import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, GGUFQuantizationTier } from '../features/transactions/types';
+import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
+import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, OcrEngineId } from '../features/transactions/types';
 import { useAIStore } from './useAIStore';
 
 interface SettingsState extends AppSettings {
@@ -19,9 +19,9 @@ interface SettingsState extends AppSettings {
   setShowIncomeInReportsFirst: (enabled: boolean) => Promise<void>;
   setFontScale: (fontScale: number) => Promise<void>;
   setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
-  setAiModelQuantization: (quantization: GGUFQuantizationTier) => Promise<void>;
+  setActiveModelId: (modelId: string) => Promise<void>;
+  setOcrEngineId: (ocrEngineId: OcrEngineId) => Promise<void>;
   setAiWifiOnlyDownload: (enabled: boolean) => Promise<void>;
-  setAiAutoQuantizationFallback: (enabled: boolean) => Promise<void>;
   setExternalApiProvider: (provider: ExternalAPIProvider) => Promise<void>;
   setExternalApiUrl: (url: string) => Promise<void>;
   setExternalApiModel: (model: string) => Promise<void>;
@@ -65,8 +65,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       isDarkMode: deriveIsDarkMode(parsed.themeMode),
       isLoaded: true,
     });
-    const preset = GGUF_QUANTIZATION_PRESETS[parsed.aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
-    useAIStore.getState().setLocalModelTarget(preset.assetVersion, preset.label);
+    const preset = MODEL_CATALOG[parsed.activeModelId] || MODEL_CATALOG['qwen3.5-2b'];
+    useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
   },
 
   setThemeMode: async (themeMode) => {
@@ -99,26 +99,26 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set({ fontScale });
   },
 
+  setOcrEngineId: async (ocrEngineId) => {
+    await saveSetting('ocrEngineId', ocrEngineId);
+    set({ ocrEngineId });
+  },
+
   setAiInferenceMode: async (aiInferenceMode) => {
     await saveSetting('aiInferenceMode', aiInferenceMode);
     set({ aiInferenceMode });
   },
 
-  setAiModelQuantization: async (aiModelQuantization) => {
-    await saveSetting('aiModelQuantization', aiModelQuantization);
-    set({ aiModelQuantization });
-    const preset = GGUF_QUANTIZATION_PRESETS[aiModelQuantization] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
-    useAIStore.getState().setLocalModelTarget(preset.assetVersion, preset.label);
+  setActiveModelId: async (activeModelId) => {
+    await saveSetting('activeModelId', activeModelId);
+    set({ activeModelId });
+    const preset = MODEL_CATALOG[activeModelId] || MODEL_CATALOG['qwen3.5-2b'];
+    useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
   },
 
   setAiWifiOnlyDownload: async (aiWifiOnlyDownload) => {
     await saveSetting('aiWifiOnlyDownload', aiWifiOnlyDownload);
     set({ aiWifiOnlyDownload });
-  },
-
-  setAiAutoQuantizationFallback: async (aiAutoQuantizationFallback) => {
-    await saveSetting('aiAutoQuantizationFallback', aiAutoQuantizationFallback);
-    set({ aiAutoQuantizationFallback });
   },
 
   setExternalApiProvider: async (externalApiProvider) => {

@@ -249,10 +249,25 @@ export const AddTransactionScreen = () => {
     setIsScanning(true);
 
     try {
-      const { provisioning, runtimeReady, warmupPending, runtime } = useAIStore.getState();
-      const { canRunNativeChat } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
-      if (!canRunNativeChat || !uri) {
-        Alert.alert('Setup Required', 'AI runtime is not ready. Please check your local model setup or External API settings before scanning receipts.');
+      if (!uri) {
+        return;
+      }
+      
+      const { provisioning } = useAIStore.getState();
+      if (provisioning.status === 'not-installed') {
+        Alert.alert(
+          'Setup Required',
+          'AI runtime is not installed. Please set up an AI model first.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Manage AI Settings',
+              onPress: () => {
+                navigation.navigate('Settings' as any);
+              },
+            },
+          ]
+        );
         return;
       }
 
@@ -285,7 +300,13 @@ export const AddTransactionScreen = () => {
           if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
         }
       } else {
-        Alert.alert('Scan Failed', 'Receipt scanning is not wired to the local runtime in this build yet. Capture the image and enter the details manually.');
+        Alert.alert('Scan Failed', 'The AI failed to format the extracted text. Capture the image and enter the details manually.');
+      }
+    } catch (e: any) {
+      if (e.message === 'NO_TEXT_DETECTED') {
+        Alert.alert('No Text Detected', 'The image doesn\'t appear to contain readable text. Try retaking the photo in better lighting.');
+      } else {
+        Alert.alert('Scan Failed', 'An error occurred during receipt processing.');
       }
     } finally {
       setIsScanning(false);

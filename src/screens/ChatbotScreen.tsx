@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Keyboard } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 
@@ -143,15 +143,21 @@ export const ChatbotScreen = () => {
   const isLoading = serviceSnapshot.isGenerating;
   const loadingStatus = serviceSnapshot.generationStatus;
 
-  useEffect(() => {
-    if (selectedMode !== 'chat' || aiInferenceMode !== 'local') {
-      chatRuntimePreloadService.clearRequest();
-      return;
-    }
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
 
-    setChatRuntimeRequested(true);
-    void chatRuntimePreloadService.requestPreload();
-  }, [chatRuntimePreloadService, selectedMode, aiInferenceMode]);
+      if (selectedMode === 'chat' && aiInferenceMode === 'local') {
+        setChatRuntimeRequested(true);
+        void chatRuntimePreloadService.requestPreload();
+      }
+
+      return () => {
+        active = false;
+        generationService.scheduleModelUnload(30000); // 30 seconds
+      };
+    }, [chatRuntimePreloadService, selectedMode, aiInferenceMode, generationService])
+  );
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
@@ -203,13 +209,30 @@ export const ChatbotScreen = () => {
     }
 
     if (!runtime.activeGenerationRequestId) {
-      updateChatMessage(pendingId, (message) => ({
-        ...message,
-        status: message.status === 'cancelled' || message.status === 'error' ? message.status : 'complete',
-      }));
+      updateChatMessage(pendingId, (message) => {
+        let finalStatus: 'cancelled' | 'error' | 'complete' | 'streaming' | undefined = message.status === 'cancelled' || message.status === 'error' ? message.status : 'complete';
+        let finalText = message.text;
+        
+        if (finalStatus === 'complete' && !message.text) {
+           finalStatus = 'error';
+           finalText = 'Generation failed to return any text.';
+        }
+        
+        return {
+          ...message,
+          text: finalText,
+          status: finalStatus,
+        };
+      });
       pendingAssistantMessageIdRef.current = null;
     }
   }, [runtime.activeGenerationRequestId, runtime.streamingResponseText, updateChatMessage]);
+
+  useEffect(() => {
+    return () => {
+      pendingAssistantMessageIdRef.current = null;
+    };
+  }, []);
 
   const progressPercent = useMemo(() => {
     if (provisioning.totalBytes && provisioning.totalBytes > 0) {
@@ -270,11 +293,13 @@ export const ChatbotScreen = () => {
   }, [provisioning.transfer.bytesPerSecond]);
 
   const handleProvisionAction = async () => {
-    const manager = getModelLifecycleManager();
-
     try {
-      if (canStartOrRetryProvisioning) {
-        await manager.retryProvisioning();
+      if (provisioning.status === 'not-installed') {
+        navigation.navigate('Settings');
+        return;
+      }
+      if (['failed', 'update-available'].includes(provisioning.status)) {
+        await getModelLifecycleManager().retryProvisioning();
       }
     } catch (error) {
       Alert.alert('AI Setup', getErrorMessage(error, 'Unable to continue model setup.'));
@@ -353,7 +378,8 @@ export const ChatbotScreen = () => {
   };
 
   const showChatRuntimeGate = aiMode === 'chat' && chatRuntimeRequested && (!canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning);
-  const chatRuntimeActionLabel = canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
+  const isNotInstalled = provisioning.status === 'not-installed';
+  const chatRuntimeActionLabel = isNotInstalled ? 'Set Up AI Model' : canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
   const inlineModelStatusLabel = aiInferenceMode === 'external'
     ? 'External API'

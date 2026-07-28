@@ -12,9 +12,9 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
-import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider, GGUFQuantizationTier } from '../features/transactions/types';
-import { EXTERNAL_API_PRESETS, GGUF_QUANTIZATION_PRESETS } from '../features/transactions/constants';
-import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
+import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
+import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
+import { getModelLifecycleManager, checkModelExists } from '../services/ai/modelLifecycle';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 
 const THEME_OPTIONS: ThemeMode[] = ['system', 'light', 'dark'];
@@ -38,9 +38,8 @@ export const SettingsScreen = () => {
     externalApiUrl,
     externalApiModel,
     externalApiKey,
-    aiModelQuantization,
+    activeModelId,
     aiWifiOnlyDownload,
-    aiAutoQuantizationFallback,
     setThemeMode,
     setCurrencyCode,
     setUseThousandsSeparator,
@@ -52,9 +51,10 @@ export const SettingsScreen = () => {
     setExternalApiUrl,
     setExternalApiModel,
     setExternalApiKey,
-    setAiModelQuantization,
+    setActiveModelId,
+    ocrEngineId,
+    setOcrEngineId,
     setAiWifiOnlyDownload,
-    setAiAutoQuantizationFallback,
   } = useSettingsStore();
   const {
     provisioning,
@@ -79,6 +79,19 @@ export const SettingsScreen = () => {
   const [categoryType, setCategoryType] = useState<CategoryType>('expense');
   const [editingCategory, setEditingCategory] = useState<CategoryRecord | null>(null);
   const [isAiActionLoading, setIsAiActionLoading] = useState(false);
+  const [downloadedModels, setDownloadedModels] = useState<Record<string, boolean>>({});
+
+  React.useEffect(() => {
+    const checkModels = async () => {
+      const results: Record<string, boolean> = {};
+      for (const modelId of Object.keys(MODEL_CATALOG)) {
+        const preset = MODEL_CATALOG[modelId];
+        results[modelId] = await checkModelExists(preset.fileName, 'v1');
+      }
+      setDownloadedModels(results);
+    };
+    checkModels();
+  }, []);
 
   const expenseCategories = useMemo(() => getCategoriesByType('expense'), [categories, getCategoriesByType]);
   const incomeCategories = useMemo(() => getCategoriesByType('income'), [categories, getCategoriesByType]);
@@ -452,6 +465,53 @@ export const SettingsScreen = () => {
           </TouchableOpacity>
         </View>
 
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>Receipt Scanning</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.rowBlock}>
+            <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>OCR Engine</Text>
+            <View style={[styles.optionRowCompact, { marginTop: 8 }]}>
+              {(['mlkit', 'paddleocr', 'external'] as const).map((engine) => (
+                <TouchableOpacity
+                  key={engine}
+                  style={[
+                    styles.optionChip,
+                    { marginBottom: 0, marginRight: 8 },
+                    ocrEngineId === engine
+                      ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                      : { backgroundColor: theme.background, borderColor: theme.border },
+                  ]}
+                  onPress={() => setOcrEngineId(engine)}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      { color: ocrEngineId === engine ? '#fff' : theme.textMuted },
+                    ]}
+                  >
+                    {engine === 'mlkit' ? 'ML Kit (Google)' : engine === 'paddleocr' ? 'PaddleOCR' : 'External'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="camera-outline" size={18} color={theme.text} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Pipeline Mode</Text>
+            </View>
+            <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>OCR + Text LLM</Text>
+          </View>
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="images-outline" size={18} color={theme.textMuted} />
+              <Text style={[styles.rowText, { color: theme.textMuted }, textScale]}>Multimodal Vision</Text>
+            </View>
+            <Text style={[styles.subText, { color: theme.textMuted }, captionScale]}>Coming Soon</Text>
+          </View>
+        </View>
+
         <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>AI Assistant</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.row}>
@@ -580,30 +640,42 @@ export const SettingsScreen = () => {
               </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.rowBlock}>
-                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Quantization Tier</Text>
-                <View style={[styles.optionRowCompact, { marginTop: 8, flexWrap: 'wrap', gap: 6 }]}>
-                  {(Object.keys(GGUF_QUANTIZATION_PRESETS) as GGUFQuantizationTier[]).map((tierKey) => {
-                    const preset = GGUF_QUANTIZATION_PRESETS[tierKey];
-                    const isSelected = aiModelQuantization === tierKey;
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Active Model</Text>
+                <View style={{ marginTop: 8, flexDirection: 'column', gap: 10 }}>
+                  {Object.keys(MODEL_CATALOG).map((modelId) => {
+                    const preset = MODEL_CATALOG[modelId];
+                    const isSelected = activeModelId === modelId;
+                    const isDownloaded = downloadedModels[modelId];
+                    const reqRamGB = Math.round(preset.requiredRamBytes / (1024 * 1024 * 1024) * 10) / 10;
+                    const recRamGB = Math.round(preset.recommendedRamBytes / (1024 * 1024 * 1024) * 10) / 10;
+                    const sizeGB = Math.round((preset.fileSizeBytes / (1024 * 1024 * 1024)) * 10) / 10;
                     return (
                       <TouchableOpacity
-                        key={tierKey}
+                        key={modelId}
                         style={[
-                          styles.optionChip,
-                          { marginBottom: 4, marginRight: 0 },
+                          { borderWidth: 1, borderRadius: 12, padding: 12 },
                           isSelected
-                            ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                            ? { backgroundColor: theme.primary + '11', borderColor: theme.primary }
                             : { backgroundColor: theme.background, borderColor: theme.border },
                         ]}
-                        onPress={() => setAiModelQuantization(tierKey)}
+                        onPress={() => setActiveModelId(modelId)}
                       >
-                        <Text
-                          style={[
-                            styles.optionChipText,
-                            { color: isSelected ? '#fff' : theme.text },
-                          ]}
-                        >
-                          {preset.shortLabel} (~{Math.round((preset.sizeBytesEstimate / (1024 * 1024 * 1024)) * 10) / 10} GB)
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <Text style={[{ fontWeight: '700' }, textScale, { color: isSelected ? theme.primary : theme.text }]}>
+                            {preset.displayName} {isDownloaded && !isSelected ? '✓ (Downloaded)' : ''}
+                          </Text>
+                          <Text style={[{ fontWeight: '600' }, captionScale, { color: theme.textMuted }]}>
+                            ~{sizeGB} GB
+                          </Text>
+                        </View>
+                        <Text style={[{ color: theme.textMuted, marginBottom: 4 }, captionScale]}>
+                          {preset.description}
+                        </Text>
+                        <Text style={[{ color: theme.text, fontWeight: '600' }, captionScale]}>
+                          Capabilities: {preset.capabilities.join(', ')}
+                        </Text>
+                        <Text style={[{ color: theme.textMuted }, captionScale]}>
+                          RAM: {reqRamGB} GB req / {recRamGB} GB rec
                         </Text>
                       </TouchableOpacity>
                     );
@@ -619,16 +691,6 @@ export const SettingsScreen = () => {
                   </View>
                 </View>
                 <Switch value={aiWifiOnlyDownload} onValueChange={setAiWifiOnlyDownload} trackColor={{ false: '#767577', true: theme.primary }} />
-              </View>
-              <View style={[styles.divider, { backgroundColor: theme.border }]} />
-              <View style={styles.row}>
-                <View style={styles.rowContent}>
-                  <View style={styles.rowLeft}>
-                    <Ionicons name="shield-checkmark-outline" size={18} color={theme.text} />
-                    <Text style={[styles.rowText, { color: theme.text }, textScale]}>Auto-Downgrade on OOM</Text>
-                  </View>
-                </View>
-                <Switch value={aiAutoQuantizationFallback} onValueChange={setAiAutoQuantizationFallback} trackColor={{ false: '#767577', true: theme.primary }} />
               </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.row}>

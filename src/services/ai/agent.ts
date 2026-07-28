@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
 import { getGenerationService } from './generationService';
-import { defaultOcrEngine } from '../ocr/MlKitEngine';
+import { getOcrEngine } from '../ocr/index';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -972,11 +972,15 @@ export const analyzeReceiptImage = async (imageUri?: string, base64Image?: strin
   if (!imageUri) return null;
   
   // 1. Run local OCR
-  const ocrResult = await defaultOcrEngine.processImage(imageUri);
+  const engineId = useSettingsStore.getState().ocrEngineId;
+  const ocrEngine = getOcrEngine(engineId);
+  const ocrResult = await ocrEngine.processImage(imageUri);
   if (!ocrResult.success || !ocrResult.rawText) {
-    return null;
+    throw new Error('NO_TEXT_DETECTED');
   }
   
+  await ensureLocalRuntimeReady();
+
   // 2. Extract entities via LLM
   const prompt = `You are a financial receipt parser.
 Extract the following information from the OCR text below:
@@ -1017,6 +1021,8 @@ JSON RESPONSE:`;
     return {
       totalAmount: ocrResult.extractedTotal || undefined,
     };
+  } finally {
+    getGenerationService().scheduleModelUnload(10000); // Unload after 10 seconds of idle
   }
   
   return null;

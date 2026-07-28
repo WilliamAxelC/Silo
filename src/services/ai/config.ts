@@ -1,19 +1,18 @@
 import type { LocalRuntimeInfo } from './localInferenceTypes';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { GGUF_QUANTIZATION_PRESETS } from '../../features/transactions/constants';
-import type { GGUFQuantizationTier } from '../../features/transactions/types';
+import { MODEL_CATALOG } from '../../features/transactions/constants';
 
-export function getActiveModelConfig(tier?: GGUFQuantizationTier) {
-  const selectedTier = tier ?? useSettingsStore.getState().aiModelQuantization ?? 'Q5_K_M';
-  const preset = GGUF_QUANTIZATION_PRESETS[selectedTier] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
+export function getActiveModelConfig(modelId?: string) {
+  const selectedModelId = modelId ?? useSettingsStore.getState().activeModelId ?? 'qwen3.5-2b';
+  const preset = MODEL_CATALOG[selectedModelId] || MODEL_CATALOG['qwen3.5-2b'];
   return {
-    tier: selectedTier,
-    version: preset.assetVersion,
+    modelId: preset.id,
+    version: preset.id,
     fileName: preset.fileName,
     downloadUrl: preset.downloadUrl,
     sha256: preset.sha256,
     minFreeSpaceBytes: preset.minFreeSpaceBytes,
-    displayName: preset.label,
+    displayName: preset.displayName,
   };
 }
 

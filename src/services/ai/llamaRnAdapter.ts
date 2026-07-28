@@ -414,6 +414,10 @@ class LlamaRnAdapter {
     await this.context.stopCompletion();
   }
 
+  async releaseContext(): Promise<void> {
+    await this.dispose();
+  }
+
   async dispose(): Promise<void> {
     this.activeCompletionRequestId = null;
     this.stoppingRequestId = null;
