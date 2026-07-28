@@ -5,7 +5,7 @@ import { Alert } from 'react-native';
 export const IS_NATIVE_OCR_SUPPORTED = Constants.appOwnership !== 'expo'; 
 
 // Manual override: switch to 'false' when you build your native client
-export const FORCE_DISABLE_OCR = true; 
+export const FORCE_DISABLE_OCR = false; 
 
 export const scanReceiptNative = async (imageUri: string): Promise<string | null> => {
   if (FORCE_DISABLE_OCR || !IS_NATIVE_OCR_SUPPORTED) {

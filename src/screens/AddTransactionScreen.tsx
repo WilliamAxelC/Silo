@@ -14,7 +14,7 @@ import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/ty
 import { analyzeReceiptImage } from '../services/ai/agent';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
-import { useAIStore } from '../store/useAIStore';
+import { useAIStore, getAIRuntimeAvailability } from '../store/useAIStore';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -249,13 +249,13 @@ export const AddTransactionScreen = () => {
     setIsScanning(true);
 
     try {
-      const isLocalAiReady = provisioning.status === 'ready' && runtimeReady && !warmupPending;
-      if (!isLocalAiReady || !base64String) {
-        Alert.alert('Setup Required', 'Offline AI is still preparing on this device. Finish local model setup in Settings before scanning receipts.');
+      const { canRunNativeChat } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
+      if (!canRunNativeChat || !uri) {
+        Alert.alert('Setup Required', 'AI runtime is not ready. Please check your local model setup or External API settings before scanning receipts.');
         return;
       }
 
-      const parsedData = await analyzeReceiptImage();
+      const parsedData = await analyzeReceiptImage(uri, base64String);
 
       if (parsedData) {
         if (parsedData.merchantName) setTitle(parsedData.merchantName);

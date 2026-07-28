@@ -103,4 +103,4 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 - [x] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated out-of-memory failures during model initialization.
 
 - [ ] Add some test cases for LLM inference.
-- [ ] Implement Local Bill OCR Capabilities, be it by MLKit or PaddleOCR. The results of the OCR will then have the data extracted by an LLM to automatically create transactions.
+- [x] Implement Local Bill OCR Capabilities, be it by MLKit or PaddleOCR. The results of the OCR will then have the data extracted by an LLM to automatically create transactions.

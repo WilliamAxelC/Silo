@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
+import { getGenerationService } from './generationService';
+import { defaultOcrEngine } from '../ocr/MlKitEngine';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -941,6 +943,56 @@ export interface ParsedReceiptResult {
   date?: string;
 }
 
-export const analyzeReceiptImage = async (): Promise<ParsedReceiptResult | null> => {
+export const analyzeReceiptImage = async (imageUri?: string, base64Image?: string): Promise<ParsedReceiptResult | null> => {
+  if (!imageUri) return null;
+  
+  // 1. Run local OCR
+  const ocrResult = await defaultOcrEngine.processImage(imageUri);
+  if (!ocrResult.success || !ocrResult.rawText) {
+    return null;
+  }
+  
+  // 2. Extract entities via LLM
+  const prompt = `You are a financial receipt parser.
+Extract the following information from the OCR text below:
+- merchantName: Name of the store or merchant.
+- totalAmount: The total cost as a number.
+- category: A short category (e.g. "Food", "Transport", "Groceries").
+- date: Date of the receipt in YYYY-MM-DD format.
+- lineItemsText: A brief comma-separated list of items bought.
+
+Return ONLY a valid JSON object matching these keys. If a value is missing, omit the key or use null.
+
+OCR TEXT:
+${ocrResult.rawText}
+
+JSON RESPONSE:`;
+
+  try {
+    const responseText = await getGenerationService().startGeneration({ 
+      prompt, 
+      mode: 'chat' // chat mode gives it general reasoning capability
+    });
+    
+    // Attempt to extract JSON from the response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsedData = JSON.parse(jsonMatch[0]);
+      return {
+        merchantName: parsedData.merchantName || ocrResult.extractedMerchant || undefined,
+        totalAmount: typeof parsedData.totalAmount === 'number' ? parsedData.totalAmount : ocrResult.extractedTotal || undefined,
+        category: parsedData.category,
+        lineItemsText: parsedData.lineItemsText,
+        date: parsedData.date,
+      };
+    }
+  } catch (error) {
+    console.error("LLM Extraction Error:", error);
+    // Fallback to basic OCR data if LLM fails
+    return {
+      totalAmount: ocrResult.extractedTotal || undefined,
+    };
+  }
+  
   return null;
 };
