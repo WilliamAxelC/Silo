@@ -26,6 +26,9 @@ interface SettingsState extends AppSettings {
   setExternalApiUrl: (url: string) => Promise<void>;
   setExternalApiModel: (model: string) => Promise<void>;
   setExternalApiKey: (apiKey: string) => Promise<void>;
+  setExternalApiCustomHeaders: (headers: string) => Promise<void>;
+  setLocalSystemPrompt: (prompt: string) => Promise<void>;
+  setExternalSystemPrompt: (prompt: string) => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
@@ -143,5 +146,20 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setExternalApiKey: async (externalApiKey) => {
     await saveSetting('externalApiKey', externalApiKey);
     set({ externalApiKey });
+  },
+
+  setExternalApiCustomHeaders: async (externalApiCustomHeaders) => {
+    await saveSetting('externalApiCustomHeaders', externalApiCustomHeaders);
+    set({ externalApiCustomHeaders });
+  },
+
+  setLocalSystemPrompt: async (localSystemPrompt) => {
+    await saveSetting('localSystemPrompt', localSystemPrompt);
+    set({ localSystemPrompt });
+  },
+
+  setExternalSystemPrompt: async (externalSystemPrompt) => {
+    await saveSetting('externalSystemPrompt', externalSystemPrompt);
+    set({ externalSystemPrompt });
   },
 }));

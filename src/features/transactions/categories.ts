@@ -86,6 +86,9 @@ export function getInitialAppSettings(): AppSettings {
     externalApiUrl: DEFAULT_APP_SETTINGS.externalApiUrl,
     externalApiModel: DEFAULT_APP_SETTINGS.externalApiModel,
     externalApiKey: DEFAULT_APP_SETTINGS.externalApiKey,
+    externalApiCustomHeaders: DEFAULT_APP_SETTINGS.externalApiCustomHeaders,
+    localSystemPrompt: DEFAULT_APP_SETTINGS.localSystemPrompt,
+    externalSystemPrompt: DEFAULT_APP_SETTINGS.externalSystemPrompt,
   };
 }
 
@@ -145,6 +148,15 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.externalApiKey:
         base.externalApiKey = row.value ?? DEFAULT_APP_SETTINGS.externalApiKey;
+        break;
+      case APP_SETTING_KEYS.externalApiCustomHeaders:
+        base.externalApiCustomHeaders = row.value ?? DEFAULT_APP_SETTINGS.externalApiCustomHeaders;
+        break;
+      case APP_SETTING_KEYS.localSystemPrompt:
+        base.localSystemPrompt = row.value ?? DEFAULT_APP_SETTINGS.localSystemPrompt;
+        break;
+      case APP_SETTING_KEYS.externalSystemPrompt:
+        base.externalSystemPrompt = row.value ?? DEFAULT_APP_SETTINGS.externalSystemPrompt;
         break;
       default:
         break;

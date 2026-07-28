@@ -183,7 +183,9 @@ export function getAIRuntimeAvailability(
 
   const runtimePhaseActive = state.warmupPending || AI_RUNTIME_PHASE_STATUSES.includes(state.provisioning.status);
   const availability = state.runtime.availability;
-  const hasUsableLocalInferenceBackend = availability.available;
+  
+  const isMemoryCriticallyLow = (state.runtime.runtimeInfo?.totalRamBytes ?? Infinity) < 3 * 1024 * 1024 * 1024;
+  const hasUsableLocalInferenceBackend = availability.available && !isMemoryCriticallyLow;
   const canRunNativeChat =
     hasUsableLocalInferenceBackend &&
     state.provisioning.status === 'ready' &&

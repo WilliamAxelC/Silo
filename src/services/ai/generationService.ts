@@ -13,7 +13,7 @@ import {
   QWEN_MODEL_STOP_TOKENS,
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
-import { useAIStore } from '../../store/useAIStore';
+import { useAIStore, getAIRuntimeAvailability } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import {
   LocalInferenceException,
@@ -274,6 +274,14 @@ class GenerationService {
       return this.startExternalGeneration({ prompt, mode });
     }
 
+    const state = useAIStore.getState();
+    const availability = getAIRuntimeAvailability(state);
+
+    if (!availability.hasUsableLocalInferenceBackend && settings.externalApiUrl && settings.externalApiModel) {
+      console.log('Local backend unavailable (e.g. low memory or crash), failing over to external API...');
+      return this.startExternalGeneration({ prompt, mode });
+    }
+
     const requestStartedAtMs = Date.now();
     this.setState({
       isGenerating: true,
@@ -465,6 +473,19 @@ class GenerationService {
       xhr.setRequestHeader('Content-Type', 'application/json');
       if (apiKey) {
         xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
+      }
+
+      if (settings.externalApiCustomHeaders) {
+        try {
+          const customHeaders = JSON.parse(settings.externalApiCustomHeaders);
+          if (typeof customHeaders === 'object' && customHeaders !== null) {
+            Object.entries(customHeaders).forEach(([headerKey, headerVal]) => {
+              xhr.setRequestHeader(headerKey, String(headerVal));
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to parse externalApiCustomHeaders', e);
+        }
       }
 
       xhr.onprogress = () => {

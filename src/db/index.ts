@@ -17,7 +17,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 6;
+const DB_SCHEMA_VERSION = 7;
 
 function createBaseSchema() {
   expoDb.execSync(`
@@ -184,6 +184,38 @@ function migrateToVersion6() {
   recreateAITransactionsView();
 }
 
+function migrateToVersion7() {
+  expoDb.execSync(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS transactions_fts USING fts5(
+      merchantName,
+      note,
+      lineItemsText,
+      content='transactions',
+      content_rowid='id'
+    );
+    
+    CREATE TRIGGER IF NOT EXISTS transactions_ai AFTER INSERT ON transactions BEGIN
+      INSERT INTO transactions_fts(rowid, merchantName, note, lineItemsText)
+      VALUES (new.id, new.merchant_name, new.note, new.line_items_text);
+    END;
+    
+    CREATE TRIGGER IF NOT EXISTS transactions_ad AFTER DELETE ON transactions BEGIN
+      INSERT INTO transactions_fts(transactions_fts, rowid, merchantName, note, lineItemsText)
+      VALUES ('delete', old.id, old.merchant_name, old.note, old.line_items_text);
+    END;
+    
+    CREATE TRIGGER IF NOT EXISTS transactions_au AFTER UPDATE ON transactions BEGIN
+      INSERT INTO transactions_fts(transactions_fts, rowid, merchantName, note, lineItemsText)
+      VALUES ('delete', old.id, old.merchant_name, old.note, old.line_items_text);
+      INSERT INTO transactions_fts(rowid, merchantName, note, lineItemsText)
+      VALUES (new.id, new.merchant_name, new.note, new.line_items_text);
+    END;
+    
+    -- Rebuild the index from existing data
+    INSERT INTO transactions_fts(transactions_fts) VALUES('rebuild');
+  `);
+}
+
 function runMigrations() {
   createBaseSchema();
 
@@ -208,6 +240,10 @@ function runMigrations() {
 
   if (currentVersion < 6) {
     migrateToVersion6();
+  }
+
+  if (currentVersion < 7) {
+    migrateToVersion7();
   }
 
   seedDefaultSettings();

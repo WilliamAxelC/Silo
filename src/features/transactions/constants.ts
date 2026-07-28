@@ -133,6 +133,9 @@ export const DEFAULT_APP_SETTINGS = {
   externalApiUrl: 'https://api.openai.com/v1',
   externalApiModel: 'gpt-4o-mini',
   externalApiKey: '',
+  externalApiCustomHeaders: '{}',
+  localSystemPrompt: '',
+  externalSystemPrompt: '',
 } as const;
 
 export const APP_SETTING_KEYS = {
@@ -150,4 +153,7 @@ export const APP_SETTING_KEYS = {
   externalApiUrl: 'externalApiUrl',
   externalApiModel: 'externalApiModel',
   externalApiKey: 'externalApiKey',
+  externalApiCustomHeaders: 'externalApiCustomHeaders',
+  localSystemPrompt: 'localSystemPrompt',
+  externalSystemPrompt: 'externalSystemPrompt',
 } as const;

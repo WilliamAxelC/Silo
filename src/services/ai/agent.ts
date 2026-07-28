@@ -157,14 +157,37 @@ function scoreCandidate(userPrompt: string, haystack: string) {
 }
 
 export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[] {
-  const recentTransactions = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
-    `SELECT transaction_id, merchant_name, total_amount, category, date, note
-     FROM ai_transactions_view
-     ORDER BY date DESC
-     LIMIT 40`,
-  );
+  // Use FTS5 to find matches if possible.
+  const keywords = userPrompt.replace(/[^\w\s]/g, ' ').trim().split(/\s+/).filter(w => w.length > 2);
+  const matchQuery = keywords.length > 0 ? keywords.map(w => `"${w}"*`).join(' OR ') : '';
 
-  const contextItems: RetrievedContextItem[] = recentTransactions
+  let ftsResults: any[] = [];
+  if (matchQuery) {
+    try {
+      ftsResults = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
+        `SELECT v.transaction_id, v.merchant_name, v.total_amount, v.category, v.date, v.note
+         FROM transactions_fts fts
+         JOIN ai_transactions_view v ON fts.rowid = v.transaction_id
+         WHERE transactions_fts MATCH ?
+         ORDER BY rank
+         LIMIT 20`,
+        [matchQuery]
+      );
+    } catch (e) {
+      console.warn('FTS query failed, falling back to manual scoring.', e);
+    }
+  }
+
+  if (ftsResults.length === 0) {
+    ftsResults = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
+      `SELECT transaction_id, merchant_name, total_amount, category, date, note
+       FROM ai_transactions_view
+       ORDER BY date DESC
+       LIMIT 40`,
+    );
+  }
+
+  const contextItems: RetrievedContextItem[] = ftsResults
     .map((row) => {
       const content = `${row.merchant_name || 'Unknown merchant'} ${row.category || 'Uncategorized'} ${formatCurrency(row.total_amount)} ${new Date(row.date).toLocaleDateString('en-GB')} ${row.note ?? ''}`;
       return {
@@ -172,7 +195,7 @@ export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[
         kind: 'transaction' as const,
         label: row.merchant_name || 'Unknown merchant',
         content,
-        score: scoreCandidate(userPrompt, content),
+        score: matchQuery ? 100 : scoreCandidate(userPrompt, content), // FTS matches get static high score
       };
     })
     .filter((item) => item.score > 0)
@@ -443,7 +466,7 @@ function buildFallbackChatPrompt(userPrompt: string, chatHistory: Message[], sys
     .join('\n\n');
 }
 
-function buildGroundedPrompt(userPrompt: string, retrievedContext: RetrievedContextItem[]) {
+function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], baseSystemPrompt: string) {
   const contextBlock = trimCollapsedText(
     retrievedContext
       .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT)
@@ -452,29 +475,33 @@ function buildGroundedPrompt(userPrompt: string, retrievedContext: RetrievedCont
     QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
   );
   return [
-    'You are Silo AI, a local-only finance assistant running entirely on-device.',
+    baseSystemPrompt,
     'Answer only from the grounded local finance facts below.',
     'If the facts are insufficient, say that you do not have enough local evidence.',
     `Grounded local facts:\n${contextBlock}`,
-    `User question: ${trimCollapsedText(userPrompt, 500)}`,
     'Respond in 3 short paragraphs or fewer.',
   ].join('\n\n');
 }
 
 export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state: ReturnType<typeof useAIStore.getState>, retrievedContext?: RetrievedContextItem[]) {
   const runtimeInfo = state.runtime.runtimeInfo;
-  const systemPrompt = [
+  const customSystemPrompt = useSettingsStore.getState().localSystemPrompt;
+  const defaultSystemPrompt = [
     'You are Silo AI, an offline finance assistant running locally on this Android device.',
     'Be concise, practical, and honest about uncertainty.',
     'Do not invent balances, transactions, or categories that are not present in the local app data.',
     'For exact numeric finance queries, the app handles deterministic answers before you are called.',
   ].join(' ');
+  
+  let systemPrompt = customSystemPrompt || defaultSystemPrompt;
+  
+  if (mode === 'rag' && retrievedContext) {
+    systemPrompt = buildGroundedSystemPrompt(retrievedContext, systemPrompt);
+  }
 
-  const rawPrompt = mode === 'rag' && retrievedContext
-    ? buildGroundedPrompt(userPrompt, retrievedContext)
-    : supportsQwenChatTemplate(runtimeInfo)
-      ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt)
-      : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt);
+  const rawPrompt = supportsQwenChatTemplate(runtimeInfo)
+    ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt)
+    : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt);
 
   return supportsQwenChatTemplate(runtimeInfo)
     ? trimPreservedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS)
@@ -492,13 +519,13 @@ export function buildExternalMessagesForMode(
   state: ReturnType<typeof useAIStore.getState>,
   retrievedContext?: RetrievedContextItem[],
 ): ExternalChatMessage[] {
-  const systemPrompt = [
+  const customSystemPrompt = useSettingsStore.getState().externalSystemPrompt;
+  const defaultSystemPrompt = [
     'You are Silo AI, a helpful and intelligent personal finance assistant.',
     'Be concise, practical, and honest about uncertainty.',
     'Do not invent balances, transactions, or categories that are not present in the provided app data.',
   ].join(' ');
-
-  const messages: ExternalChatMessage[] = [];
+  let systemPrompt = customSystemPrompt || defaultSystemPrompt;
 
   if (mode === 'rag' && retrievedContext) {
     const contextBlock = trimCollapsedText(
@@ -508,23 +535,21 @@ export function buildExternalMessagesForMode(
         .join('\n'),
       QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
     );
-    messages.push({
-      role: 'system',
-      content: `${systemPrompt}\n\nAnswer only from the grounded local finance facts below. If the facts are insufficient, say that you do not have enough evidence.\n\nGrounded finance facts:\n${contextBlock}`,
-    });
-    messages.push({ role: 'user', content: userPrompt });
-  } else {
-    const { activeTurns, summaryText } = manageContextWindow(state.chatHistory);
-    const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
-    messages.push({ role: 'system', content: effectiveSystemPrompt });
-    activeTurns.forEach((msg) => {
-      messages.push({
-        role: msg.role === 'user' ? 'user' : 'assistant',
-        content: msg.text,
-      });
-    });
-    messages.push({ role: 'user', content: userPrompt });
+    systemPrompt = `${systemPrompt}\n\nAnswer only from the grounded local finance facts below. If the facts are insufficient, say that you do not have enough evidence.\n\nGrounded finance facts:\n${contextBlock}`;
   }
+
+  const messages: ExternalChatMessage[] = [];
+  const { activeTurns, summaryText } = manageContextWindow(state.chatHistory);
+  const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
+  
+  messages.push({ role: 'system', content: effectiveSystemPrompt });
+  activeTurns.forEach((msg) => {
+    messages.push({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.text,
+    });
+  });
+  messages.push({ role: 'user', content: userPrompt });
 
   return messages;
 }

@@ -15,6 +15,38 @@ import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../services/ai/generationService';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { getChatRuntimePreloadService } from '../services/ai/chatRuntimePreloadService';
+import { ChatChart } from '../components/ChatChart';
+
+function parseMessageWithCharts(text: string) {
+  const cleanText = text.replace(/<\/chart>/g, '');
+  const chartRegex = /<chart\s+([^>]+)>/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = chartRegex.exec(cleanText)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'markdown', content: cleanText.substring(lastIndex, match.index) });
+    }
+    
+    const attrString = match[1];
+    const typeMatch = attrString.match(/type=(?:'|")([^'"]+)(?:'|")/);
+    const dataMatch = attrString.match(/data=(?:'|")([^'"]+)(?:'|")/);
+    
+    parts.push({
+      type: 'chart',
+      chartType: typeMatch ? typeMatch[1] : 'bar',
+      chartData: dataMatch ? dataMatch[1] : '[]',
+    });
+    lastIndex = chartRegex.lastIndex;
+  }
+  
+  if (lastIndex < cleanText.length) {
+    parts.push({ type: 'markdown', content: cleanText.substring(lastIndex) });
+  }
+  
+  return parts;
+}
 
 export const ChatbotScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -481,7 +513,13 @@ export const ChatbotScreen = () => {
                   {msg.role === 'user' ? (
                     <Text selectable style={{ fontSize: 16, color: '#fff' }}>{msg.text}</Text>
                   ) : msg.text ? (
-                    <Markdown style={{ body: { fontSize: 16, color: theme.text } }}>{msg.text}</Markdown>
+                    parseMessageWithCharts(msg.text).map((part, partIndex) => (
+                      part.type === 'markdown' ? (
+                        <Markdown key={partIndex} style={{ body: { fontSize: 16, color: theme.text } }}>{part.content}</Markdown>
+                      ) : (
+                        <ChatChart key={partIndex} type={part.chartType!} data={part.chartData!} />
+                      )
+                    ))
                   ) : (
                     <View style={styles.messageLoadingRow}>
                       <ActivityIndicator color={theme.primary} size="small" />

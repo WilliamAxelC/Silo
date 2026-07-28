@@ -47,6 +47,9 @@ export interface AppSettings {
   externalApiUrl: string;
   externalApiModel: string;
   externalApiKey: string;
+  externalApiCustomHeaders: string;
+  localSystemPrompt: string;
+  externalSystemPrompt: string;
 }
 
 export type TransactionInput = Omit<Transaction, 'id'>;
