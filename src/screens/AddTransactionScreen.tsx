@@ -104,6 +104,8 @@ export const AddTransactionScreen = () => {
 
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [sourceModalVisible, setSourceModalVisible] = useState(false);
+  const [sourceModalTarget, setSourceModalTarget] = useState<'attachment' | 'scan' | null>(null);
 
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [customCategory, setCustomCategory] = useState('');
@@ -220,39 +222,29 @@ export const AddTransactionScreen = () => {
   };
 
   const pickImage = async (source: 'gallery' | 'camera') => {
-    const result = source === 'gallery'
-      ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 })
-      : (await ImagePicker.requestCameraPermissionsAsync(), await ImagePicker.launchCameraAsync({ quality: 0.8 }));
-
-    if (!result.canceled) setImageUri(result.assets[0].uri);
-    setImageModalVisible(false);
-  };
-
-  const handleScanReceipt = async () => {
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permission Required', 'Camera access is needed to scan receipts.');
-      return;
+    setSourceModalVisible(false);
+    let result;
+    if (source === 'gallery') {
+      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8, base64: true });
+    } else {
+      await ImagePicker.requestCameraPermissionsAsync();
+      result = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: true });
     }
-
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 0.8,
-      base64: true,
-    });
 
     if (result.canceled || !result.assets || !result.assets[0].uri) return;
 
-    const uri = result.assets[0].uri;
-    const base64String = result.assets[0].base64;
+    if (sourceModalTarget === 'scan') {
+      processScanReceipt(result.assets[0].uri, result.assets[0].base64 || undefined);
+    } else {
+      setImageUri(result.assets[0].uri);
+    }
+  };
 
+  const processScanReceipt = async (uri: string, base64String?: string) => {
     setImageUri(uri);
     setIsScanning(true);
 
     try {
-      if (!uri) {
-        return;
-      }
-      
       const { provisioning } = useAIStore.getState();
       if (provisioning.status === 'not-installed') {
         Alert.alert(
@@ -302,15 +294,26 @@ export const AddTransactionScreen = () => {
       } else {
         Alert.alert('Scan Failed', 'The AI failed to format the extracted text. Capture the image and enter the details manually.');
       }
-    } catch (e: any) {
-      if (e.message === 'NO_TEXT_DETECTED') {
-        Alert.alert('No Text Detected', 'The image doesn\'t appear to contain readable text. Try retaking the photo in better lighting.');
+    } catch (error: any) {
+      console.warn('OCR error:', error);
+      if (error?.message === 'NO_TEXT_DETECTED') {
+        Alert.alert('No Text Detected', 'We couldn\'t find any readable text in the image. Please make sure the receipt is clear and try again.');
       } else {
-        Alert.alert('Scan Failed', 'An error occurred during receipt processing.');
+        Alert.alert('Scan Failed', 'Failed to scan the receipt. Please try again or enter details manually.');
       }
     } finally {
       setIsScanning(false);
     }
+  };
+
+  const openScanSourceModal = () => {
+    setSourceModalTarget('scan');
+    setSourceModalVisible(true);
+  };
+
+  const openAttachmentSourceModal = () => {
+    setSourceModalTarget('attachment');
+    setSourceModalVisible(true);
   };
 
   const buildTransactionPayload = (): TransactionInput => {
@@ -411,7 +414,7 @@ export const AddTransactionScreen = () => {
           </View>
           <TouchableOpacity
             style={[styles.scanButtonCompact, { backgroundColor: theme.primary, opacity: isScanning ? 0.7 : 1 }]}
-            onPress={handleScanReceipt}
+            onPress={openScanSourceModal}
             disabled={isScanning}
           >
             {isScanning ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="scan-outline" size={18} color="#fff" />}
@@ -563,7 +566,7 @@ export const AddTransactionScreen = () => {
         <View style={styles.compactRow}>
           <View style={[styles.fieldCard, styles.flexField]}>
             <Text style={[styles.label, { color: theme.text }]}>Attachment</Text>
-            <TouchableOpacity style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => !imageUri && setImageModalVisible(true)}>
+            <TouchableOpacity style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => !imageUri && openAttachmentSourceModal()}>
               {imageUri ? (
                 <>
                   <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
@@ -597,8 +600,8 @@ export const AddTransactionScreen = () => {
 
       {showPicker && <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />}
 
-      <Modal visible={imageModalVisible} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setImageModalVisible(false)}>
+      <Modal visible={sourceModalVisible} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSourceModalVisible(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Select a Source</Text>
             <View style={styles.modalActions}>
@@ -611,7 +614,7 @@ export const AddTransactionScreen = () => {
                 <Text style={styles.modalBtnText}>Camera</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setImageModalVisible(false)}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setSourceModalVisible(false)}>
               <Text style={[styles.cancelBtnText, { color: theme.expense }]}>Cancel</Text>
             </TouchableOpacity>
           </TouchableOpacity>
