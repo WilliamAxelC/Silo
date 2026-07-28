@@ -88,19 +88,19 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 ## Future Improvements
 
 ### External API Enhancements
-- [ ] Add support for additional authentication schemes and custom headers (e.g., Anthropic Claude API, Google Gemini API).
-- [ ] Implement automatic failover from local on-device inference to External API when device RAM or battery is critically low.
-- [ ] Allow customizable system prompts per inference mode in user settings.
+- [x] Add support for additional authentication schemes and custom headers (e.g., Anthropic Claude API, Google Gemini API).
+- [x] Implement automatic failover from local on-device inference to External API when device RAM or battery is critically low.
+- [x] Allow customizable system prompts per inference mode in user settings.
 
 ### Advanced RAG & Grounding Capabilities
-- [ ] Implement full-text SQLite indexing (FTS5) or vector embeddings for semantic search across transaction histories and receipt OCR text.
-- [ ] Enable multi-turn conversational follow-ups on grounded RAG financial queries.
-- [ ] Support interactive data visualizations and chart rendering directly within chat response bubbles.
+- [x] Implement full-text SQLite indexing (FTS5) or vector embeddings for semantic search across transaction histories and receipt OCR text.
+- [x] Enable multi-turn conversational follow-ups on grounded RAG financial queries.
+- [x] Support interactive data visualizations and chart rendering directly within chat response bubbles.
 
 ### Model Provisioning & Storage Management
 - [x] Add an interactive model management UI in Settings allowing users to delete downloaded weights or switch between different GGUF quantization tiers (e.g., `Q4_K_M`, `Q2_K`, `INT4`) on demand.
 - [x] Support Wi-Fi-only download restrictions for OTA model provisioning.
 - [x] Add automatic quantization fallback (`Q4_K_M` → `Q2_K`) on repeated out-of-memory failures during model initialization.
 
-- [ ] Add some test cases for LLM inference.
+- [x] Add some test cases for LLM inference.
 - [x] Implement Local Bill OCR Capabilities, be it by MLKit or PaddleOCR. The results of the OCR will then have the data extracted by an LLM to automatically create transactions.
