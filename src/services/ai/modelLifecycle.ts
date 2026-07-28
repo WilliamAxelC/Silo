@@ -578,7 +578,7 @@ export class QModelLifecycleManager {
         if (installedModelPath !== useAIStore.getState().provisioning.modelPath) {
           this.updateProvisioning({ modelPath: installedModelPath, lastError: null, pausedReason: null });
         }
-        await this.verifyAndFinalizeInstalledModel(installedModelPath);
+        void this.verifyAndFinalizeInstalledModel(installedModelPath);
         return;
       }
 
@@ -601,7 +601,7 @@ export class QModelLifecycleManager {
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
       }
 
-      await this.beginDownload();
+      void this.beginDownload();
     } catch (error) {
       this.failProvisioning(error, 'Provisioning failed before download started.');
     }
@@ -658,12 +658,9 @@ export class QModelLifecycleManager {
       updatedAt: startedAt,
     });
 
-    this.inFlightDownloadPromise = this.runResumableDownload(null, null);
-    try {
-      await this.inFlightDownloadPromise;
-    } finally {
+    this.inFlightDownloadPromise = this.runResumableDownload(null, null).finally(() => {
       this.inFlightDownloadPromise = null;
-    }
+    });
   }
 
   private async runResumableDownload(_resumeData: string | null, _manifest: TransferManifest | null) {
