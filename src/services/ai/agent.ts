@@ -29,7 +29,7 @@ import {
 
 export type LocalAiMode = 'rag' | 'chat';
 
-interface RetrievedContextItem {
+export interface RetrievedContextItem {
   id: string;
   kind: 'transaction' | 'balance' | 'category-spending' | 'note';
   label: string;

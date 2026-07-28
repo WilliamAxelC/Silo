@@ -8,7 +8,7 @@ export function getActiveModelConfig(tier?: GGUFQuantizationTier) {
   const preset = GGUF_QUANTIZATION_PRESETS[selectedTier] || GGUF_QUANTIZATION_PRESETS.Q5_K_M;
   return {
     tier: selectedTier,
-    version: preset.version,
+    version: preset.assetVersion,
     fileName: preset.fileName,
     downloadUrl: preset.downloadUrl,
     sha256: preset.sha256,

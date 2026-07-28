@@ -102,6 +102,7 @@ export type LocalRuntimeInfo = {
   lastGenerationEvalDurationMs?: number;
   lastTotalDurationMs?: number;
   lastStopReason?: string | null;
+  totalRamBytes?: number;
 };
 
 export type LocalHealthCheckResult = {

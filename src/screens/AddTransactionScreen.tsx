@@ -249,13 +249,14 @@ export const AddTransactionScreen = () => {
     setIsScanning(true);
 
     try {
+      const { provisioning, runtimeReady, warmupPending, runtime } = useAIStore.getState();
       const { canRunNativeChat } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
       if (!canRunNativeChat || !uri) {
         Alert.alert('Setup Required', 'AI runtime is not ready. Please check your local model setup or External API settings before scanning receipts.');
         return;
       }
 
-      const parsedData = await analyzeReceiptImage(uri, base64String);
+      const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined);
 
       if (parsedData) {
         if (parsedData.merchantName) setTitle(parsedData.merchantName);
