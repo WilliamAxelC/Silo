@@ -186,6 +186,11 @@ function migrateToVersion6() {
 
 function migrateToVersion7() {
   expoDb.execSync(`
+    DROP TABLE IF EXISTS transactions_fts;
+    DROP TRIGGER IF EXISTS transactions_ai;
+    DROP TRIGGER IF EXISTS transactions_ad;
+    DROP TRIGGER IF EXISTS transactions_au;
+
     CREATE VIRTUAL TABLE IF NOT EXISTS transactions_fts USING fts5(
       merchant_name,
       note,
