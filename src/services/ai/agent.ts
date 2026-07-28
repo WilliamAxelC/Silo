@@ -499,9 +499,17 @@ export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state:
     systemPrompt = buildGroundedSystemPrompt(retrievedContext, systemPrompt);
   }
 
+  const historyForPrompt = state.chatHistory.filter(msg => msg.status !== 'streaming');
+  if (historyForPrompt.length > 0) {
+    const lastMsg = historyForPrompt[historyForPrompt.length - 1];
+    if (lastMsg.role === 'user' && lastMsg.text === userPrompt) {
+      historyForPrompt.pop();
+    }
+  }
+
   const rawPrompt = supportsQwenChatTemplate(runtimeInfo)
-    ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt)
-    : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), state.chatHistory, systemPrompt);
+    ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), historyForPrompt, systemPrompt)
+    : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), historyForPrompt, systemPrompt);
 
   return supportsQwenChatTemplate(runtimeInfo)
     ? trimPreservedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS)
@@ -539,7 +547,16 @@ export function buildExternalMessagesForMode(
   }
 
   const messages: ExternalChatMessage[] = [];
-  const { activeTurns, summaryText } = manageContextWindow(state.chatHistory);
+  
+  const historyForPrompt = state.chatHistory.filter(msg => msg.status !== 'streaming');
+  if (historyForPrompt.length > 0) {
+    const lastMsg = historyForPrompt[historyForPrompt.length - 1];
+    if (lastMsg.role === 'user' && lastMsg.text === userPrompt) {
+      historyForPrompt.pop();
+    }
+  }
+
+  const { activeTurns, summaryText } = manageContextWindow(historyForPrompt);
   const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
   
   messages.push({ role: 'system', content: effectiveSystemPrompt });
