@@ -6,21 +6,28 @@ export const useMonthlySummary = (currentDate: Date) => {
   const transactionsList = useTransactionStore((state) => state.transactionsList);
 
   return useMemo(() => {
-    // 1. Safe Date Filtering (Ignores corrupted dates)
-    const currentMonthData = transactionsList.filter(tx => 
-      tx.date && isSameMonth(new Date(tx.date), currentDate)
+    const { totalIncome, totalExpense, currentMonthData, currentMonthExpenses } = transactionsList.reduce(
+      (acc, tx) => {
+        if (tx.date && isSameMonth(new Date(tx.date), currentDate)) {
+          acc.currentMonthData.push(tx);
+          const amount = tx.totalAmount || 0;
+          if (amount > 0) {
+            acc.totalIncome += amount;
+          } else if (amount < 0) {
+            acc.currentMonthExpenses.push(tx);
+            acc.totalExpense += Math.abs(amount);
+          }
+        }
+        return acc;
+      },
+      {
+        totalIncome: 0,
+        totalExpense: 0,
+        currentMonthData: [] as typeof transactionsList,
+        currentMonthExpenses: [] as typeof transactionsList,
+      }
     );
 
-    // 2. Centralized Math with Fallbacks (|| 0)
-    const totalIncome = currentMonthData
-      .filter(tx => (tx.totalAmount || 0) > 0)
-      .reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
-      
-    const currentMonthExpenses = currentMonthData.filter(tx => (tx.totalAmount || 0) < 0);
-    
-    const totalExpense = currentMonthExpenses
-      .reduce((acc, curr) => acc + Math.abs(curr.totalAmount || 0), 0);
-      
     const balance = totalIncome - totalExpense;
 
     return {

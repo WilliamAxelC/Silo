@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -8,7 +8,7 @@ interface ChatChartProps {
   data: string;
 }
 
-export function ChatChart({ type, data }: ChatChartProps) {
+export const ChatChart = React.memo(function ChatChart({ type, data }: ChatChartProps) {
   const theme = useAppTheme();
   let parsedData: any[] = [];
 
@@ -26,7 +26,7 @@ export function ChatChart({ type, data }: ChatChartProps) {
     }
   } catch (e) {
     return (
-      <View style={{ padding: 12, backgroundColor: theme.surface, borderRadius: 8, borderWidth: 1, borderColor: theme.border }}>
+      <View style={[styles.errorContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Text style={{ color: theme.expense }}>Failed to parse chart data.</Text>
       </View>
     );
@@ -45,7 +45,7 @@ export function ChatChart({ type, data }: ChatChartProps) {
   };
 
   return (
-    <View style={{ marginVertical: 12, padding: 12, backgroundColor: theme.surface, borderRadius: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
+    <View style={[styles.chartContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       {type === 'line' ? (
         <LineChart
           data={parsedData}
@@ -71,4 +71,19 @@ export function ChatChart({ type, data }: ChatChartProps) {
       )}
     </View>
   );
-}
+});
+
+const styles = StyleSheet.create({
+  errorContainer: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  chartContainer: {
+    marginVertical: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+});

@@ -24,6 +24,7 @@ interface TransactionState {
   categories: CategoryRecord[];
   budgets: Record<string, number>;
   isSaving: boolean;
+  error: string | null;
 
   initDB: () => Promise<void>;
   fetchTransactions: () => Promise<void>;
@@ -42,6 +43,7 @@ interface TransactionState {
 
   clearAllData: () => Promise<void>;
   injectDummyData: () => Promise<void>;
+  clearError: () => void;
 }
 
 function normalizeBudgetMap(rows: Array<{ category: string; limitAmount: number }>) {
@@ -57,6 +59,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   categories: [],
   budgets: {},
   isSaving: false,
+  error: null,
 
   initDB: async () => {
     await get().fetchCategories();
@@ -85,6 +88,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       set({ transactionsList: rows.map(mapTransactionRowToModel) });
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -102,6 +106,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to fetch categories:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -113,6 +118,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       set({ budgets: normalizeBudgetMap(filteredRows) });
     } catch (error) {
       console.error('Failed to fetch budgets:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -183,15 +189,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       return { ok: false, message: 'A category with this name already exists for this type.' };
     }
 
-    await db.update(categories).set({ name: normalizedName }).where(eq(categories.id, id));
-    await db.update(transactionItems).set({ category: normalizedName }).where(eq(transactionItems.category, current.name));
+    await db.transaction(async (tx) => {
+      await tx.update(categories).set({ name: normalizedName }).where(eq(categories.id, id));
+      await tx.update(transactionItems).set({ category: normalizedName }).where(eq(transactionItems.category, current.name));
 
-    if (current.type === 'expense') {
-      const matchingBudgetRows = await db.select().from(budgets).where(eq(budgets.category, current.name));
-      if (matchingBudgetRows.length > 0) {
-        await db.update(budgets).set({ category: normalizedName }).where(eq(budgets.category, current.name));
+      if (current.type === 'expense') {
+        const matchingBudgetRows = await tx.select().from(budgets).where(eq(budgets.category, current.name));
+        if (matchingBudgetRows.length > 0) {
+          await tx.update(budgets).set({ category: normalizedName }).where(eq(budgets.category, current.name));
+        }
       }
-    }
+    });
 
     await get().fetchCategories();
     await get().fetchTransactions();
@@ -226,33 +234,36 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const normalizedTx = normalizeTransactionInput(tx);
       const categoryType = getCategoryTypeForTransaction(normalizedTx.type);
       const normalizedCategory = get().normalizeCategoryForType(normalizedTx.category, normalizedTx.type);
-      const [newTx] = await db
-        .insert(transactions)
-        .values({
-          walletId: DEFAULT_WALLET_ID,
-          merchantName: normalizedTx.merchantName,
-          totalAmount: normalizedTx.totalAmount,
-          type: normalizedTx.type,
-          date: normalizedTx.date,
-          imageUri: normalizedTx.imageUri,
-          note: normalizedTx.note,
-          lineItemsText: normalizedTx.lineItemsText,
-        })
-        .returning({ id: transactions.id });
+      await db.transaction(async (txDb) => {
+        const [newTx] = await txDb
+          .insert(transactions)
+          .values({
+            walletId: DEFAULT_WALLET_ID,
+            merchantName: normalizedTx.merchantName,
+            totalAmount: normalizedTx.totalAmount,
+            type: normalizedTx.type,
+            date: normalizedTx.date,
+            imageUri: normalizedTx.imageUri,
+            note: normalizedTx.note,
+            lineItemsText: normalizedTx.lineItemsText,
+          })
+          .returning({ id: transactions.id });
 
-      if (newTx?.id) {
-        await db.insert(transactionItems).values({
-          transactionId: newTx.id,
-          category: normalizedCategory || getUncategorizedLabel(categoryType),
-          amount: Math.abs(normalizedTx.totalAmount),
-        });
-      }
+        if (newTx?.id) {
+          await txDb.insert(transactionItems).values({
+            transactionId: newTx.id,
+            category: normalizedCategory || getUncategorizedLabel(categoryType),
+            amount: Math.abs(normalizedTx.totalAmount),
+          });
+        }
+      });
 
       if (!options?.skipRefresh) {
         await get().fetchTransactions();
       }
     } catch (error) {
       console.error('Failed to add transaction:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
       set({ isSaving: false });
@@ -306,6 +317,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to update transaction:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
       set({ isSaving: false });
@@ -314,12 +326,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
   deleteTransaction: async (id) => {
     try {
-      await db.delete(transactionItems).where(eq(transactionItems.transactionId, id));
-      await db.delete(transactions).where(eq(transactions.id, id));
+      await db.transaction(async (tx) => {
+        await tx.delete(transactionItems).where(eq(transactionItems.transactionId, id));
+        await tx.delete(transactions).where(eq(transactions.id, id));
+      });
       await get().fetchTransactions();
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to delete transaction:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -331,6 +346,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to set budget:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -343,6 +359,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to clear data:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -367,8 +384,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to inject dummy data:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
     } finally {
       set({ isSaving: false });
     }
   },
+
+  clearError: () => set({ error: null }),
 }));

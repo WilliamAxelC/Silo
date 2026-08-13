@@ -68,6 +68,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 expo-error.log*
+crash*.txt
+crash*.log
+build-*.log
 
 # Local utility scripts and outputs
 map-tree.bat

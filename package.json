@@ -8,7 +8,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "tree": "npx tree-node-cli -L 4 -I \"node_modules|.git|.expo|android|ios\"",
-    "tree:export": "npx tree-node-cli -L 4 -I \"node_modules|.git|.expo|android|ios\" > project-map.txt"
+    "tree:export": "npx tree-node-cli -L 4 -I \"node_modules|.git|.expo|android|ios\" > project-map.txt",
+    "lint": "expo lint",
+    "format": "prettier --write 'src/**/*.{ts,tsx}'",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

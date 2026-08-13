@@ -17,7 +17,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 7;
+const DB_SCHEMA_VERSION = 8;
 
 function createBaseSchema() {
   expoDb.execSync(`
@@ -66,8 +66,10 @@ function recreateAITransactionsView() {
 }
 
 function seedDefaultSettings() {
-  Object.entries(DEFAULT_APP_SETTINGS).forEach(([key, value]) => {
-    expoDb.runSync(`INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?);`, [key, serializeSettingValue(value)]);
+  expoDb.withTransactionSync(() => {
+    Object.entries(DEFAULT_APP_SETTINGS).forEach(([key, value]) => {
+      expoDb.runSync(`INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?);`, [key, serializeSettingValue(value)]);
+    });
   });
 }
 
@@ -76,14 +78,16 @@ function seedDefaultCategories() {
   const existingSet = new Set(existing.map((row) => `${row.type}:${row.name.toLowerCase()}`));
   const now = Date.now();
 
-  DEFAULT_CATEGORY_SEEDS.forEach((seed, index) => {
-    const key = `${seed.type}:${seed.name.toLowerCase()}`;
-    if (!existingSet.has(key)) {
-      expoDb.runSync(
-        `INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`,
-        [seed.name, seed.type, seed.isSystem ? 1 : 0, now + index]
-      );
-    }
+  expoDb.withTransactionSync(() => {
+    DEFAULT_CATEGORY_SEEDS.forEach((seed, index) => {
+      const key = `${seed.type}:${seed.name.toLowerCase()}`;
+      if (!existingSet.has(key)) {
+        expoDb.runSync(
+          `INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`,
+          [seed.name, seed.type, seed.isSystem ? 1 : 0, now + index]
+        );
+      }
+    });
   });
 }
 
@@ -100,29 +104,31 @@ function migrateLegacyCategories() {
   const now = Date.now();
   let offset = 0;
 
-  legacyRows.forEach((row) => {
-    const category = row.category?.trim();
-    if (!category) return;
+  expoDb.withTransactionSync(() => {
+    legacyRows.forEach((row) => {
+      const category = row.category?.trim();
+      if (!category) return;
 
-    const type = inferCategoryType(category, row.type);
-    const key = `${type}:${category.toLowerCase()}`;
-    if (!existingSet.has(key)) {
-      expoDb.runSync(`INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`, [category, type, 0, now + offset]);
-      existingSet.add(key);
-      offset += 1;
-    }
-  });
+      const type = inferCategoryType(category, row.type);
+      const key = `${type}:${category.toLowerCase()}`;
+      if (!existingSet.has(key)) {
+        expoDb.runSync(`INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`, [category, type, 0, now + offset]);
+        existingSet.add(key);
+        offset += 1;
+      }
+    });
 
-  budgetRows.forEach((row) => {
-    const category = row.category?.trim();
-    if (!category) return;
+    budgetRows.forEach((row) => {
+      const category = row.category?.trim();
+      if (!category) return;
 
-    const key = `expense:${category.toLowerCase()}`;
-    if (!existingSet.has(key)) {
-      expoDb.runSync(`INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`, [category, 'expense', 0, now + offset]);
-      existingSet.add(key);
-      offset += 1;
-    }
+      const key = `expense:${category.toLowerCase()}`;
+      if (!existingSet.has(key)) {
+        expoDb.runSync(`INSERT INTO categories (name, type, is_system, created_at) VALUES (?, ?, ?, ?);`, [category, 'expense', 0, now + offset]);
+        existingSet.add(key);
+        offset += 1;
+      }
+    });
   });
 }
 
@@ -221,6 +227,16 @@ function migrateToVersion7() {
   `);
 }
 
+function migrateToVersion8() {
+  expoDb.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+    CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+    CREATE INDEX IF NOT EXISTS idx_transaction_items_txn_id ON transaction_items(transaction_id);
+    CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);
+    CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
+  `);
+}
+
 function runMigrations() {
   createBaseSchema();
 
@@ -249,6 +265,10 @@ function runMigrations() {
 
   if (currentVersion < 7) {
     migrateToVersion7();
+  }
+
+  if (currentVersion < 8) {
+    migrateToVersion8();
   }
 
   seedDefaultSettings();

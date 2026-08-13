@@ -82,82 +82,53 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    ndkVersion = rootProject.ext.ndkVersion
+    ndkVersion rootProject.ext.ndkVersion
 
-    buildToolsVersion = rootProject.ext.buildToolsVersion
-    compileSdk = rootProject.ext.compileSdkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.LCSdev.silo"
+    namespace 'com.LCSdev.silo'
     defaultConfig {
-        applicationId "com.LCSdev.silo"
+        applicationId 'com.LCSdev.silo'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode 1
+        versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
-        resValue "string", "build_developer_name", '"LCS Dev"'
-        manifestPlaceholders = [appDeveloperName: "LCS Dev"]
-
-
-        ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
-        }
     }
     signingConfigs {
         debug {
-            storeFile = file('debug.keystore')
-            storePassword = 'android'
-            keyAlias = 'androiddebugkey'
-            keyPassword = 'android'
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
         }
     }
     buildTypes {
         debug {
-            signingConfig = signingConfigs.debug
+            signingConfig signingConfigs.debug
         }
         release {
-            signingConfig = signingConfigs.debug
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
-            shrinkResources = enableShrinkResources.toBoolean()
-            minifyEnabled = enableMinifyInReleaseBuilds
+            shrinkResources enableShrinkResources.toBoolean()
+            minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
-            crunchPngs = enablePngCrunchInRelease.toBoolean()
+            crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
     packagingOptions {
         jniLibs {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
-            useLegacyPackaging = enableLegacyPackaging.toBoolean()
+            useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
     androidResources {
-        ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
-    }
-}
-
-afterEvaluate {
-    tasks.matching { it.name == 'packageRelease' }.configureEach {
-        dependsOn 'sdkReleaseDependencyData'
-        doFirst {
-            def dependencyDataDir = file("$buildDir/intermediates/sdk_dependency_data/release/sdkReleaseDependencyData")
-            if (!dependencyDataDir.exists()) {
-                dependencyDataDir.mkdirs()
-            }
-            def dependencyDataFile = file("$dependencyDataDir/sdkDependencyData.pb")
-            if (!dependencyDataFile.exists()) {
-                dependencyDataFile.bytes = new byte[0]
-            }
-        }
-    }
-}
-
-android.applicationVariants.configureEach { variant ->
-    variant.outputs.configureEach { output ->
-        def variantName = variant.name
-        def versionName = variant.versionName ?: "1.0.0"
-        output.outputFileName = "Silo-${variantName}-${versionName}.apk"
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 }
 
@@ -184,8 +155,6 @@ android.applicationVariants.configureEach { variant ->
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    // Placeholder dependency slot for a future vendored GGUF runtime such as llama.cpp Android bindings.
-    // implementation("com.example.localinference:android-runtime:<version>")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

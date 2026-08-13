@@ -73,6 +73,8 @@ const TabNavigator = () => {
               <TouchableOpacity
                 style={[styles.customButton, { backgroundColor: theme.primary }]}
                 onPress={() => globalNav.navigate('AddTransactionStack', {})}
+                accessibilityRole="button"
+                accessibilityLabel="Add transaction"
               >
                 <Ionicons name="add" size={32} color="#fff" />
               </TouchableOpacity>
@@ -116,9 +118,21 @@ export const AppNavigator = () => {
     },
   };
 
+  const linking = {
+    prefixes: ['silo://', 'https://silo.app'],
+    config: {
+      screens: {
+        MainTabs: { screens: { Cashflow: 'cashflow', Reports: 'reports', Budget: 'budget', More: 'more' } },
+        Chatbot: 'chat',
+        AddTransactionStack: 'add/:transactionId?',
+        Settings: 'settings',
+      },
+    },
+  };
+
   return (
     <View style={[styles.appShell, { backgroundColor: theme.background }]}>
-      <NavigationContainer theme={navigationTheme}>
+      <NavigationContainer theme={navigationTheme} linking={linking}>
         <Stack.Navigator
           initialRouteName="MainTabs"
           screenOptions={{

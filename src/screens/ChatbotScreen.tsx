@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Keyboard } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -55,19 +55,18 @@ export const ChatbotScreen = () => {
   const insets = useSafeAreaInsets();
   const { aiInferenceMode, externalApiProvider, externalApiModel } = useSettingsStore();
 
-  const {
-    chatHistory,
-    addChatMessage,
-    updateChatMessage,
-    clearChatHistory,
-    provisioning,
-    runtime,
-    selectedMode,
-    setSelectedMode,
-    runtimeReady,
-    warmupPending,
-    localModelDisplayName,
-  } = useAIStore();
+  const chatHistory = useAIStore((state) => state.chatHistory);
+  const addChatMessage = useAIStore((state) => state.addChatMessage);
+  const updateChatMessage = useAIStore((state) => state.updateChatMessage);
+  const clearChatHistory = useAIStore((state) => state.clearChatHistory);
+  const provisioning = useAIStore((state) => state.provisioning);
+  const runtime = useAIStore((state) => state.runtime);
+  const selectedMode = useAIStore((state) => state.selectedMode);
+  const setSelectedMode = useAIStore((state) => state.setSelectedMode);
+  const runtimeReady = useAIStore((state) => state.runtimeReady);
+  const warmupPending = useAIStore((state) => state.warmupPending);
+  const localModelDisplayName = useAIStore((state) => state.localModelDisplayName);
+  const provisioningStatus = useAIStore((state) => state.provisioning.status);
 
   const generationService = useMemo(() => getGenerationService(), []);
   const chatRuntimePreloadService = useMemo(() => getChatRuntimePreloadService(), []);
@@ -79,7 +78,6 @@ export const ChatbotScreen = () => {
   const assistantMessageStartedAtRef = useRef<Record<string, number>>({});
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [serviceSnapshot, setServiceSnapshot] = useState<GenerationServiceRuntimeSnapshot>(generationService.getSnapshot());
 
   useEffect(() => {
@@ -87,26 +85,6 @@ export const ChatbotScreen = () => {
       setInputText(initialMessage);
     }
   }, [initialMessage, chatHistory.length]);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates?.height ?? 0);
-      requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      });
-    });
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
 
   useEffect(() => {
     const subscription = generationService.subscribe(setServiceSnapshot);
@@ -392,8 +370,8 @@ export const ChatbotScreen = () => {
   const showCompactLoader = Boolean(stageStatusMessage) && (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
-      <KeyboardAvoidingView style={styles.keyboardShell} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 8) : 0}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView style={styles.keyboardShell} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}> 
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={theme.text} />
@@ -449,7 +427,9 @@ export const ChatbotScreen = () => {
             <Text style={[styles.metaLine, { color: theme.expense }]}>{provisioning.lastError}</Text>
           ) : null}
           {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
-            <Text style={[styles.metaLine, { color: theme.textMuted }]}>{provisioning.pausedReason}</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]}>
+              {provisioningStatus === 'ready' ? 'Ready for queries' : 'Preparing...'}
+            </Text>
           ) : null}
           {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !provisioning.lastError && !provisioning.pausedReason && !canRunNativeChat && !showCompactLoader ? (
             <Text style={[styles.metaLine, { color: theme.textMuted }]}>

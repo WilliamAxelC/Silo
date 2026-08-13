@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, SectionList, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { addMonths } from 'date-fns';
@@ -17,6 +17,13 @@ export const CashflowScreen = () => {
   const theme = useAppTheme();
 
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await fetchTransactions();
+    setRefreshing(false);
+  }, [fetchTransactions]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -59,24 +66,30 @@ export const CashflowScreen = () => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={[styles.monthSelector, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.arrowBtn}>
+        <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.arrowBtn} accessibilityRole="button" accessibilityLabel="Previous month">
           <Ionicons name="chevron-back" size={20} color={theme.textMuted} />
         </TouchableOpacity>
         <Text style={[styles.monthText, { color: theme.text }]}>{currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
-        <TouchableOpacity onPress={() => changeMonth(1)} style={styles.arrowBtn}>
+        <TouchableOpacity onPress={() => changeMonth(1)} style={styles.arrowBtn} accessibilityRole="button" accessibilityLabel="Next month">
           <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
         </TouchableOpacity>
       </View>
 
       <SectionList
         sections={sectionListData}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
         keyExtractor={(item) => item.id.toString()}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={<Text style={[styles.emptyText, { color: theme.textMuted }]}>No transactions this month.</Text>}
         contentContainerStyle={styles.listContent}
         renderSectionHeader={({ section: { title } }) => <Text style={[styles.sectionHeader, { color: theme.text }]}>{title}</Text>}
         renderItem={({ item }) => (
-          <TouchableOpacity style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]} onPress={() => navigation.navigate('AddTransactionStack', { transactionId: item.id })}>
+          <TouchableOpacity 
+            style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]} 
+            onPress={() => navigation.navigate('AddTransactionStack', { transactionId: item.id })}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.merchantName || 'Unknown'}, ${item.totalAmount}`}
+          >
             <View style={[styles.iconContainer, { backgroundColor: theme.background }]}>
               <Ionicons name="receipt-outline" size={18} color={theme.textMuted} />
             </View>

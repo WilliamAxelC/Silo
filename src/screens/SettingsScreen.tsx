@@ -41,21 +41,36 @@ export const SettingsScreen = () => {
     activeModelId,
     aiWifiOnlyDownload,
     setThemeMode,
-    setCurrencyCode,
-    setUseThousandsSeparator,
-    setDateFormat,
-    setShowIncomeInReportsFirst,
-    setFontScale,
-    setAiInferenceMode,
-    setExternalApiProvider,
-    setExternalApiUrl,
-    setExternalApiModel,
-    setExternalApiKey,
-    setActiveModelId,
-    ocrEngineId,
-    setOcrEngineId,
-    setAiWifiOnlyDownload,
-  } = useSettingsStore();
+  const themeMode = useSettingsStore(s => s.themeMode);
+  const currencyCode = useSettingsStore(s => s.currencyCode);
+  const useThousandsSeparator = useSettingsStore(s => s.useThousandsSeparator);
+  const dateFormat = useSettingsStore(s => s.dateFormat);
+  const showIncomeInReportsFirst = useSettingsStore(s => s.showIncomeInReportsFirst);
+  const fontScale = useSettingsStore(s => s.fontScale);
+  const aiInferenceMode = useSettingsStore(s => s.aiInferenceMode);
+  const externalApiProvider = useSettingsStore(s => s.externalApiProvider);
+  const externalApiUrl = useSettingsStore(s => s.externalApiUrl);
+  const externalApiModel = useSettingsStore(s => s.externalApiModel);
+  const externalApiKey = useSettingsStore(s => s.externalApiKey);
+  const activeModelId = useSettingsStore(s => s.activeModelId);
+  const aiWifiOnlyDownload = useSettingsStore(s => s.aiWifiOnlyDownload);
+  const ocrEngineId = useSettingsStore(s => s.ocrEngineId);
+
+  const setThemeMode = useSettingsStore(s => s.setThemeMode);
+  const setCurrencyCode = useSettingsStore(s => s.setCurrencyCode);
+  const setUseThousandsSeparator = useSettingsStore(s => s.setUseThousandsSeparator);
+  const setDateFormat = useSettingsStore(s => s.setDateFormat);
+  const setShowIncomeInReportsFirst = useSettingsStore(s => s.setShowIncomeInReportsFirst);
+  const setFontScale = useSettingsStore(s => s.setFontScale);
+  const setAiInferenceMode = useSettingsStore(s => s.setAiInferenceMode);
+  const setExternalApiProvider = useSettingsStore(s => s.setExternalApiProvider);
+  const setExternalApiUrl = useSettingsStore(s => s.setExternalApiUrl);
+  const setExternalApiModel = useSettingsStore(s => s.setExternalApiModel);
+  const setExternalApiKey = useSettingsStore(s => s.setExternalApiKey);
+  const setActiveModelId = useSettingsStore(s => s.setActiveModelId);
+  const setOcrEngineId = useSettingsStore(s => s.setOcrEngineId);
+  const setAiWifiOnlyDownload = useSettingsStore(s => s.setAiWifiOnlyDownload);
+
   const {
     provisioning,
     localModelDisplayName,

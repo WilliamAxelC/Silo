@@ -18,12 +18,9 @@ import { useAIStore, getAIRuntimeAvailability } from '../store/useAIStore';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
 
-type ReceiptLineItemDraft = {
-  id: string;
-  name: string;
-  price: string;
-  note: string;
-};
+import { ReceiptItemsEditor, ReceiptLineItemDraft } from '../components/ReceiptItemsEditor';
+import { CategorySelectorModal } from '../components/CategorySelectorModal';
+import { SourceSelectorModal } from '../components/SourceSelectorModal';
 
 const createReceiptItemDraft = (overrides?: Partial<ReceiptLineItemDraft>): ReceiptLineItemDraft => ({
   id: overrides?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -509,57 +506,12 @@ export const AddTransactionScreen = () => {
           ) : null}
 
           {(detailsMode === 'receipt' || detailsMode === 'both') ? (
-            <View style={styles.receiptEditorBlock}>
-              <View style={styles.receiptHeaderRow}>
-                <Text style={[styles.receiptHeaderTitle, { color: theme.text }]}>Receipt Items</Text>
-                <TouchableOpacity style={[styles.inlineAddButton, { borderColor: theme.primary }]} onPress={addReceiptItemRow}>
-                  <Ionicons name="add" size={15} color={theme.primary} />
-                  <Text style={[styles.inlineAddButtonText, { color: theme.primary }]}>Add</Text>
-                </TouchableOpacity>
-              </View>
-
-              {lineItems.length === 0 ? (
-                <TouchableOpacity style={[styles.emptyReceiptState, { borderColor: theme.border, backgroundColor: theme.surface }]} onPress={addReceiptItemRow}>
-                  <Ionicons name="receipt-outline" size={16} color={theme.textMuted} />
-                  <Text style={[styles.emptyReceiptText, { color: theme.textMuted }]}>Add itemized lines</Text>
-                </TouchableOpacity>
-              ) : (
-                lineItems.map((item) => (
-                  <View key={item.id} style={[styles.receiptRowCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                    <View style={styles.receiptRowTop}>
-                      <TextInput
-                        style={[styles.receiptNameInput, { color: theme.text }]}
-                        value={item.name}
-                        onChangeText={(value) => updateReceiptItemRow(item.id, 'name', value)}
-                        placeholder="Item"
-                        placeholderTextColor={theme.textMuted}
-                      />
-                      <View style={[styles.receiptPriceBox, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                        <Text style={[styles.receiptPricePrefix, { color: theme.textMuted }]}>Rp</Text>
-                        <TextInput
-                          style={[styles.receiptPriceInput, { color: theme.text }]}
-                          value={item.price}
-                          onChangeText={(value) => updateReceiptItemRow(item.id, 'price', value)}
-                          placeholder="0"
-                          placeholderTextColor={theme.textMuted}
-                          keyboardType="numeric"
-                        />
-                      </View>
-                      <TouchableOpacity style={styles.receiptRemoveBtn} onPress={() => removeReceiptItemRow(item.id)}>
-                        <Ionicons name="close-circle" size={20} color={theme.expense} />
-                      </TouchableOpacity>
-                    </View>
-                    <TextInput
-                      style={[styles.receiptNoteInput, { color: theme.textMuted, borderTopColor: theme.border }]}
-                      value={item.note}
-                      onChangeText={(value) => updateReceiptItemRow(item.id, 'note', value)}
-                      placeholder="Notes"
-                      placeholderTextColor={theme.textMuted}
-                    />
-                  </View>
-                ))
-              )}
-            </View>
+            <ReceiptItemsEditor
+              lineItems={lineItems}
+              onAddRow={addReceiptItemRow}
+              onRemoveRow={removeReceiptItemRow}
+              onUpdateRow={updateReceiptItemRow}
+            />
           ) : null}
         </View>
 
@@ -600,56 +552,24 @@ export const AddTransactionScreen = () => {
 
       {showPicker && <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />}
 
-      <Modal visible={sourceModalVisible} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSourceModalVisible(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Select a Source</Text>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: theme.primary }]} onPress={() => pickImage('gallery')}>
-                <Ionicons name="images" size={34} color="#fff" />
-                <Text style={styles.modalBtnText}>Gallery</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: theme.primary }]} onPress={() => pickImage('camera')}>
-                <Ionicons name="camera" size={34} color="#fff" />
-                <Text style={styles.modalBtnText}>Camera</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setSourceModalVisible(false)}>
-              <Text style={[styles.cancelBtnText, { color: theme.expense }]}>Cancel</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <SourceSelectorModal
+        visible={sourceModalVisible}
+        onClose={() => setSourceModalVisible(false)}
+        onPickImage={pickImage}
+      />
 
-      <Modal visible={categoryModalVisible} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCategoryModalVisible(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Select Category</Text>
-            <ScrollView style={{ maxHeight: 250 }}>
-              {availableCategories.map((cat: CategoryRecord) => (
-                <TouchableOpacity key={cat.id} style={[styles.categoryRow, { borderBottomColor: theme.border }]} onPress={() => { setCategory(cat.name); setCategoryModalVisible(false); }}>
-                  <Text style={[styles.categoryText, { color: theme.text }]}>{cat.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.customCategoryBox}>
-              <TextInput
-                style={[styles.customCategoryInput, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text }]}
-                placeholderTextColor={theme.textMuted}
-                placeholder="Add new category"
-                value={customCategory}
-                onChangeText={setCustomCategory}
-              />
-              <TouchableOpacity style={[styles.addCategoryBtn, { backgroundColor: theme.primary }]} onPress={handleAddCustomCategory}>
-                <Ionicons name="add" size={18} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setCategoryModalVisible(false)}>
-              <Text style={[styles.cancelBtnText, { color: theme.expense }]}>Close</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <CategorySelectorModal
+        visible={categoryModalVisible}
+        onClose={() => setCategoryModalVisible(false)}
+        categories={availableCategories}
+        onSelectCategory={(name) => {
+          setCategory(name);
+          setCategoryModalVisible(false);
+        }}
+        customCategory={customCategory}
+        onChangeCustomCategory={setCustomCategory}
+        onAddCustomCategory={handleAddCustomCategory}
+      />
     </SafeAreaView>
   );
 };
@@ -695,21 +615,6 @@ const styles = StyleSheet.create({
   compactDetailsBtn: { paddingHorizontal: 12 },
   detailsModeText: { fontSize: 12, fontWeight: '700' },
   noteInputCompact: { minHeight: 92, paddingTop: 12 },
-  receiptEditorBlock: { marginTop: 2 },
-  receiptHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  receiptHeaderTitle: { fontSize: 14, fontWeight: '700' },
-  inlineAddButton: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  inlineAddButtonText: { fontSize: 12, fontWeight: '700', marginLeft: 4 },
-  emptyReceiptState: { minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  emptyReceiptText: { marginLeft: 6, fontSize: 13 },
-  receiptRowCard: { borderWidth: 1, borderRadius: 14, marginBottom: 8, overflow: 'hidden' },
-  receiptRowTop: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 },
-  receiptNameInput: { flex: 1, fontSize: 14, marginRight: 8 },
-  receiptPriceBox: { minWidth: 98, borderWidth: 1, borderRadius: 10, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginRight: 6 },
-  receiptPricePrefix: { fontSize: 12, fontWeight: '700', marginRight: 4 },
-  receiptPriceInput: { flex: 1, minHeight: 34, fontSize: 13 },
-  receiptRemoveBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  receiptNoteInput: { minHeight: 38, borderTopWidth: 1, paddingHorizontal: 10, paddingVertical: 8, fontSize: 12 },
   attachmentCompact: { minHeight: 86, borderWidth: 1, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   attachmentCompactEmpty: { alignItems: 'center', justifyContent: 'center' },
   attachmentCompactText: { marginTop: 4, fontSize: 12 },
@@ -721,17 +626,4 @@ const styles = StyleSheet.create({
   saveButton: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   saveButtonCompact: { paddingHorizontal: 18 },
   saveButtonText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
-  modalContent: { borderRadius: 18, padding: 18 },
-  modalTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
-  modalActions: { flexDirection: 'row', justifyContent: 'space-between' },
-  modalBtn: { flex: 1, minHeight: 108, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  modalBtnText: { marginTop: 8, color: '#fff', fontWeight: '700' },
-  cancelBtn: { marginTop: 14, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
-  cancelBtnText: { fontSize: 14, fontWeight: '700' },
-  categoryRow: { minHeight: 46, justifyContent: 'center', borderBottomWidth: 1, paddingHorizontal: 4 },
-  categoryText: { fontSize: 14, fontWeight: '500' },
-  customCategoryBox: { flexDirection: 'row', marginTop: 12 },
-  customCategoryInput: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 14, marginRight: 10 },
-  addCategoryBtn: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 });
