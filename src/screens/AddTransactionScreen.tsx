@@ -242,24 +242,6 @@ export const AddTransactionScreen = () => {
     setIsScanning(true);
 
     try {
-      const { provisioning } = useAIStore.getState();
-      if (provisioning.status === 'not-installed') {
-        Alert.alert(
-          'Setup Required',
-          'AI runtime is not installed. Please set up an AI model first.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Manage AI Settings',
-              onPress: () => {
-                navigation.navigate('Settings' as any);
-              },
-            },
-          ]
-        );
-        return;
-      }
-
       const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined);
 
       if (parsedData) {

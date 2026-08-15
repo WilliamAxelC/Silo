@@ -7,6 +7,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { formatDisplayCurrency } from '../features/transactions/amount';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
   if (percentage >= 100) {
@@ -52,6 +53,8 @@ const ProgressBar = ({ spent, limit, theme }: { spent: number; limit: number; th
 export const BudgetScreen = () => {
   const theme = useAppTheme();
   const fontScale = useSettingsStore((state) => state.fontScale);
+  const currencyCode = useSettingsStore((state) => state.currencyCode);
+  const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const { budgets, setBudget, getCategoriesByType } = useTransactionStore();
   const [currentDate] = useState(() => new Date());
   const { currentMonthExpenses } = useMonthlySummary(currentDate);
@@ -107,7 +110,7 @@ export const BudgetScreen = () => {
 
   const handleSaveBudget = async () => {
     const numericValue = parseFloat(budgetInput.replace(/,/g, ''));
-    if (!isNaN(numericValue) && numericValue > 0) {
+    if (!isNaN(numericValue) && numericValue >= 0) {
       await setBudget(selectedCategory, numericValue);
     }
     setModalVisible(false);
@@ -134,12 +137,12 @@ export const BudgetScreen = () => {
           <View style={styles.heroMetricGrid}>
             <View style={styles.metricCell}>
               <Text style={[styles.metricLabel, { color: theme.textMuted }, smallScale]}>Budgeted</Text>
-              <Text style={[styles.metricValue, { color: theme.text }, metricScale]}>Rp {totalBudgeted.toLocaleString()}</Text>
+              <Text style={[styles.metricValue, { color: theme.text }, metricScale]}>{formatDisplayCurrency(totalBudgeted, currencyCode, useThousandsSeparator)}</Text>
             </View>
             <View style={[styles.metricDivider, { backgroundColor: theme.border }]} />
             <View style={styles.metricCell}>
               <Text style={[styles.metricLabel, { color: theme.textMuted }, smallScale]}>Spent</Text>
-              <Text style={[styles.metricValue, { color: theme.text }, metricScale]}>Rp {totalSpent.toLocaleString()}</Text>
+              <Text style={[styles.metricValue, { color: theme.text }, metricScale]}>{formatDisplayCurrency(totalSpent, currencyCode, useThousandsSeparator)}</Text>
             </View>
           </View>
           <View style={styles.miniStatRow}>
@@ -194,8 +197,8 @@ export const BudgetScreen = () => {
                 {item.hasBudget ? (
                   <>
                     <View style={styles.amountLine}>
-                      <Text style={[styles.amountPrimary, { color: theme.text }, metricScale]}>Rp {item.spent.toLocaleString()}</Text>
-                      <Text style={[styles.amountSecondary, { color: theme.textMuted }, smallScale]}>of Rp {item.limit.toLocaleString()}</Text>
+                      <Text style={[styles.amountPrimary, { color: theme.text }, metricScale]}>{formatDisplayCurrency(item.spent, currencyCode, useThousandsSeparator)}</Text>
+                      <Text style={[styles.amountSecondary, { color: theme.textMuted }, smallScale]}>of {formatDisplayCurrency(item.limit, currencyCode, useThousandsSeparator)}</Text>
                     </View>
 
                     <ProgressBar spent={item.spent} limit={item.limit} theme={theme} />
@@ -208,7 +211,7 @@ export const BudgetScreen = () => {
                         </Text>
                       </View>
                       <Text style={[styles.remainingText, { color: isOverspent ? theme.expense : theme.textMuted }, smallScale]}>
-                        {isOverspent ? 'Over' : 'Left'} Rp {Math.abs(item.remaining).toLocaleString()}
+                        {isOverspent ? 'Over' : 'Left'} {formatDisplayCurrency(Math.abs(item.remaining), currencyCode, useThousandsSeparator)}
                       </Text>
                     </View>
                   </>

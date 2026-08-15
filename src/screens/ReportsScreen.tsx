@@ -6,8 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { addMonths } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
+import { formatDisplayCurrency } from '../features/transactions/amount';
 import { useFocusEffect } from '@react-navigation/native';
 
 const getCategoryColor = (index: number, type: 'expense' | 'income') => {
@@ -20,6 +22,8 @@ const getCategoryColor = (index: number, type: 'expense' | 'income') => {
 export const ReportsScreen = () => {
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const theme = useAppTheme();
+  const currencyCode = useSettingsStore((state) => state.currencyCode);
+  const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const [currentDate, setCurrentDate] = useState(new Date());
   
   const [reportType, setReportType] = useState<'expense' | 'income'>('expense');
@@ -112,15 +116,15 @@ export const ReportsScreen = () => {
         <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.summaryCol}>
             <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Income</Text>
-            <Text style={[styles.summaryValue, { color: theme.income }]}>{(totalIncome || 0).toLocaleString()}</Text>
+            <Text style={[styles.summaryValue, { color: theme.income }]}>{formatDisplayCurrency(totalIncome || 0, currencyCode, useThousandsSeparator)}</Text>
           </View>
           <View style={styles.summaryCol}>
             <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Expense</Text>
-            <Text style={[styles.summaryValue, { color: theme.expense }]}>{(totalExpense || 0).toLocaleString()}</Text>
+            <Text style={[styles.summaryValue, { color: theme.expense }]}>{formatDisplayCurrency(totalExpense || 0, currencyCode, useThousandsSeparator)}</Text>
           </View>
           <View style={styles.summaryCol}>
             <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Balance</Text>
-            <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>{(balance || 0).toLocaleString()}</Text>
+            <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>{formatDisplayCurrency(balance || 0, currencyCode, useThousandsSeparator)}</Text>
           </View>
         </View>
 
@@ -136,7 +140,7 @@ export const ReportsScreen = () => {
               centerLabelComponent={() => (
                 <View style={{justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8}}>
                     <Text style={{fontSize: 18, color: theme.text, fontWeight: 'bold'}} adjustsFontSizeToFit numberOfLines={1}>
-                      {(totalForType || 0).toLocaleString()}
+                      {formatDisplayCurrency(totalForType || 0, currencyCode, useThousandsSeparator)}
                     </Text>
                     <Text style={{fontSize: 12, color: theme.textMuted}}>
                       Total {reportType === 'expense' ? 'Expense' : 'Income'}
@@ -175,7 +179,7 @@ export const ReportsScreen = () => {
                       <Text style={[styles.legendCategory, { color: theme.text }]}>{item.category}</Text>
                     </View>
                     <View style={styles.legendHeaderRight}>
-                      <Text style={[styles.legendAmount, { color: theme.text }]}>Rp {(item.value || 0).toLocaleString()}</Text>
+                      <Text style={[styles.legendAmount, { color: theme.text }]}>{formatDisplayCurrency(item.value || 0, currencyCode, useThousandsSeparator)}</Text>
                       <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color={theme.textMuted} style={styles.chevron} />
                     </View>
                   </View>
@@ -201,7 +205,7 @@ export const ReportsScreen = () => {
                           </Text>
                         </View>
                         <Text style={[styles.txAmount, { color: reportType === 'income' ? theme.income : theme.text }]}>
-                          {reportType === 'income' ? '+' : ''}Rp {Math.abs(tx.totalAmount).toLocaleString()}
+                          {reportType === 'income' ? '+' : ''}{formatDisplayCurrency(Math.abs(tx.totalAmount), currencyCode, useThousandsSeparator)}
                         </Text>
                       </View>
                     ))}

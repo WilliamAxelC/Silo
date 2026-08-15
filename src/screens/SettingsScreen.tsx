@@ -639,47 +639,52 @@ export const SettingsScreen = () => {
                 <Text style={[styles.statusText, { color: hasUsableLocalInferenceBackend && canRunNativeChat ? theme.primary : theme.textMuted }, captionScale]}>{localModelDisplayName}</Text>
               </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
               <View style={styles.rowBlock}>
-                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Active Model</Text>
-                <View style={{ marginTop: 8, flexDirection: 'column', gap: 10 }}>
-                  {Object.keys(MODEL_CATALOG).map((modelId) => {
-                    const preset = MODEL_CATALOG[modelId];
-                    const isSelected = activeModelId === modelId;
-                    const isDownloaded = downloadedModels[modelId];
-                    const reqRamGB = Math.round(preset.requiredRamBytes / (1024 * 1024 * 1024) * 10) / 10;
-                    const recRamGB = Math.round(preset.recommendedRamBytes / (1024 * 1024 * 1024) * 10) / 10;
-                    const sizeGB = Math.round((preset.fileSizeBytes / (1024 * 1024 * 1024)) * 10) / 10;
+                <Text style={[styles.featureTitle, { color: theme.text }, textScale]}>Offline Model</Text>
+                <View style={{ marginTop: 8 }}>
+                  {(() => {
+                    const preset = MODEL_CATALOG['qwen3.5-2b'] || {
+                      displayName: 'Qwen 3.5 2B (Offline)',
+                      description: 'High performance edge LLM. Fast, accurate, and completely offline.',
+                      fileSizeBytes: 1503238000,
+                      requiredRamBytes: 2 * 1024 * 1024 * 1024,
+                      recommendedRamBytes: 3 * 1024 * 1024 * 1024,
+                    };
+                    const isDownloaded = downloadedModels['qwen3.5-2b'] || provisioning.status === 'ready';
+                    const reqRamGB = 2;
+                    const recRamGB = 3;
+                    const sizeGB = 1.5;
                     return (
-                      <TouchableOpacity
-                        key={modelId}
+                      <View
                         style={[
-                          { borderWidth: 1, borderRadius: 12, padding: 12 },
-                          isSelected
-                            ? { backgroundColor: theme.primary + '11', borderColor: theme.primary }
-                            : { backgroundColor: theme.background, borderColor: theme.border },
+                          { borderWidth: 1, borderRadius: 12, padding: 14, backgroundColor: theme.surface, borderColor: isDownloaded ? theme.primary : theme.border },
                         ]}
-                        onPress={() => setActiveModelId(modelId)}
                       >
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <Text style={[{ fontWeight: '700' }, textScale, { color: isSelected ? theme.primary : theme.text }]}>
-                            {preset.displayName} {isDownloaded && !isSelected ? '✓ (Downloaded)' : ''}
-                          </Text>
-                          <Text style={[{ fontWeight: '600' }, captionScale, { color: theme.textMuted }]}>
-                            ~{sizeGB} GB
-                          </Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="hardware-chip" size={18} color={theme.primary} />
+                            <Text style={[{ fontWeight: '700' }, textScale, { color: theme.text }]}>
+                              {preset.displayName}
+                            </Text>
+                          </View>
+                          <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: isDownloaded ? theme.primary + '22' : theme.border }}>
+                            <Text style={[{ fontWeight: '700', color: isDownloaded ? theme.primary : theme.textMuted }, captionScale]}>
+                              {isDownloaded ? 'Installed' : provisioning.status === 'downloading' ? `Downloading ${progressPercent}%` : 'Not Installed'}
+                            </Text>
+                          </View>
                         </View>
-                        <Text style={[{ color: theme.textMuted, marginBottom: 4 }, captionScale]}>
+                        <Text style={[{ color: theme.textMuted, marginBottom: 8, lineHeight: 18 }, captionScale]}>
                           {preset.description}
                         </Text>
-                        <Text style={[{ color: theme.text, fontWeight: '600' }, captionScale]}>
-                          Capabilities: {preset.capabilities.join(', ')}
-                        </Text>
-                        <Text style={[{ color: theme.textMuted }, captionScale]}>
-                          RAM: {reqRamGB} GB req / {recRamGB} GB rec
-                        </Text>
-                      </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={[{ color: theme.textMuted }, captionScale]}>
+                            Size: ~{sizeGB} GB · RAM: {reqRamGB}GB req / {recRamGB}GB rec
+                          </Text>
+                        </View>
+                      </View>
                     );
-                  })}
+                  })()}
                 </View>
               </View>
               <View style={[styles.divider, { backgroundColor: theme.border }]} />

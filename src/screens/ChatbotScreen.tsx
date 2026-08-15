@@ -500,13 +500,40 @@ export const ChatbotScreen = () => {
             <View style={styles.emptyStateWrap}>
               <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
                 {canSendMessage
-                  ? 'Try asking: "How much did I spend on food in the last 30 days?"'
+                  ? 'Ask anything about your finances or choose a quick topic below:'
                   : aiMode === 'rag'
                     ? 'Grounded questions are answered from records stored on this device only.'
                     : 'Chat mode is disabled because this build does not include a usable on-device generation runtime.'}
               </Text>
+              
+              {canSendMessage ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14, justifyContent: 'center' }}>
+                  {[
+                    'What is my total balance?',
+                    'How much did I spend on food in the last 30 days?',
+                    'Show my recent transactions',
+                    'How can I save 20% of my income?',
+                  ].map((suggestion, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 16,
+                        backgroundColor: theme.surface,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                      }}
+                      onPress={() => setInputText(suggestion)}
+                    >
+                      <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '500' }}>{suggestion}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+
               {stageStatusMessage ? (
-                <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 14 }]}>
                   <ActivityIndicator color={theme.primary} />
                   <Text style={[styles.inlineStatusText, { color: theme.textMuted }]}>{stageStatusMessage}</Text>
                 </View>

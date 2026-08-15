@@ -5,8 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { addMonths } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
+import { formatDisplayCurrency } from '../features/transactions/amount';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NavigationProps } from '../navigation/types';
@@ -35,6 +37,9 @@ export const CashflowScreen = () => {
     setCurrentDate((prev) => addMonths(prev, offset));
   };
 
+  const currencyCode = useSettingsStore((state) => state.currencyCode);
+  const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
+
   const { currentMonthData, totalIncome, totalExpense, balance } = useMonthlySummary(currentDate);
 
   const groupedData = currentMonthData.reduce((acc, curr) => {
@@ -50,15 +55,15 @@ export const CashflowScreen = () => {
     <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Income</Text>
-        <Text style={[styles.summaryValue, { color: theme.income }]}>{(totalIncome || 0).toLocaleString()}</Text>
+        <Text style={[styles.summaryValue, { color: theme.income }]}>{formatDisplayCurrency(totalIncome || 0, currencyCode, useThousandsSeparator)}</Text>
       </View>
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Expense</Text>
-        <Text style={[styles.summaryValue, { color: theme.expense }]}>{(totalExpense || 0).toLocaleString()}</Text>
+        <Text style={[styles.summaryValue, { color: theme.expense }]}>{formatDisplayCurrency(totalExpense || 0, currencyCode, useThousandsSeparator)}</Text>
       </View>
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Balance</Text>
-        <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>{(balance || 0).toLocaleString()}</Text>
+        <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>{formatDisplayCurrency(balance || 0, currencyCode, useThousandsSeparator)}</Text>
       </View>
     </View>
   );
@@ -98,7 +103,7 @@ export const CashflowScreen = () => {
               <Text style={[styles.transactionSubtitle, { color: theme.textMuted }]} numberOfLines={1}>{item.category || 'Uncategorized'}</Text>
             </View>
             <Text style={[styles.transactionAmount, { color: (item.totalAmount || 0) > 0 ? theme.income : theme.expense }]}>
-              {(item.totalAmount || 0) > 0 ? '+' : ''}{(item.totalAmount || 0).toLocaleString()}
+              {(item.totalAmount || 0) > 0 ? '+' : ''}{formatDisplayCurrency(item.totalAmount || 0, currencyCode, useThousandsSeparator)}
             </Text>
           </TouchableOpacity>
         )}
