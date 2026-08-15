@@ -1,3 +1,6 @@
+const { Platform } = require('react-native');
+Platform.OS = 'android';
+
 // Mock react-native-device-info
 jest.mock('react-native-device-info', () => require('react-native-device-info/jest/react-native-device-info-mock'));
 
@@ -40,3 +43,12 @@ jest.mock('llama.rn', () => ({
     release: jest.fn(async () => {}),
   })),
 }));
+
+// Mock ppu-paddle-ocr/mobile
+jest.mock('ppu-paddle-ocr/mobile', () => ({
+  PaddleOCR: jest.fn().mockImplementation(() => ({
+    init: jest.fn(async () => {}),
+    recognize: jest.fn(async () => ({ text: 'TOTAL 50000' })),
+  })),
+}));
+

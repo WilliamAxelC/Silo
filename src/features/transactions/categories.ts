@@ -29,7 +29,8 @@ const LEGACY_EXPENSE_CATEGORY_NAMES = new Set<string>([
   'home',
 ]);
 
-export function normalizeCategoryName(name: string): string {
+export function normalizeCategoryName(name: string | null | undefined): string {
+  if (!name) return '';
   return name.trim().replace(/\s+/g, ' ');
 }
 
@@ -41,7 +42,7 @@ export function getUncategorizedLabel(type: CategoryType): string {
   return type === 'income' ? UNCATEGORIZED_INCOME_LABEL : UNCATEGORIZED_EXPENSE_LABEL;
 }
 
-export function inferCategoryType(name: string, transactionType?: string | null): CategoryType {
+export function inferCategoryType(name: string | null | undefined, transactionType?: string | null): CategoryType {
   const normalized = normalizeCategoryName(name).toLowerCase();
 
   if (LEGACY_INCOME_CATEGORY_NAMES.has(normalized)) {
@@ -59,10 +60,19 @@ export function inferCategoryType(name: string, transactionType?: string | null)
   return 'expense';
 }
 
-export function isDuplicateCategory(categories: CategoryRecord[], name: string, type: CategoryType, excludeId?: number): boolean {
+export function isDuplicateCategory(
+  categories: CategoryRecord[],
+  name: string,
+  type: CategoryType,
+  excludeId?: number
+): boolean {
   const normalized = normalizeCategoryName(name).toLowerCase();
+  if (!normalized) return false;
   return categories.some(
-    (category) => category.type === type && category.id !== excludeId && normalizeCategoryName(category.name).toLowerCase() === normalized
+    (category) =>
+      category.type === type &&
+      category.id !== excludeId &&
+      normalizeCategoryName(category.name).toLowerCase() === normalized
   );
 }
 

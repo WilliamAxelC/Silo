@@ -27,7 +27,7 @@ export function parseReceiptTextHeuristic(rawText: string): {
     if (
       !/^\d+$/.test(line) &&
       !/^[\d\W]+$/.test(line) &&
-      !/\b(jl\.|jalan|telp|phone|npwp|receipt|struk|nota|order|table|meja|kasir|cashier|pos|date|tanggal)\b/i.test(line) &&
+      !/\b(jl\.?|jalan|telp\.?|phone|npwp|receipt|struk|nota|order|table|meja|kasir|cashier|pos|date|tanggal)\b/i.test(line) &&
       line.length >= 3 &&
       line.length <= 40
     ) {

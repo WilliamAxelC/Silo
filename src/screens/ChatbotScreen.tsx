@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  Keyboard,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -28,11 +40,11 @@ function parseMessageWithCharts(text: string) {
     if (match.index > lastIndex) {
       parts.push({ type: 'markdown', content: cleanText.substring(lastIndex, match.index) });
     }
-    
+
     const attrString = match[1];
     const typeMatch = attrString.match(/type=(?:'|")([^'"]+)(?:'|")/);
     const dataMatch = attrString.match(/data=(?:'|")([^'"]+)(?:'|")/);
-    
+
     parts.push({
       type: 'chart',
       chartType: typeMatch ? typeMatch[1] : 'bar',
@@ -40,13 +52,20 @@ function parseMessageWithCharts(text: string) {
     });
     lastIndex = chartRegex.lastIndex;
   }
-  
+
   if (lastIndex < cleanText.length) {
     parts.push({ type: 'markdown', content: cleanText.substring(lastIndex) });
   }
-  
+
   return parts;
 }
+
+const QUICK_SUGGESTIONS = [
+  { icon: 'wallet-outline', text: 'What is my total balance?' },
+  { icon: 'fast-food-outline', text: 'How much did I spend on food in the last 30 days?' },
+  { icon: 'receipt-outline', text: 'Show my recent transactions' },
+  { icon: 'trending-up-outline', text: 'How can I save 20% of my income?' },
+];
 
 export const ChatbotScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -80,6 +99,7 @@ export const ChatbotScreen = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [serviceSnapshot, setServiceSnapshot] = useState<GenerationServiceRuntimeSnapshot>(generationService.getSnapshot());
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
 
   useEffect(() => {
     const showSub = Keyboard.addListener(
@@ -111,7 +131,26 @@ export const ChatbotScreen = () => {
 
   const handleCopyToClipboard = async (text: string) => {
     await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', 'Message copied to clipboard!');
+    Alert.alert('Copied', 'Message copied to clipboard.');
+  };
+
+  const handleClearHistoryWithConfirm = () => {
+    if (chatHistory.length === 0) return;
+    Alert.alert(
+      'Clear Chat History',
+      'Are you sure you want to delete all messages in this conversation?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: () => {
+            clearChatHistory();
+            setLastFailedPrompt(null);
+          },
+        },
+      ]
+    );
   };
 
   const formatElapsed = useCallback((seconds: number) => {
@@ -129,9 +168,16 @@ export const ChatbotScreen = () => {
     localInferenceStatusMessage,
   } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
   const canSendMessage = aiMode === 'rag' ? canRunGroundedQueries : canRunNativeChat;
-  const canStartOrRetryProvisioning = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
-  const isBusyProvisioning = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(provisioning.status);
-  const showPrimaryProvisionAction = aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !canRunNativeChat && canStartOrRetryProvisioning;
+  const canStartOrRetryProvisioning =
+    aiInferenceMode === 'local' &&
+    hasUsableLocalInferenceBackend &&
+    ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
+  const isBusyProvisioning =
+    aiInferenceMode === 'local' &&
+    hasUsableLocalInferenceBackend &&
+    ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(provisioning.status);
+  const showPrimaryProvisionAction =
+    aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !canRunNativeChat && canStartOrRetryProvisioning;
   const isPreparingChatRuntime = aiInferenceMode === 'local' ? serviceSnapshot.isPreparingRuntime : false;
   const chatRuntimeStatus = serviceSnapshot.runtimeStatus;
   const isLoading = serviceSnapshot.isGenerating;
@@ -148,15 +194,20 @@ export const ChatbotScreen = () => {
 
       return () => {
         active = false;
-        generationService.scheduleModelUnload(30000); // 30 seconds
+        generationService.scheduleModelUnload(30000);
       };
     }, [chatRuntimePreloadService, selectedMode, aiInferenceMode, generationService])
   );
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
-    const shouldRun = Boolean(activeStartedAt)
-      && (isPreparingChatRuntime || isLoading || isBusyProvisioning || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
+    const shouldRun =
+      Boolean(activeStartedAt) &&
+      (isPreparingChatRuntime ||
+        isLoading ||
+        isBusyProvisioning ||
+        Boolean(runtime.activeGenerationRequestId) ||
+        Boolean(runtime.activeStatusLabel));
 
     if (!shouldRun || !activeStartedAt) {
       if (elapsedTimerRef.current) {
@@ -185,8 +236,16 @@ export const ChatbotScreen = () => {
         elapsedTimerRef.current = null;
       }
     };
-  }, [isBusyProvisioning, isLoading, isPreparingChatRuntime, runtime.activeGenerationRequestId, runtime.activePhaseStartedAt, runtime.activeStatusLabel]);
+  }, [
+    isBusyProvisioning,
+    isLoading,
+    isPreparingChatRuntime,
+    runtime.activeGenerationRequestId,
+    runtime.activePhaseStartedAt,
+    runtime.activeStatusLabel,
+  ]);
 
+  // Smooth scroll down when token streaming without jumping
   useEffect(() => {
     const pendingId = pendingAssistantMessageIdRef.current;
     if (!pendingId) {
@@ -199,19 +258,22 @@ export const ChatbotScreen = () => {
         text: runtime.streamingResponseText,
         status: 'streaming',
       }));
+
+      scrollViewRef.current?.scrollToEnd({ animated: false });
       return;
     }
 
     if (!runtime.activeGenerationRequestId) {
       updateChatMessage(pendingId, (message) => {
-        let finalStatus: 'cancelled' | 'error' | 'complete' | 'streaming' | undefined = message.status === 'cancelled' || message.status === 'error' ? message.status : 'complete';
+        let finalStatus: 'cancelled' | 'error' | 'complete' | 'streaming' | undefined =
+          message.status === 'cancelled' || message.status === 'error' ? message.status : 'complete';
         let finalText = message.text;
-        
+
         if (finalStatus === 'complete' && !message.text) {
-           finalStatus = 'error';
-           finalText = 'Generation failed to return any text.';
+          finalStatus = 'error';
+          finalText = 'Generation failed to return any response.';
         }
-        
+
         return {
           ...message,
           text: finalText,
@@ -219,6 +281,7 @@ export const ChatbotScreen = () => {
         };
       });
       pendingAssistantMessageIdRef.current = null;
+      scrollViewRef.current?.scrollToEnd({ animated: true });
     }
   }, [runtime.activeGenerationRequestId, runtime.streamingResponseText, updateChatMessage]);
 
@@ -253,30 +316,43 @@ export const ChatbotScreen = () => {
       return 'Queuing local model setup...';
     }
     if (provisioning.status === 'downloading') {
-      return `Downloading the local Qwen model${progressPercent > 0 ? ` (${progressPercent}%)` : '...'} `;
+      return `Downloading local model${progressPercent > 0 ? ` (${progressPercent}%)` : '...'} `;
     }
     if (provisioning.status === 'verifying') {
-      return 'Verifying the downloaded model before activation...';
+      return 'Verifying downloaded model...';
     }
     if (provisioning.status === 'unpacking') {
-      return 'Moving the verified model into the active offline runtime location...';
+      return 'Preparing offline runtime...';
     }
     if (provisioning.status === 'registering') {
-      return 'Loading the model into the Android runtime. This can take a while on older phones.';
+      return 'Loading model into device memory...';
     }
     if (provisioning.status === 'warming') {
-      return 'Warming up the local runtime so your first real question is more stable.';
+      return 'Warming up local inference...';
     }
     if (provisioning.status === 'indexing') {
-      return 'Finalizing on-device AI setup and preparing local knowledge caches.';
+      return 'Finalizing local index...';
     }
     if (runtime.activeGenerationRequestId) {
-      return aiInferenceMode === 'external' ? 'Generating response from external API...' : 'Generating a response locally on your device.';
+      return aiInferenceMode === 'external' ? 'Generating response from external API...' : 'Generating response locally on device.';
     }
     return null;
-  }, [aiInferenceMode, chatRuntimeStatus, isLoading, isPreparingChatRuntime, loadingStatus, progressPercent, provisioning.status, runtime.activeGenerationRequestId, runtime.activeStatusLabel]);
+  }, [
+    aiInferenceMode,
+    chatRuntimeStatus,
+    isLoading,
+    isPreparingChatRuntime,
+    loadingStatus,
+    progressPercent,
+    provisioning.status,
+    runtime.activeGenerationRequestId,
+    runtime.activeStatusLabel,
+  ]);
 
-  const compactStatusTone = runtime.activeGenerationRequestId || isLoading || isPreparingChatRuntime || isBusyProvisioning ? theme.primary : theme.textMuted;
+  const compactStatusTone =
+    runtime.activeGenerationRequestId || isLoading || isPreparingChatRuntime || isBusyProvisioning
+      ? theme.primary
+      : theme.textMuted;
 
   const transferRateLabel = useMemo(() => {
     if (!provisioning.transfer.bytesPerSecond || provisioning.transfer.bytesPerSecond <= 0) {
@@ -308,21 +384,23 @@ export const ChatbotScreen = () => {
     }
   };
 
-  const handleSend = async () => {
-    if (!inputText.trim() || isLoading || isPreparingChatRuntime || runtime.activeGenerationRequestId || !canSendMessage) {
+  const executeSend = async (queryText: string) => {
+    if (!queryText.trim() || isLoading || isPreparingChatRuntime || runtime.activeGenerationRequestId || !canSendMessage) {
       return;
     }
 
-    const userQuery = inputText.trim();
+    const userQuery = queryText.trim();
     const userMessageId = `user-${Date.now()}`;
     const assistantMessageId = `assistant-${Date.now()}`;
     const startedAt = Date.now();
 
+    setLastFailedPrompt(null);
     assistantMessageStartedAtRef.current[assistantMessageId] = startedAt;
     pendingAssistantMessageIdRef.current = assistantMessageId;
     setInputText('');
     addChatMessage({ role: 'user', text: userQuery, id: userMessageId, createdAt: new Date(startedAt).toISOString() });
     addChatMessage({ role: 'ai', text: '', id: assistantMessageId, status: 'streaming', createdAt: new Date(startedAt).toISOString() });
+
     requestAnimationFrame(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     });
@@ -338,7 +416,7 @@ export const ChatbotScreen = () => {
       assistantMessageStartedAtRef.current[assistantMessageId] = durationMs;
       pendingAssistantMessageIdRef.current = null;
     } catch (error) {
-      const message = getErrorMessage(error, 'Local AI failed unexpectedly.');
+      const message = getErrorMessage(error, 'Silo AI query failed.');
       const isCancelled = message.toLowerCase().includes('cancel');
       const durationMs = Date.now() - startedAt;
       updateChatMessage(assistantMessageId, {
@@ -348,10 +426,27 @@ export const ChatbotScreen = () => {
       });
       assistantMessageStartedAtRef.current[assistantMessageId] = durationMs;
       pendingAssistantMessageIdRef.current = null;
+      if (!isCancelled) {
+        setLastFailedPrompt(userQuery);
+      }
     } finally {
       requestAnimationFrame(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       });
+    }
+  };
+
+  const handleSend = () => {
+    executeSend(inputText);
+  };
+
+  const handleSuggestionPress = (suggestion: string) => {
+    executeSend(suggestion);
+  };
+
+  const handleRetryLast = () => {
+    if (lastFailedPrompt) {
+      executeSend(lastFailedPrompt);
     }
   };
 
@@ -375,91 +470,132 @@ export const ChatbotScreen = () => {
   const isNotInstalled = provisioning.status === 'not-installed';
   const chatRuntimeActionLabel = isNotInstalled ? 'Set Up AI Model' : canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
-  const inlineModelStatusLabel = aiInferenceMode === 'external'
-    ? 'External API'
-    : hasUsableLocalInferenceBackend
-    ? `${getProvisioningStatusLabel(provisioning.status)}${progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}`
-    : 'Unavailable';
-  const displayModelSubtitle = aiInferenceMode === 'external'
-    ? `${externalApiProvider.toUpperCase()} · ${externalApiModel}`
-    : localModelDisplayName;
-  const showCompactLoader = Boolean(stageStatusMessage) && (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
+  const inlineModelStatusLabel =
+    aiInferenceMode === 'external'
+      ? 'External API'
+      : hasUsableLocalInferenceBackend
+      ? `${getProvisioningStatusLabel(provisioning.status)}${progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}`
+      : 'Unavailable';
+  const displayModelSubtitle =
+    aiInferenceMode === 'external' ? `${externalApiProvider.toUpperCase()} · ${externalApiModel}` : localModelDisplayName;
+  const showCompactLoader =
+    Boolean(stageStatusMessage) &&
+    (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={styles.keyboardShell} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}> 
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.headerIconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Ionicons name="chevron-back" size={24} color={theme.text} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={styles.headerTitleRow}>
               <Text style={[styles.headerTitle, { color: theme.text }]}>Silo AI</Text>
               <View style={[styles.inlineStatusChip, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                <View style={[styles.inlineStatusDot, { backgroundColor: canRunNativeChat ? theme.primary : hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense }]} />
-                <Text style={[styles.inlineStatusChipText, { color: canRunNativeChat ? theme.primary : theme.textMuted }]}>{inlineModelStatusLabel}</Text>
+                <View
+                  style={[
+                    styles.inlineStatusDot,
+                    { backgroundColor: canRunNativeChat ? theme.primary : hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense },
+                  ]}
+                />
+                <Text style={[styles.inlineStatusChipText, { color: canRunNativeChat ? theme.primary : theme.textMuted }]}>
+                  {inlineModelStatusLabel}
+                </Text>
               </View>
             </View>
-            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]} numberOfLines={1}>{displayModelSubtitle}</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
+              {displayModelSubtitle}
+            </Text>
           </View>
-          <TouchableOpacity onPress={clearChatHistory} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={handleClearHistoryWithConfirm}
+            style={styles.headerIconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Clear chat history"
+          >
             <Ionicons name="trash-outline" size={20} color={theme.expense} />
           </TouchableOpacity>
         </View>
 
+        {/* Status Card & Loader */}
         <View style={[styles.statusCard, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <View style={styles.statusHeaderRow}>
-            <Text style={[styles.statusMessage, styles.statusMessageTight, { color: hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense }]}>
+            <Text
+              style={[
+                styles.statusMessage,
+                styles.statusMessageTight,
+                { color: hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense },
+              ]}
+            >
               {localInferenceStatusMessage}
             </Text>
             {showPrimaryProvisionAction ? (
-              <TouchableOpacity style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]} onPress={handleProvisionAction}>
+              <TouchableOpacity
+                style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]}
+                onPress={handleProvisionAction}
+                accessibilityRole="button"
+              >
                 <Text style={styles.primaryMiniButtonText}>Retry</Text>
               </TouchableOpacity>
             ) : null}
           </View>
-          {showCompactLoader ? (
+
+          {showCompactLoader && (
             <View style={[styles.compactStatusBar, { backgroundColor: theme.background, borderColor: theme.border }]}>
               <ActivityIndicator color={theme.primary} size="small" />
               <View style={styles.compactStatusCopy}>
-                <Text style={[styles.compactStatusTitle, { color: compactStatusTone }]} numberOfLines={2}>{stageStatusMessage || 'Provisioning local Qwen model...'}</Text>
-                {statusMetaLabel ? <Text style={[styles.compactStatusMeta, { color: theme.textMuted }]}>{statusMetaLabel}</Text> : null}
+                <Text style={[styles.compactStatusTitle, { color: compactStatusTone }]} numberOfLines={2}>
+                  {stageStatusMessage || 'Preparing AI model...'}
+                </Text>
+                {statusMetaLabel && (
+                  <Text style={[styles.compactStatusMeta, { color: theme.textMuted }]}>{statusMetaLabel}</Text>
+                )}
               </View>
               {runtime.activeGenerationRequestId ? (
-                <TouchableOpacity onPress={handleCancelGeneration} style={styles.pauseButton}>
+                <TouchableOpacity onPress={handleCancelGeneration} style={styles.pauseButton} accessibilityRole="button">
                   <Text style={[styles.pauseButtonText, { color: theme.expense }]}>Stop</Text>
                 </TouchableOpacity>
               ) : isBusyProvisioning ? (
-                <TouchableOpacity onPress={handleCancelDownload} style={styles.pauseButton}>
+                <TouchableOpacity onPress={handleCancelDownload} style={styles.pauseButton} accessibilityRole="button">
                   <Text style={[styles.pauseButtonText, { color: theme.expense }]}>Cancel</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
-          ) : null}
-          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && transferRateLabel && !showCompactLoader ? (
-            <Text style={[styles.metaLine, { color: theme.textMuted }]}>Transfer rate: {transferRateLabel}</Text>
-          ) : null}
-          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && provisioning.lastError ? (
-            <Text style={[styles.metaLine, { color: theme.expense }]}>{provisioning.lastError}</Text>
-          ) : null}
-          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && provisioning.pausedReason ? (
-            <Text style={[styles.headerSubtitle, { color: theme.textMuted }]}>
-              {provisioningStatus === 'ready' ? 'Ready for queries' : 'Preparing...'}
-            </Text>
-          ) : null}
-          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && !provisioning.lastError && !provisioning.pausedReason && !canRunNativeChat && !showCompactLoader ? (
-            <Text style={[styles.metaLine, { color: theme.textMuted }]}>
-              {runtimePhaseActive
-                ? 'The local model file is installed and the runtime is finishing registration, warmup, and index initialization.'
-                : 'Model download must complete in one uninterrupted pass so partial files are never treated as installed.'}
-            </Text>
-          ) : null}
+          )}
+
+          {aiInferenceMode === 'local' && hasUsableLocalInferenceBackend && transferRateLabel && !showCompactLoader && (
+            <Text style={[styles.metaLine, { color: theme.textMuted }]}>Transfer speed: {transferRateLabel}</Text>
+          )}
         </View>
 
+        {/* Actionable Error Banner if last request failed */}
+        {lastFailedPrompt && (
+          <View style={[styles.errorBanner, { backgroundColor: theme.expenseMuted, borderColor: theme.expense }]}>
+            <Ionicons name="alert-circle-outline" size={18} color={theme.expense} style={{ marginRight: 8 }} />
+            <Text style={[styles.errorBannerText, { color: theme.expense }]}>
+              Previous query encountered an error.
+            </Text>
+            <TouchableOpacity style={[styles.retryPill, { backgroundColor: theme.expense }]} onPress={handleRetryLast}>
+              <Ionicons name="refresh" size={14} color="#fff" style={{ marginRight: 4 }} />
+              <Text style={styles.retryPillText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Mode Toggle: Grounded vs Chat */}
         <View style={[styles.toggleContainer, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <TouchableOpacity
             style={[styles.toggleBtn, aiMode === 'rag' && { backgroundColor: theme.primary }]}
             onPress={() => setSelectedMode('rag')}
+            accessibilityRole="button"
+            accessibilityLabel="Switch to Grounded mode"
           >
             <Text style={[styles.toggleText, { color: aiMode === 'rag' ? '#fff' : theme.textMuted }]}>Grounded</Text>
           </TouchableOpacity>
@@ -469,28 +605,43 @@ export const ChatbotScreen = () => {
               setChatRuntimeRequested(true);
               setSelectedMode('chat');
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Switch to Chat mode"
           >
             <Text style={[styles.toggleText, { color: aiMode === 'chat' ? '#fff' : theme.textMuted }]}>Chat</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Chat History Scroll */}
         <ScrollView
           ref={scrollViewRef}
           style={styles.chatArea}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: Math.max(88, insets.bottom + keyboardHeight + 72) }}
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+          contentContainerStyle={{
+            paddingHorizontal: 14,
+            paddingTop: 14,
+            paddingBottom: Math.max(88, insets.bottom + keyboardHeight + 72),
+          }}
+          onContentSizeChange={() => {
+            if (runtime.activeGenerationRequestId) {
+              scrollViewRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
         >
           {showChatRuntimeGate ? (
             <View style={styles.emptyStateWrap}>
               <View style={[styles.chatGateCard, styles.chatGateCardCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Ionicons name="sparkles-outline" size={18} color={theme.primary} />
+                <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
                 <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
-                  {stageStatusMessage ?? 'Loading the offline chatbot only after entering this screen.'}
+                  {stageStatusMessage ?? 'Loading the offline chatbot on device...'}
                 </Text>
                 {canStartOrRetryProvisioning ? (
-                  <TouchableOpacity style={[styles.chatGateButton, { backgroundColor: theme.primary }]} onPress={handleProvisionAction}>
+                  <TouchableOpacity
+                    style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                    onPress={handleProvisionAction}
+                    accessibilityRole="button"
+                  >
                     <Text style={styles.chatGateButtonText}>{chatRuntimeActionLabel}</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -500,57 +651,61 @@ export const ChatbotScreen = () => {
             <View style={styles.emptyStateWrap}>
               <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
                 {canSendMessage
-                  ? 'Ask anything about your finances or choose a quick topic below:'
+                  ? 'Ask anything about your personal finances or tap a quick question:'
                   : aiMode === 'rag'
-                    ? 'Grounded questions are answered from records stored on this device only.'
-                    : 'Chat mode is disabled because this build does not include a usable on-device generation runtime.'}
+                  ? 'Grounded queries are answered from records stored on this device only.'
+                  : 'Chat mode is disabled because on-device generation is unavailable.'}
               </Text>
-              
-              {canSendMessage ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14, justifyContent: 'center' }}>
-                  {[
-                    'What is my total balance?',
-                    'How much did I spend on food in the last 30 days?',
-                    'Show my recent transactions',
-                    'How can I save 20% of my income?',
-                  ].map((suggestion, idx) => (
+
+              {/* Interactive Quick Suggestion Pills */}
+              {canSendMessage && (
+                <View style={styles.suggestionGrid}>
+                  {QUICK_SUGGESTIONS.map((suggestion, idx) => (
                     <TouchableOpacity
                       key={idx}
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 16,
-                        backgroundColor: theme.surface,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                      }}
-                      onPress={() => setInputText(suggestion)}
+                      style={[
+                        styles.suggestionPill,
+                        {
+                          backgroundColor: theme.surface,
+                          borderColor: theme.border,
+                        },
+                      ]}
+                      onPress={() => handleSuggestionPress(suggestion.text)}
+                      accessibilityRole="button"
                     >
-                      <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '500' }}>{suggestion}</Text>
+                      <Ionicons
+                        name={suggestion.icon as any}
+                        size={16}
+                        color={theme.primary}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text style={[styles.suggestionText, { color: theme.text }]}>{suggestion.text}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              ) : null}
+              )}
 
-              {stageStatusMessage ? (
-                <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 14 }]}>
+              {stageStatusMessage && (
+                <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                   <ActivityIndicator color={theme.primary} />
                   <Text style={[styles.inlineStatusText, { color: theme.textMuted }]}>{stageStatusMessage}</Text>
                 </View>
-              ) : null}
+              )}
             </View>
           ) : null}
 
+          {/* Messages */}
           {chatHistory.map((msg, index) => {
             const measuredDuration = msg.id ? assistantMessageStartedAtRef.current[msg.id] : null;
-            const durationLabel = typeof measuredDuration === 'number' && msg.role === 'ai' && msg.status === 'complete' && measuredDuration < 600000
-              ? `${(measuredDuration / 1000).toFixed(measuredDuration >= 10000 ? 0 : 1)}s inference`
-              : null;
+            const durationLabel =
+              typeof measuredDuration === 'number' && msg.role === 'ai' && msg.status === 'complete' && measuredDuration < 600000
+                ? `${(measuredDuration / 1000).toFixed(measuredDuration >= 10000 ? 0 : 1)}s inference`
+                : null;
 
             return (
               <View key={msg.id ?? index} style={styles.messageWrap}>
                 <TouchableOpacity
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                   onLongPress={() => handleCopyToClipboard(msg.text)}
                   style={[
                     styles.messageBubble,
@@ -560,45 +715,73 @@ export const ChatbotScreen = () => {
                   ]}
                 >
                   {msg.role === 'user' ? (
-                    <Text selectable style={{ fontSize: 16, color: '#fff' }}>{msg.text}</Text>
+                    <Text selectable style={{ fontSize: 15, color: '#fff', lineHeight: 22 }}>
+                      {msg.text}
+                    </Text>
                   ) : msg.text ? (
-                    parseMessageWithCharts(msg.text).map((part, partIndex) => (
+                    parseMessageWithCharts(msg.text).map((part, partIndex) =>
                       part.type === 'markdown' ? (
-                        <Markdown key={partIndex} style={{ body: { fontSize: 16, color: theme.text } }}>{part.content}</Markdown>
+                        <Markdown
+                          key={partIndex}
+                          style={{
+                            body: { fontSize: 15, color: theme.text, lineHeight: 22 },
+                            code_inline: { backgroundColor: theme.background, color: theme.primary },
+                          }}
+                        >
+                          {part.content}
+                        </Markdown>
                       ) : (
                         <ChatChart key={partIndex} type={part.chartType!} data={part.chartData!} />
                       )
-                    ))
+                    )
                   ) : (
                     <View style={styles.messageLoadingRow}>
                       <ActivityIndicator color={theme.primary} size="small" />
                       <Text style={[styles.messageLoadingText, { color: theme.textMuted }]}>Thinking…</Text>
                     </View>
                   )}
-                  {msg.role === 'ai' && msg.status && msg.status !== 'complete' ? (
+                  {msg.role === 'ai' && msg.status && msg.status !== 'complete' && (
                     <Text style={[styles.messageMeta, { color: msg.status === 'error' ? theme.expense : theme.textMuted }]}>
-                      {msg.status === 'streaming' ? 'Thinking locally…' : msg.status === 'cancelled' ? 'Cancelled' : 'Error'}
+                      {msg.status === 'streaming' ? 'Generating response…' : msg.status === 'cancelled' ? 'Cancelled' : 'Error'}
                     </Text>
-                  ) : null}
+                  )}
                 </TouchableOpacity>
-                {durationLabel ? <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text> : null}
+                {durationLabel && <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text>}
               </View>
             );
           })}
         </ScrollView>
 
-        <View style={[styles.inputArea, { backgroundColor: theme.surface, borderTopColor: theme.border, paddingBottom: Math.max(insets.bottom + 10, keyboardHeight > 0 && Platform.OS === 'android' ? 12 : 16) }]}>
+        {/* Input Bar */}
+        <View
+          style={[
+            styles.inputArea,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              paddingBottom: Math.max(insets.bottom + 10, keyboardHeight > 0 && Platform.OS === 'android' ? 12 : 16),
+            },
+          ]}
+        >
           <TextInput
-            style={[styles.input, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text, opacity: canSendMessage && !showChatRuntimeGate ? 1 : 0.7 }]}
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.background,
+                borderColor: theme.border,
+                color: theme.text,
+                opacity: canSendMessage && !showChatRuntimeGate ? 1 : 0.7,
+              },
+            ]}
             placeholderTextColor={theme.textMuted}
             placeholder={
               showChatRuntimeGate
-                ? 'Waiting for the local chatbot to finish loading...'
+                ? 'Waiting for AI chatbot to load...'
                 : canSendMessage
-                  ? 'Ask about your finances...'
-                  : aiMode === 'rag'
-                    ? 'Ask a grounded question about your local records...'
-                    : 'Chat mode unavailable: no local inference backend wired'
+                ? 'Ask about your finances or spending...'
+                : aiMode === 'rag'
+                ? 'Ask a grounded query about your records...'
+                : 'Chat mode unavailable on this build'
             }
             value={inputText}
             onChangeText={setInputText}
@@ -608,12 +791,31 @@ export const ChatbotScreen = () => {
             maxLength={2000}
           />
           {runtime.activeGenerationRequestId ? (
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: theme.expense }]} onPress={handleCancelGeneration}>
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: theme.expense }]}
+              onPress={handleCancelGeneration}
+              accessibilityRole="button"
+              accessibilityLabel="Stop generation"
+            >
               <Ionicons name="stop" size={18} color="#fff" />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: canSendMessage && !showChatRuntimeGate && !runtime.activeGenerationRequestId ? theme.primary : theme.border }]} onPress={handleSend} disabled={!canSendMessage || isLoading || showChatRuntimeGate || Boolean(runtime.activeGenerationRequestId)}>
-              <Ionicons name="send" size={20} color="#fff" />
+            <TouchableOpacity
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    canSendMessage && !showChatRuntimeGate && !runtime.activeGenerationRequestId && inputText.trim()
+                      ? theme.primary
+                      : theme.border,
+                },
+              ]}
+              onPress={handleSend}
+              disabled={!canSendMessage || isLoading || showChatRuntimeGate || Boolean(runtime.activeGenerationRequestId) || !inputText.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+            >
+              <Ionicons name="send" size={18} color="#fff" />
             </TouchableOpacity>
           )}
         </View>
@@ -625,57 +827,122 @@ export const ChatbotScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardShell: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  headerIconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flex: 1, marginHorizontal: 8 },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { fontSize: 17, fontWeight: '600' },
-  headerSubtitle: { fontSize: 10, marginTop: 1 },
-  inlineStatusChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, maxWidth: '68%' },
+  headerTitle: { fontSize: 17, fontWeight: '700' },
+  headerSubtitle: { fontSize: 11, marginTop: 1 },
+  inlineStatusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    maxWidth: '68%',
+  },
   inlineStatusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
   inlineStatusChipText: { fontSize: 10, fontWeight: '700', flexShrink: 1 },
-  backButton: { padding: 4 },
-  statusCard: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1 },
+  statusCard: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1 },
   statusHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  statusCopy: { flex: 1, paddingRight: 12 },
-  statusTitle: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
-  statusSubtitle: { fontSize: 11, fontWeight: '600' },
   statusMessage: { fontSize: 11, lineHeight: 15, marginTop: 2, flex: 1 },
   statusMessageTight: { marginTop: 0 },
   metaLine: { fontSize: 10, lineHeight: 14, marginTop: 4 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  progressText: { marginLeft: 8, fontSize: 12, flex: 1 },
-  pauseButton: { paddingHorizontal: 8, paddingVertical: 4 },
+  pauseButton: { paddingHorizontal: 8, paddingVertical: 4, minHeight: 44, justifyContent: 'center' },
   pauseButtonText: { fontSize: 12, fontWeight: '700' },
-  primaryMiniButton: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  primaryMiniButton: { borderRadius: 999, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center', alignItems: 'center' },
   primaryMiniButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  toggleContainer: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 5, borderBottomWidth: 1 },
-  toggleBtn: { flex: 1, paddingVertical: 6, alignItems: 'center', borderRadius: 8 },
-  toggleText: { fontSize: 14, fontWeight: 'bold' },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderRadius: 12,
+  },
+  errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
+  retryPill: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  retryPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  toggleContainer: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1 },
+  toggleBtn: { flex: 1, minHeight: 38, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
+  toggleText: { fontSize: 13, fontWeight: '700' },
   chatArea: { flex: 1 },
-  emptyStateWrap: { marginTop: 24, gap: 12 },
+  emptyStateWrap: { marginTop: 20, gap: 14 },
   chatGateCard: { borderWidth: 1, borderRadius: 18, padding: 16, alignItems: 'center', gap: 10 },
   chatGateCardCompact: { paddingVertical: 14 },
-  chatGateTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  chatGateText: { fontSize: 12, lineHeight: 18, textAlign: 'center' },
-  chatGateMeta: { fontSize: 12, lineHeight: 18, textAlign: 'center' },
-  chatGateButton: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10, marginTop: 4 },
+  chatGateText: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  chatGateButton: { borderRadius: 999, paddingHorizontal: 18, minHeight: 44, justifyContent: 'center', marginTop: 4 },
   chatGateButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  placeholderText: { textAlign: 'center' },
+  placeholderText: { textAlign: 'center', fontSize: 13, lineHeight: 18, paddingHorizontal: 16 },
+  suggestionGrid: { flexDirection: 'column', gap: 8, paddingHorizontal: 4 },
+  suggestionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 46,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  suggestionText: { fontSize: 13, fontWeight: '600', flex: 1 },
   inlineStatusCard: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   inlineStatusText: { flex: 1, fontSize: 11, lineHeight: 16 },
-  compactStatusBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, marginTop: 6, paddingHorizontal: 10, paddingVertical: 7 },
+  compactStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
   compactStatusCopy: { flex: 1 },
   compactStatusTitle: { fontSize: 12, fontWeight: '700' },
   compactStatusMeta: { fontSize: 11, marginTop: 2 },
-  messageWrap: { marginBottom: 10 },
-  messageBubble: { maxWidth: '85%', padding: 11, borderRadius: 12 },
-  userBubble: { alignSelf: 'flex-end', borderBottomRightRadius: 2 },
-  aiBubble: { alignSelf: 'flex-start', borderWidth: 1, borderBottomLeftRadius: 2 },
-  messageLoadingRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  messageLoadingText: { marginLeft: 8, fontSize: 12, flex: 1 },
+  messageWrap: { marginBottom: 12 },
+  messageBubble: { maxWidth: '85%', padding: 12, borderRadius: 16 },
+  userBubble: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+  aiBubble: { alignSelf: 'flex-start', borderWidth: 1, borderBottomLeftRadius: 4 },
+  messageLoadingRow: { flexDirection: 'row', alignItems: 'center' },
+  messageLoadingText: { marginLeft: 8, fontSize: 13 },
   messageMeta: { marginTop: 8, fontSize: 11, fontWeight: '600' },
-  durationText: { fontSize: 11, marginTop: 4, marginLeft: 4 },
-  inputArea: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 8, borderTopWidth: 1 },
-  input: { flex: 1, minHeight: 44, maxHeight: 120, borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, marginRight: 10, textAlignVertical: 'top' },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
+  durationText: { fontSize: 10, marginTop: 4, marginLeft: 4 },
+  inputArea: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+  },
+  input: {
+    flex: 1,
+    minHeight: 46,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: 8,
+    textAlignVertical: 'top',
+    fontSize: 14,
+  },
+  sendBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
 });

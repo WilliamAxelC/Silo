@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, ScrollView, Image, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Image,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,12 +21,12 @@ import { formatAmountInput, parseSignedAmount } from '../features/transactions/a
 import { getCategoryTypeForTransaction } from '../features/transactions/categories';
 import { createTransactionInput, deriveEditableTransactionType, normalizeTransactionInput } from '../features/transactions/factories';
 import { buildEditableTransactionInput } from '../features/transactions/mappers';
-import type { CategoryRecord, TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
+import type { TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
 import { analyzeReceiptImage } from '../services/ai/agent';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
-import { useAIStore, getAIRuntimeAvailability } from '../store/useAIStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -74,6 +86,8 @@ export const AddTransactionScreen = () => {
   const route = useRoute<AddTransactionScreenRouteProp>();
   const editingId = route.params?.transactionId;
   const theme = useAppTheme();
+  const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const dateFormat = useSettingsStore((s) => s.dateFormat);
 
   const {
     addTransaction,
@@ -85,7 +99,6 @@ export const AddTransactionScreen = () => {
     getCategoriesByType,
     normalizeCategoryForType,
   } = useTransactionStore();
-  const { provisioning, runtimeReady, warmupPending } = useAIStore();
 
   const [type, setType] = useState<TransactionType>('expense');
   const [title, setTitle] = useState('');
@@ -99,7 +112,6 @@ export const AddTransactionScreen = () => {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
 
-  const [imageModalVisible, setImageModalVisible] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [sourceModalTarget, setSourceModalTarget] = useState<'attachment' | 'scan' | null>(null);
@@ -108,11 +120,15 @@ export const AddTransactionScreen = () => {
   const [customCategory, setCustomCategory] = useState('');
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scanStatusLabel, setScanStatusLabel] = useState<string | null>(null);
 
   const activeCategoryType = getCategoryTypeForTransaction(type);
-  const availableCategories = useMemo(() => getCategoriesByType(activeCategoryType), [activeCategoryType, categories, getCategoriesByType]);
+  const availableCategories = useMemo(
+    () => getCategoriesByType(activeCategoryType),
+    [activeCategoryType, categories, getCategoriesByType]
+  );
   const lineItemsText = useMemo(() => serializeReceiptLineItems(lineItems), [lineItems]);
-  const compactDateLabel = selectedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  const compactDateLabel = selectedDate.toLocaleDateString(dateFormat || 'en-GB', { day: '2-digit', month: 'short' });
   const compactTimeLabel = selectedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const detailModeOptions = useMemo(
@@ -136,6 +152,7 @@ export const AddTransactionScreen = () => {
     setImageUri(nextForm.imageUri ?? null);
     setType(nextForm.type);
     setSelectedDate(new Date());
+    setScanStatusLabel(null);
   };
 
   useEffect(() => {
@@ -206,7 +223,9 @@ export const AddTransactionScreen = () => {
 
   const updateReceiptItemRow = (id: string, field: keyof Omit<ReceiptLineItemDraft, 'id'>, value: string) => {
     setLineItems((current) =>
-      current.map((item) => (item.id === id ? { ...item, [field]: field === 'price' ? formatAmountInput(value) : value } : item))
+      current.map((item) =>
+        item.id === id ? { ...item, [field]: field === 'price' ? formatAmountInput(value) : value } : item
+      )
     );
   };
 
@@ -240,9 +259,12 @@ export const AddTransactionScreen = () => {
   const processScanReceipt = async (uri: string, base64String?: string) => {
     setImageUri(uri);
     setIsScanning(true);
+    setScanStatusLabel('Starting receipt scan...');
 
     try {
-      const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined);
+      const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined, (status: string) => {
+        setScanStatusLabel(status);
+      });
 
       if (parsedData) {
         if (parsedData.merchantName) setTitle(parsedData.merchantName);
@@ -270,15 +292,18 @@ export const AddTransactionScreen = () => {
           const parsedDate = new Date(parsedData.date);
           if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
         }
+        setScanStatusLabel(null);
       } else {
-        Alert.alert('Scan Failed', 'The AI failed to format the extracted text. Capture the image and enter the details manually.');
+        Alert.alert('Scan Result', 'Extracted image details. Review and adjust fields if needed.');
+        setScanStatusLabel(null);
       }
     } catch (error: any) {
       console.warn('OCR error:', error);
+      setScanStatusLabel(null);
       if (error?.message === 'NO_TEXT_DETECTED') {
         Alert.alert('No Text Detected', 'We couldn\'t find any readable text in the image. Please make sure the receipt is clear and try again.');
       } else {
-        Alert.alert('Scan Failed', 'Failed to scan the receipt. Please try again or enter details manually.');
+        Alert.alert('Scan Failed', 'Failed to scan the receipt automatically. Please enter details manually.');
       }
     } finally {
       setIsScanning(false);
@@ -332,7 +357,7 @@ export const AddTransactionScreen = () => {
 
   const handleDelete = () => {
     if (!editingId) return;
-    Alert.alert('Delete Transaction', 'Are you sure you want to delete this?', [
+    Alert.alert('Delete Transaction', 'Are you sure you want to delete this transaction?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -346,8 +371,9 @@ export const AddTransactionScreen = () => {
     ]);
   };
 
-  const handleAddCustomCategory = async () => {
-    const trimmedCategory = customCategory.trim();
+  const handleAddCustomCategory = async (nameOverride?: string) => {
+    const target = typeof nameOverride === 'string' ? nameOverride : customCategory;
+    const trimmedCategory = target.trim();
 
     if (trimmedCategory !== '') {
       try {
@@ -363,176 +389,290 @@ export const AddTransactionScreen = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.headerBackButton}
-            onPress={() => {
-              resetForm();
-              if (navigation.canGoBack()) {
-                navigation.goBack();
-              } else {
-                navigation.navigate('MainTabs', { screen: 'Cashflow' });
-              }
-            }}
-          >
-            <Ionicons name="chevron-back" size={24} color={theme.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerScreenTitle, { color: theme.text }]}>{editingId ? 'Edit Transaction' : 'Add Transaction'}</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        <View style={styles.compactRow}>
-          <View style={[styles.typeToggle, styles.compactTypeToggle, { borderColor: theme.border, backgroundColor: theme.surface }] }>
-            <TouchableOpacity style={[styles.toggleBtn, styles.compactToggleBtn, { backgroundColor: type === 'income' ? theme.income : 'transparent' }]} onPress={() => setType('income')}>
-              <Text style={[styles.toggleText, { color: type === 'income' ? '#fff' : theme.textMuted }]}>Income</Text>
+      <KeyboardAvoidingView
+        style={styles.keyboardShell}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Top Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={[styles.headerBackButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              onPress={() => {
+                resetForm();
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.navigate('MainTabs', { screen: 'Cashflow' });
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="chevron-back" size={22} color={theme.text} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.toggleBtn, styles.compactToggleBtn, { backgroundColor: type === 'expense' ? theme.expense : 'transparent' }]} onPress={() => setType('expense')}>
-              <Text style={[styles.toggleText, { color: type === 'expense' ? '#fff' : theme.textMuted }]}>Expense</Text>
-            </TouchableOpacity>
+            <Text style={[styles.headerScreenTitle, { color: theme.text }]}>
+              {editingId ? 'Edit Transaction' : 'Add Transaction'}
+            </Text>
+            <View style={styles.headerSpacer} />
           </View>
-          <TouchableOpacity
-            style={[styles.scanButtonCompact, { backgroundColor: theme.primary, opacity: isScanning ? 0.7 : 1 }]}
-            onPress={openScanSourceModal}
-            disabled={isScanning}
-          >
-            {isScanning ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="scan-outline" size={18} color="#fff" />}
-            <Text style={styles.scanButtonTextCompact}>{isScanning ? 'Scanning' : 'Scan'}</Text>
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.compactRow}>
-          <View style={[styles.fieldCard, styles.flexField]}>
-            <Text style={[styles.label, { color: theme.text }]}>Title*</Text>
-            <TextInput
-              style={[styles.compactInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
-              placeholderTextColor={theme.textMuted}
-              value={title}
-              onChangeText={setTitle}
-              placeholder="Store or transaction"
-            />
-          </View>
-          <View style={[styles.fieldCard, styles.amountField]}>
-            <Text style={[styles.label, { color: theme.text }]}>Amount*</Text>
-            <View style={styles.amountInputContainer}>
-              <View style={[styles.currencyBadge, styles.compactCurrencyBadge, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
-                <Text style={[styles.currencyText, { color: theme.textMuted }]}>Rp</Text>
+          {/* Real-time Scan Status Feedback Banner */}
+          {isScanning && (
+            <View style={[styles.scanStatusBar, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}>
+              <ActivityIndicator color={theme.primary} size="small" style={styles.scanSpinner} />
+              <View style={styles.scanStatusTextWrap}>
+                <Text style={[styles.scanStatusTitle, { color: theme.primary }]}>Scanning Receipt</Text>
+                <Text style={[styles.scanStatusSub, { color: theme.text }]}>
+                  {scanStatusLabel || 'Extracting text and identifying line items...'}
+                </Text>
               </View>
+            </View>
+          )}
+
+          {/* Type Toggle + Scan Receipt Button */}
+          <View style={styles.compactRow}>
+            <View style={[styles.typeToggle, styles.compactTypeToggle, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+              <TouchableOpacity
+                style={[
+                  styles.toggleBtn,
+                  styles.compactToggleBtn,
+                  { backgroundColor: type === 'expense' ? theme.expense : 'transparent' },
+                ]}
+                onPress={() => setType('expense')}
+                accessibilityRole="button"
+                accessibilityLabel="Set Expense type"
+              >
+                <Text style={[styles.toggleText, { color: type === 'expense' ? '#fff' : theme.textMuted }]}>Expense</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.toggleBtn,
+                  styles.compactToggleBtn,
+                  { backgroundColor: type === 'income' ? theme.income : 'transparent' },
+                ]}
+                onPress={() => setType('income')}
+                accessibilityRole="button"
+                accessibilityLabel="Set Income type"
+              >
+                <Text style={[styles.toggleText, { color: type === 'income' ? '#fff' : theme.textMuted }]}>Income</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.scanButtonCompact, { backgroundColor: theme.primary, opacity: isScanning ? 0.7 : 1 }]}
+              onPress={openScanSourceModal}
+              disabled={isScanning}
+              accessibilityRole="button"
+              accessibilityLabel="Scan receipt"
+            >
+              {isScanning ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="scan-outline" size={18} color="#fff" />
+              )}
+              <Text style={styles.scanButtonTextCompact}>{isScanning ? 'Scanning…' : 'Scan'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Title & Amount Fields */}
+          <View style={styles.compactRow}>
+            <View style={[styles.fieldCard, styles.flexField]}>
+              <Text style={[styles.label, { color: theme.text }]}>Title *</Text>
               <TextInput
-                style={[styles.amountInput, styles.compactAmountInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+                style={[styles.compactInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
                 placeholderTextColor={theme.textMuted}
-                value={amount}
-                onChangeText={handleAmountChange}
-                keyboardType="numeric"
-                placeholder="0"
+                value={title}
+                onChangeText={setTitle}
+                placeholder="Merchant or title"
               />
             </View>
-          </View>
-        </View>
-
-        <View style={styles.compactRow}>
-          <View style={[styles.fieldCard, styles.flexField]}>
-            <Text style={[styles.label, { color: theme.text }]}>Category</Text>
-            <TouchableOpacity
-              style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
-              onPress={() => setCategoryModalVisible(true)}
-            >
-              <Text style={[styles.iconInputText, { color: theme.text }]} numberOfLines={1}>{category}</Text>
-              <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
-            </TouchableOpacity>
-          </View>
-          <View style={[styles.fieldCard, styles.dateGroup]}>
-            <Text style={[styles.label, { color: theme.text }]}>When</Text>
-            <View style={styles.inlineDateActions}>
-              <TouchableOpacity style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => openPicker('date')}>
-                <Ionicons name="calendar-outline" size={15} color={theme.textMuted} />
-                <Text style={[styles.miniActionText, { color: theme.text }]}>{compactDateLabel}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => openPicker('time')}>
-                <Ionicons name="time-outline" size={15} color={theme.textMuted} />
-                <Text style={[styles.miniActionText, { color: theme.text }]}>{compactTimeLabel}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.inputGroupCompact}>
-          <View style={styles.inlineSectionHeader}>
-            <Text style={[styles.sectionTitleCompact, { color: theme.text }]}>Details</Text>
-            <View style={[styles.detailsModeToggle, styles.compactDetailsToggle, { borderColor: theme.border, backgroundColor: theme.surface }] }>
-              {detailModeOptions.map((option) => {
-                const isActive = detailsMode === option.key;
-                return (
-                  <TouchableOpacity
-                    key={option.key}
-                    style={[styles.detailsModeBtn, styles.compactDetailsBtn, { backgroundColor: isActive ? theme.primary : 'transparent' }]}
-                    onPress={() => handleDetailsModeChange(option.key)}
-                  >
-                    <Text style={[styles.detailsModeText, { color: isActive ? '#fff' : theme.textMuted }]}>{option.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          {(detailsMode === 'note' || detailsMode === 'both') ? (
-            <TextInput
-              style={[styles.compactInput, styles.noteInputCompact, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
-              value={note}
-              onChangeText={setNote}
-              placeholder="Description or note"
-              placeholderTextColor={theme.textMuted}
-              multiline
-              textAlignVertical="top"
-            />
-          ) : null}
-
-          {(detailsMode === 'receipt' || detailsMode === 'both') ? (
-            <ReceiptItemsEditor
-              lineItems={lineItems}
-              onAddRow={addReceiptItemRow}
-              onRemoveRow={removeReceiptItemRow}
-              onUpdateRow={updateReceiptItemRow}
-            />
-          ) : null}
-        </View>
-
-        <View style={styles.compactRow}>
-          <View style={[styles.fieldCard, styles.flexField]}>
-            <Text style={[styles.label, { color: theme.text }]}>Attachment</Text>
-            <TouchableOpacity style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => !imageUri && openAttachmentSourceModal()}>
-              {imageUri ? (
-                <>
-                  <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
-                  <TouchableOpacity style={styles.removeImageBtnCompact} onPress={() => setImageUri(null)}>
-                    <Ionicons name="close-circle" size={24} color={theme.expense} />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <View style={styles.attachmentCompactEmpty}>
-                  <Ionicons name="attach" size={16} color={theme.textMuted} />
-                  <Text style={[styles.attachmentCompactText, { color: theme.textMuted }]}>Add photo</Text>
+            <View style={[styles.fieldCard, styles.amountField]}>
+              <Text style={[styles.label, { color: theme.text }]}>Amount *</Text>
+              <View style={styles.amountInputContainer}>
+                <View style={[styles.currencyBadge, styles.compactCurrencyBadge, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <Text style={[styles.currencyText, { color: theme.textMuted }]}>{currencyCode}</Text>
                 </View>
+                <TextInput
+                  style={[styles.amountInput, styles.compactAmountInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+                  placeholderTextColor={theme.textMuted}
+                  value={amount}
+                  onChangeText={handleAmountChange}
+                  keyboardType="numeric"
+                  placeholder="0"
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Category & Date Pickers */}
+          <View style={styles.compactRow}>
+            <View style={[styles.fieldCard, styles.flexField]}>
+              <Text style={[styles.label, { color: theme.text }]}>Category</Text>
+              <TouchableOpacity
+                style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={() => setCategoryModalVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Select category"
+              >
+                <Text style={[styles.iconInputText, { color: theme.text }]} numberOfLines={1}>
+                  {category || 'Select category'}
+                </Text>
+                <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.fieldCard, styles.dateGroup]}>
+              <Text style={[styles.label, { color: theme.text }]}>Date & Time</Text>
+              <View style={styles.inlineDateActions}>
+                <TouchableOpacity
+                  style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                  onPress={() => openPicker('date')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick date"
+                >
+                  <Ionicons name="calendar-outline" size={15} color={theme.textMuted} />
+                  <Text style={[styles.miniActionText, { color: theme.text }]}>{compactDateLabel}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border, marginLeft: 6 }]}
+                  onPress={() => openPicker('time')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick time"
+                >
+                  <Ionicons name="time-outline" size={15} color={theme.textMuted} />
+                  <Text style={[styles.miniActionText, { color: theme.text }]}>{compactTimeLabel}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          {/* Details Section (Note vs Items vs Both) */}
+          <View style={styles.inputGroupCompact}>
+            <View style={styles.inlineSectionHeader}>
+              <Text style={[styles.sectionTitleCompact, { color: theme.text }]}>Details</Text>
+              <View style={[styles.detailsModeToggle, styles.compactDetailsToggle, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+                {detailModeOptions.map((option) => {
+                  const isActive = detailsMode === option.key;
+                  return (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[
+                        styles.detailsModeBtn,
+                        styles.compactDetailsBtn,
+                        { backgroundColor: isActive ? theme.primary : 'transparent' },
+                      ]}
+                      onPress={() => handleDetailsModeChange(option.key)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Show ${option.label} details`}
+                    >
+                      <Text style={[styles.detailsModeText, { color: isActive ? '#fff' : theme.textMuted }]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {(detailsMode === 'note' || detailsMode === 'both') && (
+              <TextInput
+                style={[
+                  styles.compactInput,
+                  styles.noteInputCompact,
+                  { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text },
+                ]}
+                value={note}
+                onChangeText={setNote}
+                placeholder="Description or notes"
+                placeholderTextColor={theme.textMuted}
+                multiline
+                textAlignVertical="top"
+              />
+            )}
+
+            {(detailsMode === 'receipt' || detailsMode === 'both') && (
+              <ReceiptItemsEditor
+                lineItems={lineItems}
+                onAddRow={addReceiptItemRow}
+                onRemoveRow={removeReceiptItemRow}
+                onUpdateRow={updateReceiptItemRow}
+              />
+            )}
+          </View>
+
+          {/* Receipt / Invoice Photo Attachment */}
+          <View style={styles.compactRow}>
+            <View style={[styles.fieldCard, styles.flexField]}>
+              <Text style={[styles.label, { color: theme.text }]}>Receipt Photo</Text>
+              <TouchableOpacity
+                style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={() => !imageUri && openAttachmentSourceModal()}
+                accessibilityRole="button"
+                accessibilityLabel={imageUri ? 'Attached receipt photo' : 'Add receipt photo'}
+              >
+                {imageUri ? (
+                  <View style={styles.imagePreviewWrap}>
+                    <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
+                    <TouchableOpacity
+                      style={[styles.removeImageBtnCompact, { backgroundColor: theme.surface }]}
+                      onPress={() => setImageUri(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove photo"
+                    >
+                      <Ionicons name="close-circle" size={26} color={theme.expense} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.attachmentCompactEmpty}>
+                    <Ionicons name="camera-outline" size={22} color={theme.primary} />
+                    <Text style={[styles.attachmentCompactText, { color: theme.textMuted }]}>Attach receipt image</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Save & Delete Action Row */}
+          <View style={styles.actionRow}>
+            {editingId ? (
+              <TouchableOpacity
+                style={[styles.deleteButtonCompact, { borderColor: theme.expense, backgroundColor: theme.surface }]}
+                onPress={handleDelete}
+                disabled={isSaving}
+                accessibilityRole="button"
+                accessibilityLabel="Delete transaction"
+              >
+                <Ionicons name="trash-outline" size={18} color={theme.expense} style={{ marginRight: 6 }} />
+                <Text style={[styles.deleteButtonTextCompact, { color: theme.expense }]}>Delete</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]}
+              onPress={handleSave}
+              disabled={isSaving}
+              accessibilityRole="button"
+              accessibilityLabel="Save transaction"
+            >
+              {isSaving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>{editingId ? 'Update Transaction' : 'Save Transaction'}</Text>
               )}
             </TouchableOpacity>
           </View>
-        </View>
 
-        <View style={styles.actionRow}>
-          {editingId ? (
-            <TouchableOpacity style={[styles.deleteButtonCompact, { borderColor: theme.expense }]} onPress={handleDelete} disabled={isSaving}>
-              <Text style={[styles.deleteButtonTextCompact, { color: theme.expense }]}>Delete</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]} onPress={handleSave} disabled={isSaving}>
-            {isSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save</Text>}
-          </TouchableOpacity>
-        </View>
+          <View style={{ height: 80 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-        <View style={{ height: 72 }} />
-      </ScrollView>
-
-      {showPicker && <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />}
+      {showPicker && (
+        <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />
+      )}
 
       <SourceSelectorModal
         visible={sourceModalVisible}
@@ -544,6 +684,7 @@ export const AddTransactionScreen = () => {
         visible={categoryModalVisible}
         onClose={() => setCategoryModalVisible(false)}
         categories={availableCategories}
+        selectedCategory={category}
         onSelectCategory={(name) => {
           setCategory(name);
           setCategoryModalVisible(false);
@@ -558,54 +699,131 @@ export const AddTransactionScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 28 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  headerBackButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  keyboardShell: { flex: 1 },
+  scrollContent: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 32 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  headerBackButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerScreenTitle: { fontSize: 18, fontWeight: '700' },
-  headerSpacer: { width: 36 },
-  compactRow: { flexDirection: 'row', marginBottom: 10 },
-  typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
+  headerSpacer: { width: 44 },
+  scanStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  scanSpinner: { marginRight: 10 },
+  scanStatusTextWrap: { flex: 1 },
+  scanStatusTitle: { fontSize: 13, fontWeight: '700' },
+  scanStatusSub: { fontSize: 12, marginTop: 2 },
+  compactRow: { flexDirection: 'row', marginBottom: 12 },
+  typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   compactTypeToggle: { flex: 1, marginRight: 10 },
   toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  compactToggleBtn: { minHeight: 42 },
-  toggleText: { fontSize: 13, fontWeight: '700' },
-  scanButtonCompact: { minWidth: 92, minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', paddingHorizontal: 12 },
+  compactToggleBtn: { minHeight: 46 },
+  toggleText: { fontSize: 14, fontWeight: '700' },
+  scanButtonCompact: {
+    minWidth: 100,
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 14,
+  },
   scanButtonTextCompact: { color: '#fff', fontWeight: '700', fontSize: 13, marginLeft: 6 },
   fieldCard: { flex: 1 },
   flexField: { flex: 1 },
-  amountField: { width: 150, marginLeft: 10 },
-  dateGroup: { width: 170, marginLeft: 10 },
+  amountField: { width: 160, marginLeft: 10 },
+  dateGroup: { width: 180, marginLeft: 10 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  compactInput: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 14 },
+  compactInput: { minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontSize: 14 },
   amountInputContainer: { flexDirection: 'row', alignItems: 'center' },
-  currencyBadge: { borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  compactCurrencyBadge: { width: 46, height: 44, marginRight: 8 },
-  currencyText: { fontSize: 13, fontWeight: '700' },
-  amountInput: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12 },
-  compactAmountInput: { fontSize: 14 },
-  compactPicker: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  iconInputText: { fontSize: 14, flex: 1, marginRight: 8 },
+  currencyBadge: { borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  compactCurrencyBadge: { width: 50, height: 46, marginRight: 8 },
+  currencyText: { fontSize: 12, fontWeight: '700' },
+  amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12 },
+  compactAmountInput: { fontSize: 14, fontWeight: '600' },
+  compactPicker: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconInputText: { fontSize: 14, fontWeight: '500', flex: 1, marginRight: 8 },
   inlineDateActions: { flexDirection: 'row' },
-  miniAction: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' },
-  miniActionText: { marginLeft: 6, fontSize: 12, fontWeight: '600' },
-  inputGroupCompact: { marginBottom: 10 },
-  inlineSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  miniAction: {
+    flex: 1,
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 4,
+  },
+  miniActionText: { marginLeft: 4, fontSize: 12, fontWeight: '600' },
+  inputGroupCompact: { marginBottom: 12 },
+  inlineSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   sectionTitleCompact: { fontSize: 14, fontWeight: '700' },
   detailsModeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
-  compactDetailsToggle: { minHeight: 36 },
-  detailsModeBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  compactDetailsToggle: { minHeight: 38 },
+  detailsModeBtn: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', minWidth: 54 },
   compactDetailsBtn: { paddingHorizontal: 12 },
   detailsModeText: { fontSize: 12, fontWeight: '700' },
-  noteInputCompact: { minHeight: 92, paddingTop: 12 },
-  attachmentCompact: { minHeight: 86, borderWidth: 1, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  attachmentCompactEmpty: { alignItems: 'center', justifyContent: 'center' },
+  noteInputCompact: { minHeight: 88, paddingTop: 12 },
+  attachmentCompact: {
+    minHeight: 90,
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentCompactEmpty: { alignItems: 'center', justifyContent: 'center', padding: 12 },
   attachmentCompactText: { marginTop: 4, fontSize: 12 },
-  previewImageCompact: { width: '100%', height: 120 },
-  removeImageBtnCompact: { position: 'absolute', top: 8, right: 8 },
-  actionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  deleteButtonCompact: { minHeight: 44, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, marginRight: 10 },
-  deleteButtonTextCompact: { fontSize: 13, fontWeight: '700' },
-  saveButton: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  imagePreviewWrap: { width: '100%', height: 140, position: 'relative' },
+  previewImageCompact: { width: '100%', height: '100%' },
+  removeImageBtnCompact: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    borderRadius: 14,
+  },
+  actionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  deleteButtonCompact: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 18,
+    marginRight: 10,
+  },
+  deleteButtonTextCompact: { fontSize: 14, fontWeight: '700' },
+  saveButton: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   saveButtonCompact: { paddingHorizontal: 18 },
-  saveButtonText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  saveButtonText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

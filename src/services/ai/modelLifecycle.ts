@@ -104,6 +104,7 @@ export interface LocalInferenceAdapter {
   getRuntimeInfo(): Promise<LocalRuntimeInfo>;
   runHealthCheck(): Promise<LocalHealthCheckResult>;
   indexLocalKnowledge(): Promise<void>;
+  releaseContext?(): Promise<void>;
 }
 
 class NoopInferenceAdapter implements LocalInferenceAdapter {
@@ -128,6 +129,10 @@ class NoopInferenceAdapter implements LocalInferenceAdapter {
   }
 
   async indexLocalKnowledge(): Promise<void> {
+    return;
+  }
+
+  async releaseContext(): Promise<void> {
     return;
   }
 }
@@ -168,6 +173,10 @@ class LlamaRnInferenceAdapter implements LocalInferenceAdapter {
       message: 'Skipping redundant local AI index initialization because no native/vector indexing work is currently implemented.',
     });
     return;
+  }
+
+  async releaseContext(): Promise<void> {
+    await this.adapter.releaseContext();
   }
 }
 
@@ -552,6 +561,61 @@ export class QModelLifecycleManager {
       this.log('warn', 'download-cancelled', reason);
     } catch (error) {
       this.failProvisioning(error, 'Unable to cancel model download.');
+    }
+  }
+
+  async deleteInstalledModel(): Promise<void> {
+    try {
+      this.log('info', 'model-deletion-requested', 'User requested full deletion of offline AI model weights.');
+
+      // Cancel any active downloads first
+      await this.cancelDownload('Model deletion requested by user.');
+
+      // Release native llama context if loaded
+      try {
+        if (typeof (this.inferenceAdapter as any).releaseContext === 'function') {
+          await (this.inferenceAdapter as any).releaseContext();
+        }
+      } catch (releaseErr) {
+        this.log('warn', 'model-release-failed', 'Failed to release native model context during deletion.', { error: getErrorMessage(releaseErr) });
+      }
+
+      // Delete target model file and any temporary download chunks
+      const config = getActiveModelConfig();
+      const targetPath = getActiveModelPath();
+      const legacyPaths = [
+        targetPath,
+        getTempDownloadPath(),
+        `${FileSystemModule.documentDirectory ?? ''}${config.fileName}`,
+      ];
+
+      for (const p of legacyPaths) {
+        await safeDelete(p);
+      }
+
+      await clearManifest();
+      await clearTransferManifest();
+
+      // Reset AI store state
+      const state = useAIStore.getState();
+      state.setRuntimeModelLoaded(false, null);
+      state.setRuntimeHealth(false, null);
+      state.setRuntimeInfo(null);
+      state.setRuntimeState(state.runtime.availability.available ? 'detected' : 'unavailable');
+      state.markRuntimeReady(false);
+      state.setWarmupPending(false);
+      state.setRuntimeError(null);
+      state.resetTransfer();
+
+      this.updateProvisioning({
+        ...createInitialProvisioningSnapshot(),
+        status: 'not-installed',
+      });
+
+      this.log('info', 'model-deleted-success', 'Offline AI model weights and metadata removed successfully.');
+    } catch (error) {
+      this.log('error', 'model-delete-failed', 'Failed to delete offline AI model.', { error: getErrorMessage(error) });
+      throw error;
     }
   }
 

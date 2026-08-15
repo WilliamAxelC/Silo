@@ -243,6 +243,7 @@ export interface AIStoreState {
   updateChatMessage: (messageId: string, updater: Partial<Message> | ((message: Message) => Message)) => void;
   removeChatMessage: (messageId: string) => void;
   clearChatHistory: () => void;
+  clearLogs: () => void;
   replaceProvisioning: (snapshot: Partial<AIProvisioningSnapshot>) => void;
   updateTransfer: (snapshot: Partial<AITransferSnapshot>) => void;
   resetTransfer: () => void;
@@ -377,6 +378,7 @@ export const useAIStore = create<AIStoreState>((set) => ({
       chatHistory: state.chatHistory.filter((message) => message.id !== messageId),
     })),
   clearChatHistory: () => set({ chatHistory: [] }),
+  clearLogs: () => set({ logs: [] }),
   replaceProvisioning: (snapshot) =>
     set((state) => ({
       provisioning: {

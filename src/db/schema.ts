@@ -13,12 +13,12 @@ export const budgets = sqliteTable('budgets', {
   category: text('category').notNull(),
   limitAmount: real('limit_amount').notNull(),
   period: text('period').default('monthly'),
-  walletId: integer('wallet_id').references(() => wallets.id),
+  walletId: integer('wallet_id').references(() => wallets.id, { onDelete: 'cascade' }),
 });
 
 export const transactions = sqliteTable('transactions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  walletId: integer('wallet_id').references(() => wallets.id).notNull(),
+  walletId: integer('wallet_id').references(() => wallets.id, { onDelete: 'cascade' }).notNull(),
   merchantName: text('merchant_name').notNull(),
   totalAmount: real('total_amount').notNull(),
   type: text('type').notNull(),
@@ -30,7 +30,7 @@ export const transactions = sqliteTable('transactions', {
 
 export const transactionItems = sqliteTable('transaction_items', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  transactionId: integer('transaction_id').references(() => transactions.id).notNull(),
+  transactionId: integer('transaction_id').references(() => transactions.id, { onDelete: 'cascade' }).notNull(),
   category: text('category').notNull(),
   amount: real('amount').notNull(),
 });
@@ -65,7 +65,7 @@ export const appSettings = sqliteTable('app_settings', {
 
 export const sharedSplits = sqliteTable('shared_splits', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  transactionId: integer('transaction_id').references(() => transactions.id).notNull(),
+  transactionId: integer('transaction_id').references(() => transactions.id, { onDelete: 'cascade' }).notNull(),
   personName: text('person_name').notNull(),
   amountOwed: real('amount_owed').notNull(),
   isSettled: integer('is_settled', { mode: 'boolean' }).default(false),

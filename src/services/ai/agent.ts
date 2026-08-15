@@ -985,8 +985,14 @@ export interface ParsedReceiptResult {
   date?: string;
 }
 
-export const analyzeReceiptImage = async (imageUri?: string, base64Image?: string): Promise<ParsedReceiptResult | null> => {
+export const analyzeReceiptImage = async (
+  imageUri?: string,
+  base64Image?: string,
+  onStatusChange?: (status: string) => void,
+): Promise<ParsedReceiptResult | null> => {
   if (!imageUri) return null;
+
+  onStatusChange?.('Running MLKit OCR on image...');
 
   // 1. Run local OCR
   const engineId = useSettingsStore.getState().ocrEngineId;
@@ -995,6 +1001,8 @@ export const analyzeReceiptImage = async (imageUri?: string, base64Image?: strin
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');
   }
+
+  onStatusChange?.('Extracting merchant, totals, and line items...');
 
   // 2. Extract entities via LLM (or fallback to OCR heuristics)
   const prompt = `You are a financial receipt parser for Indonesian and international receipts.
@@ -1014,6 +1022,7 @@ ${ocrResult.rawText}
 JSON RESPONSE:`;
 
   try {
+    onStatusChange?.('Structuring receipt with AI inference...');
     await ensureLocalRuntimeReady();
     const responseText = await getGenerationService().startGeneration({
       prompt,

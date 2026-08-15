@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
-import { db } from '../db/index';
+import { db, searchTransactions as searchTransactionsDb } from '../db/index';
 import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
 import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
@@ -30,6 +30,7 @@ interface TransactionState {
   fetchTransactions: () => Promise<void>;
   fetchCategories: () => Promise<void>;
   fetchBudgets: () => Promise<void>;
+  searchTransactions: (query: string, options?: { limit?: number; offset?: number; type?: TransactionType }) => Promise<Transaction[]>;
   addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
   updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
@@ -119,6 +120,16 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     } catch (error) {
       console.error('Failed to fetch budgets:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  searchTransactions: async (query, options) => {
+    try {
+      return searchTransactionsDb(query, options);
+    } catch (error) {
+      console.error('Failed to search transactions:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return [];
     }
   },
 
@@ -342,7 +353,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     try {
       const normalizedCategory = normalizeCategoryName(category);
       await db.delete(budgets).where(eq(budgets.category, normalizedCategory));
-      await db.insert(budgets).values({ category: normalizedCategory, limitAmount, walletId: DEFAULT_WALLET_ID });
+      if (limitAmount > 0) {
+        await db.insert(budgets).values({ category: normalizedCategory, limitAmount, walletId: DEFAULT_WALLET_ID });
+      }
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to set budget:', error);
