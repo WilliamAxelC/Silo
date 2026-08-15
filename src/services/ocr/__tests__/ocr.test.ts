@@ -232,12 +232,12 @@ CASH 170000
       expect(typeof result.success).toBe('boolean');
     });
 
-    it('returns not implemented for ExternalOcrEngine', async () => {
+    it('falls back to ML Kit engine for ExternalOcrEngine', async () => {
       const engine = new ExternalOcrEngine();
       const result = await engine.processImage('file:///mock/ext.jpg');
 
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Not implemented');
+      expect(result.success).toBe(true);
+      expect(result.rawText).toBeDefined();
     });
   });
 

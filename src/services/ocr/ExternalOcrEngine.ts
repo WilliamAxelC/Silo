@@ -1,9 +1,12 @@
-import { Alert } from 'react-native';
 import { IOcrEngine, OcrResult } from './types';
+import { MlKitEngine } from './MlKitEngine';
 
 export class ExternalOcrEngine implements IOcrEngine {
+  private fallbackEngine = new MlKitEngine();
+
   async processImage(imageUri: string): Promise<OcrResult> {
-    Alert.alert("External OCR", "External OCR not implemented yet. Fallback to ML Kit.");
-    return { rawText: '', extractedTotal: null, extractedMerchant: null, success: false, error: 'Not implemented' };
+    console.warn('External OCR not configured, falling back to on-device ML Kit OCR.');
+    return this.fallbackEngine.processImage(imageUri);
   }
 }
+

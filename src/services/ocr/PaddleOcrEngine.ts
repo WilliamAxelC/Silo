@@ -1,18 +1,23 @@
-import { Alert } from 'react-native';
 import { IOcrEngine, OcrResult } from './types';
+import { MlKitEngine } from './MlKitEngine';
 
 export class PaddleOcrEngine implements IOcrEngine {
+  private fallbackEngine = new MlKitEngine();
+
   async processImage(imageUri: string): Promise<OcrResult> {
     try {
       const { PaddleOCR } = require('ppu-paddle-ocr/mobile');
       const ocr = new PaddleOCR();
-      await ocr.init(); // Assuming default init handles model downloading/loading
+      await ocr.init();
       const result = await ocr.recognize(imageUri);
-      return { rawText: result.text || '', extractedTotal: null, extractedMerchant: null, success: true };
+      if (result && result.text) {
+        return { rawText: result.text || '', extractedTotal: null, extractedMerchant: null, success: true };
+      }
+      return this.fallbackEngine.processImage(imageUri);
     } catch (e: any) {
-      console.error(e);
-      Alert.alert("PaddleOCR Error", e.message || "Failed to run PaddleOCR on-device.");
-      return { rawText: '', extractedTotal: null, extractedMerchant: null, success: false, error: e.message || 'Unknown Error' };
+      console.warn('PaddleOCR native module unavailable, falling back to ML Kit:', e?.message || e);
+      return this.fallbackEngine.processImage(imageUri);
     }
   }
 }
+

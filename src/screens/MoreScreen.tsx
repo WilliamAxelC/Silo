@@ -74,21 +74,25 @@ export const MoreScreen = () => {
           </>
         ) : null}
 
-        <TouchableOpacity style={[styles.settingRow, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => navigation.navigate('SystemLogs')}>
-          <View style={styles.settingRowLeft}>
-            <Ionicons name="receipt-outline" size={20} color={theme.text} />
-            <Text style={[styles.settingText, { color: theme.text }]}>System Logs</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-        </TouchableOpacity>
+        <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('SystemLogs')} accessibilityRole="button">
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="document-text-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text }]}>System Logs</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.settingRow, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={() => navigation.navigate('Settings')}>
-          <View style={styles.settingRowLeft}>
-            <Ionicons name="settings-outline" size={20} color={theme.text} />
-            <Text style={[styles.settingText, { color: theme.text }]}>App Settings</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-        </TouchableOpacity>
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Settings')} accessibilityRole="button">
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="settings-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text }]}>App Settings</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -113,7 +117,8 @@ const styles = StyleSheet.create({
   devButton: { flexDirection: 'row', alignItems: 'center', minHeight: 50, paddingHorizontal: 14, paddingVertical: 10 },
   devButtonText: { fontSize: 14, fontWeight: '500', marginLeft: 10 },
   divider: { height: 1, marginLeft: 44 },
-  settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1 },
+  menuCard: { borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: 'hidden' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 14 },
   settingRowLeft: { flexDirection: 'row', alignItems: 'center' },
   settingText: { marginLeft: 10, fontSize: 14, fontWeight: '500' },
 });
