@@ -78,7 +78,23 @@ export const ChatbotScreen = () => {
   const assistantMessageStartedAtRef = useRef<Record<string, number>>({});
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [serviceSnapshot, setServiceSnapshot] = useState<GenerationServiceRuntimeSnapshot>(generationService.getSnapshot());
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (initialMessage && chatHistory.length === 0) {

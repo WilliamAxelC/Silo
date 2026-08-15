@@ -126,13 +126,14 @@ export const AppNavigator = () => {
         Chatbot: 'chat',
         AddTransactionStack: 'add/:transactionId?',
         Settings: 'settings',
+        SystemLogs: 'logs',
       },
     },
   };
 
   return (
     <View style={[styles.appShell, { backgroundColor: theme.background }]}>
-      <NavigationContainer theme={navigationTheme} linking={linking}>
+      <NavigationContainer theme={navigationTheme} linking={linking as any}>
         <Stack.Navigator
           initialRouteName="MainTabs"
           screenOptions={{

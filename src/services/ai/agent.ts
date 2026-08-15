@@ -987,7 +987,7 @@ export interface ParsedReceiptResult {
 
 export const analyzeReceiptImage = async (imageUri?: string, base64Image?: string): Promise<ParsedReceiptResult | null> => {
   if (!imageUri) return null;
-  
+
   // 1. Run local OCR
   const engineId = useSettingsStore.getState().ocrEngineId;
   const ocrEngine = getOcrEngine(engineId);
@@ -995,19 +995,18 @@ export const analyzeReceiptImage = async (imageUri?: string, base64Image?: strin
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');
   }
-  
-  await ensureLocalRuntimeReady();
 
-  // 2. Extract entities via LLM
-  const prompt = `You are a financial receipt parser.
-Extract the following information from the OCR text below:
-- merchantName: Name of the store or merchant.
-- totalAmount: The total cost as a number.
-- category: A short category (e.g. "Food", "Transport", "Groceries").
-- date: Date of the receipt in YYYY-MM-DD format.
-- lineItemsText: A brief comma-separated list of items bought.
+  // 2. Extract entities via LLM (or fallback to OCR heuristics)
+  const prompt = `You are a financial receipt parser for Indonesian and international receipts.
+Extract the following fields from the OCR text into a JSON object:
+- merchantName: Name of the store, restaurant, or merchant (usually at the top).
+- totalAmount: The final TOTAL amount to pay as a plain integer number (e.g., 60000, 174600). Do NOT use Subtotal, Tax/PPN/PB1, Discount, Cash/Tunai (amount paid), or Kembalian/Change. In Indonesian receipts, numbers like 60.000 or 60,000 mean 60000.
+- category: One of ["Food & Dining", "Groceries", "Transport", "Bills", "Entertainment", "Shopping"].
+- date: Date of receipt in YYYY-MM-DD format (convert DD/MM/YYYY or DD-MM-YY). Use null if missing.
+- lineItemsText: Comma-separated list of items bought.
 
-Return ONLY a valid JSON object matching these keys. If a value is missing, omit the key or use null.
+Return ONLY a valid JSON object matching these keys:
+{"merchantName": "...", "totalAmount": 12345, "category": "...", "date": "...", "lineItemsText": "..."}
 
 OCR TEXT:
 ${ocrResult.rawText}
@@ -1015,32 +1014,41 @@ ${ocrResult.rawText}
 JSON RESPONSE:`;
 
   try {
-    const responseText = await getGenerationService().startGeneration({ 
-      prompt, 
-      mode: 'chat' // chat mode gives it general reasoning capability
+    await ensureLocalRuntimeReady();
+    const responseText = await getGenerationService().startGeneration({
+      prompt,
+      mode: 'chat',
     });
-    
-    // Attempt to extract JSON from the response
+
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsedData = JSON.parse(jsonMatch[0]);
+      let totalAmount: number | undefined = undefined;
+      if (typeof parsedData.totalAmount === 'number') {
+        totalAmount = parsedData.totalAmount;
+      } else if (typeof parsedData.totalAmount === 'string') {
+        const clean = parseInt(parsedData.totalAmount.replace(/[^\d]/g, ''), 10);
+        if (!isNaN(clean) && clean > 0) totalAmount = clean;
+      }
+
       return {
         merchantName: parsedData.merchantName || ocrResult.extractedMerchant || undefined,
-        totalAmount: typeof parsedData.totalAmount === 'number' ? parsedData.totalAmount : ocrResult.extractedTotal || undefined,
-        category: parsedData.category,
-        lineItemsText: parsedData.lineItemsText,
-        date: parsedData.date,
+        totalAmount: totalAmount ?? ocrResult.extractedTotal ?? undefined,
+        category: parsedData.category || undefined,
+        lineItemsText: parsedData.lineItemsText || undefined,
+        date: parsedData.date || ocrResult.extractedDate || undefined,
       };
     }
   } catch (error) {
-    console.error("LLM Extraction Error:", error);
-    // Fallback to basic OCR data if LLM fails
-    return {
-      totalAmount: ocrResult.extractedTotal || undefined,
-    };
+    console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
   } finally {
-    getGenerationService().scheduleModelUnload(10000); // Unload after 10 seconds of idle
+    getGenerationService().scheduleModelUnload(10000);
   }
-  
-  return null;
+
+  // Fallback to high-accuracy OCR heuristics
+  return {
+    merchantName: ocrResult.extractedMerchant || undefined,
+    totalAmount: ocrResult.extractedTotal || undefined,
+    date: ocrResult.extractedDate || undefined,
+  };
 };

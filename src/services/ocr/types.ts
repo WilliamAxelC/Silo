@@ -3,6 +3,7 @@ export interface OcrResult {
   rawText: string;
   extractedTotal: number | null;
   extractedMerchant: string | null;
+  extractedDate?: string | null;
   success: boolean;
   error?: string;
 }

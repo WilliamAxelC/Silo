@@ -26,21 +26,6 @@ export const SettingsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
 
-  const {
-    themeMode,
-    currencyCode,
-    useThousandsSeparator,
-    dateFormat,
-    showIncomeInReportsFirst,
-    fontScale,
-    aiInferenceMode,
-    externalApiProvider,
-    externalApiUrl,
-    externalApiModel,
-    externalApiKey,
-    activeModelId,
-    aiWifiOnlyDownload,
-    setThemeMode,
   const themeMode = useSettingsStore(s => s.themeMode);
   const currencyCode = useSettingsStore(s => s.currencyCode);
   const useThousandsSeparator = useSettingsStore(s => s.useThousandsSeparator);
