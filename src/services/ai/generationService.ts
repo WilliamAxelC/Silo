@@ -53,7 +53,13 @@ export type GenerationServiceListener = (snapshot: GenerationServiceRuntimeSnaps
 export type StartGenerationParams = {
   prompt: string;
   mode: LocalAiMode;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  stop?: string[];
+  bypassChatTemplate?: boolean;
 };
+
 
 export type PreparePromptParams = {
   userPrompt: string;
@@ -292,10 +298,11 @@ class GenerationService {
     }, delayMs);
   }
 
-  async startGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
+  async startGeneration(params: StartGenerationParams): Promise<string> {
+    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate } = params;
     const settings = useSettingsStore.getState();
     if (settings.aiInferenceMode === 'external') {
-      return this.startExternalGeneration({ prompt, mode });
+      return this.startExternalGeneration(params);
     }
 
     const state = useAIStore.getState();
@@ -303,7 +310,7 @@ class GenerationService {
 
     if (!availability.hasUsableLocalInferenceBackend && settings.externalApiUrl && settings.externalApiModel) {
       console.log('Local backend unavailable (e.g. low memory or crash), failing over to external API...');
-      return this.startExternalGeneration({ prompt, mode });
+      return this.startExternalGeneration(params);
     }
 
     const requestStartedAtMs = Date.now();
@@ -336,7 +343,7 @@ class GenerationService {
 
     try {
       const promptStartedAtMs = Date.now();
-      const preparedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
+      const preparedPrompt = bypassChatTemplate ? prompt : await this.preparePrompt({ userPrompt: prompt, mode });
       const promptPreparedAtMs = Date.now();
 
       traceLatency('llama-rn-generation-start', {
@@ -348,12 +355,14 @@ class GenerationService {
         modelLoaded: runtimeInfo.isModelLoaded ?? null,
       });
 
+      const effectiveStop = stop ? Array.from(new Set([...stop, ...QWEN_MODEL_STOP_TOKENS])) : [...QWEN_MODEL_STOP_TOKENS];
+
       const result = await this.llamaRnAdapter.completion(requestId, {
         prompt: preparedPrompt,
-        maxTokens: mode === 'rag' ? QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS : QWEN_MODEL_MAX_OUTPUT_TOKENS,
-        temperature: mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE,
-        topP: mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P,
-        stop: [...QWEN_MODEL_STOP_TOKENS],
+        maxTokens: maxTokens ?? (mode === 'rag' ? QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS : QWEN_MODEL_MAX_OUTPUT_TOKENS),
+        temperature: temperature ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE),
+        topP: topP ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P),
+        stop: effectiveStop,
         onToken: (text) => {
           const now = Date.now();
           const latestState = useAIStore.getState();
@@ -457,7 +466,7 @@ class GenerationService {
     }
   }
 
-  private async startExternalGeneration({ prompt, mode }: StartGenerationParams): Promise<string> {
+  private async startExternalGeneration({ prompt, mode, maxTokens, temperature, topP, stop }: StartGenerationParams): Promise<string> {
     const requestStartedAtMs = Date.now();
     this.setState({
       isGenerating: true,
@@ -648,8 +657,10 @@ class GenerationService {
           model,
           messages,
           stream: true,
-          temperature: mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE,
-          top_p: mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P,
+          max_tokens: maxTokens,
+          temperature: temperature ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE),
+          top_p: topP ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P),
+          stop: stop,
         }),
       );
     });

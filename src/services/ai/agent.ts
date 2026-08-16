@@ -984,6 +984,23 @@ export interface ParsedReceiptResult {
   date?: string;
 }
 
+export function filterReceiptOcrTextForAi(rawText: string): string {
+  return rawText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((line) => {
+      if (line.length < 2) return false;
+      const lower = line.toLowerCase();
+      if (lower.startsWith('http') || lower.startsWith('www.') || lower.includes('.com')) return false;
+      if (lower.includes('wifi') || lower.includes('password') || lower.includes('kritik') || lower.includes('saran')) return false;
+      if (lower.includes('npwp') || lower.includes('terima kasih') || lower.includes('selamat belanja')) return false;
+      if (lower.includes('layanan konsumen') || lower.includes('call center') || lower.includes('kebijakan')) return false;
+      return true;
+    })
+    .slice(0, 35)
+    .join('\n');
+}
+
 export const analyzeReceiptImage = async (
   imageUri?: string,
   base64Image?: string,
@@ -1001,35 +1018,42 @@ export const analyzeReceiptImage = async (
     throw new Error('NO_TEXT_DETECTED');
   }
 
-  onStatusChange?.('Extracting merchant, totals, and line items...');
+  onStatusChange?.('Structuring receipt with AI...');
 
-  // 2. Extract entities via LLM (or fallback to OCR heuristics)
-  const prompt = `You are a financial receipt parser for Indonesian and international receipts.
-Extract the following fields from the OCR text into a JSON object:
-- merchantName: Name of the store, restaurant, or merchant (usually at the top).
-- totalAmount: The final TOTAL amount to pay as a plain integer number (e.g., 60000, 174600). Do NOT use Subtotal, Tax/PPN/PB1, Discount, Cash/Tunai (amount paid), or Kembalian/Change. In Indonesian receipts, numbers like 60.000 or 60,000 mean 60000.
-- category: One of ["Food & Dining", "Groceries", "Transport", "Bills", "Entertainment", "Shopping"].
-- date: Date of receipt in YYYY-MM-DD format (convert DD/MM/YYYY or DD-MM-YY). Use null if missing.
-- lineItemsText: Comma-separated list of items bought.
+  // 2. Filter raw OCR text to keep prompt small and fast for the LLM
+  const filteredOcrText = filterReceiptOcrTextForAi(ocrResult.rawText);
 
-Return ONLY a valid JSON object matching these keys:
-{"merchantName": "...", "totalAmount": 12345, "category": "...", "date": "...", "lineItemsText": "..."}
-
-OCR TEXT:
-${ocrResult.rawText}
-
-JSON RESPONSE:`;
+  // 3. Construct direct prompt with assistant prefill to prevent <think> reasoning tokens
+  const prompt = `<|im_start|>system
+You are a fast financial receipt parser. Extract fields from the receipt into a single raw JSON object with keys: "merchantName" (string), "totalAmount" (integer number), "category" (one of ["Food & Dining","Groceries","Transport","Bills","Entertainment","Shopping"]), "date" (YYYY-MM-DD), "lineItemsText" (comma-separated items). In Indonesian receipts, amounts with dots like 60.000 mean 60000. Do NOT think or explain. Output JSON directly.<|im_end|>
+<|im_start|>user
+Receipt text:
+${filteredOcrText}
+<|im_end|>
+<|im_start|>assistant
+{"merchantName":`;
 
   try {
-    onStatusChange?.('Structuring receipt with AI inference...');
     await ensureLocalRuntimeReady();
     const { getGenerationService } = require('./generationService');
     const responseText = await getGenerationService().startGeneration({
       prompt,
       mode: 'chat',
+      maxTokens: 80,
+      temperature: 0.1,
+      stop: ['}', '<|im_end|>'],
+      bypassChatTemplate: true,
     });
 
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    let fullJsonText = responseText.trim();
+    if (!fullJsonText.startsWith('{')) {
+      fullJsonText = `{"merchantName":${fullJsonText}`;
+    }
+    if (!fullJsonText.endsWith('}')) {
+      fullJsonText = `${fullJsonText}}`;
+    }
+
+    const jsonMatch = fullJsonText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsedData = JSON.parse(jsonMatch[0]);
       let totalAmount: number | undefined = undefined;
@@ -1052,7 +1076,8 @@ JSON RESPONSE:`;
     console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
   } finally {
     const { getGenerationService } = require('./generationService');
-    getGenerationService().scheduleModelUnload(10000);
+    // Keep model resident in RAM for 5 minutes for consecutive receipt scans
+    getGenerationService().scheduleModelUnload(300_000);
   }
 
   // Fallback to high-accuracy OCR heuristics

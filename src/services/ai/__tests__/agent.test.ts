@@ -342,7 +342,29 @@ describe('AI Agent & Context Engine', () => {
 
       const genService = getGenerationService();
       expect(genService.startGeneration).toHaveBeenCalled();
-      expect(genService.scheduleModelUnload).toHaveBeenCalledWith(10000);
+      expect(genService.scheduleModelUnload).toHaveBeenCalledWith(300000);
+    });
+
+    it('filters noise, URLs, and tax disclaimers from raw OCR text for AI prompt', () => {
+      const { filterReceiptOcrTextForAi } = require('../agent');
+      const raw = `
+        INDOMARET POINT
+        Jl. Sudirman No. 12
+        NPWP: 01.234.567.8-901.000
+        WiFi: FreeWifi Password: 123
+        Kritik & Saran: sms 0812345
+        www.indomaret.co.id
+        1x Bread 15.000
+        1x Milk 25.000
+        TOTAL BAYAR 40.000
+        TERIMA KASIH ATAS KUNJUNGAN ANDA
+      `;
+      const filtered = filterReceiptOcrTextForAi(raw);
+      expect(filtered).toContain('INDOMARET POINT');
+      expect(filtered).toContain('TOTAL BAYAR 40.000');
+      expect(filtered).not.toContain('NPWP');
+      expect(filtered).not.toContain('WiFi');
+      expect(filtered).not.toContain('www.indomaret.co.id');
     });
   });
 });
