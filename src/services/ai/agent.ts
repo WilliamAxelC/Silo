@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
+import { reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -985,7 +986,8 @@ export interface ParsedReceiptResult {
 }
 
 export function filterReceiptOcrTextForAi(rawText: string): string {
-  return rawText
+  const reconstructed = reconstructMultiColumnOcrText(rawText);
+  return reconstructed
     .split('\n')
     .map((l) => l.trim())
     .filter((line) => {

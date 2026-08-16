@@ -30,6 +30,44 @@ export const scanReceiptNative = async (imageUri: string): Promise<string | null
 
 
 /**
+ * Auto-reconstructs multi-column OCR blocks where ML Kit separated text columns from numeric columns.
+ */
+export function reconstructMultiColumnOcrText(rawText: string): string {
+  const rawBlocks = rawText.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  if (rawBlocks.length < 2) return rawText;
+
+  const reconstructedBlocks: string[] = [];
+  let i = 0;
+  while (i < rawBlocks.length) {
+    if (i + 1 < rawBlocks.length) {
+      const block1Lines = rawBlocks[i].split('\n').map((l) => l.trim()).filter(Boolean);
+      const block2Lines = rawBlocks[i + 1].split('\n').map((l) => l.trim()).filter(Boolean);
+
+      const block1IsText = block1Lines.filter((l) => /[a-zA-Z]{3,}/.test(l)).length >= block1Lines.length * 0.5;
+      const block2IsNumbers = block2Lines.filter((l) => /^[\d.,\sRp+-]+$/.test(l)).length >= block2Lines.length * 0.6;
+
+      if (block1IsText && block2IsNumbers && Math.abs(block1Lines.length - block2Lines.length) <= 3) {
+        const merged: string[] = [];
+        const count = Math.max(block1Lines.length, block2Lines.length);
+        for (let j = 0; j < count; j++) {
+          const text = block1Lines[j] || '';
+          const num = block2Lines[j] || '';
+          merged.push(`${text} ${num}`.trim());
+        }
+        reconstructedBlocks.push(merged.join('\n'));
+        i += 2;
+        continue;
+      }
+    }
+    reconstructedBlocks.push(rawBlocks[i]);
+    i++;
+  }
+
+  return reconstructedBlocks.join('\n\n');
+}
+
+
+/**
  * Parses raw OCR text with specialized heuristics for Indonesian & international receipts.
  * Handles keywords like TOTAL, GRAND TOTAL, TOTAL BAYAR, AMOUNT DUE, TAGIHAN,
  * ignoring subtotal, tax/PPN/PB1, discount, and cash tendered/change.
@@ -39,7 +77,8 @@ export function parseReceiptTextHeuristic(rawText: string): {
   extractedMerchant: string | null;
   extractedDate: string | null;
 } {
-  const lines = rawText
+  const reconstructedText = reconstructMultiColumnOcrText(rawText);
+  const lines = reconstructedText
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
@@ -50,12 +89,12 @@ export function parseReceiptTextHeuristic(rawText: string): {
 
   // 1. Extract Merchant Name candidate from top header lines
   let extractedMerchant: string | null = null;
-  for (const line of lines.slice(0, 5)) {
+  for (const line of lines.slice(0, 6)) {
     // Ignore lines that look like numbers, dates, addresses, tax IDs (NPWP), or transaction codes
     if (
       !/^\d+$/.test(line) &&
       !/^[\d\W]+$/.test(line) &&
-      !/\b(jl\.?|jalan|telp\.?|phone|npwp|receipt|struk|nota|order|table|meja|kasir|cashier|pos|date|tanggal)\b/i.test(line) &&
+      !/\b(jl\.?|jalan|telp\.?|phone|npwp|receipt|struk|nota|order|table|meja|kasir|cashier|pos|date|tanggal|tgl)\b/i.test(line) &&
       line.length >= 3 &&
       line.length <= 40
     ) {
@@ -67,10 +106,11 @@ export function parseReceiptTextHeuristic(rawText: string): {
   // 2. Extract Total Amount
   let extractedTotal: number | null = null;
 
-  // Pass 1: explicit TOTAL / GRAND TOTAL / TOTAL BAYAR / AMOUNT DUE / TAGIHAN / TOTAL BELANJA
-  for (const line of [...lines].reverse()) {
+  // Pass 1: explicit TOTAL / GRAND TOTAL / TOTAL BAYAR / AMOUNT DUE / TAGIHAN / TOTAL BELANJA / TOTAL AKHIR / TOTAL HARGA
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
     if (
-      /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*sales|total\s*amount|amount\s*due|tagihan|total)\b/i.test(
+      /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*sales|total\s*amount|total\s*akhir|total\s*harga|total\s*tagihan|amount\s*due|tagihan|total)\b/i.test(
         line
       )
     ) {
@@ -79,7 +119,11 @@ export function parseReceiptTextHeuristic(rawText: string): {
           line
         )
       ) {
-        const nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+        let nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+        // If keyword line has no numbers, check immediately adjacent next line
+        if (!nums && i + 1 < lines.length) {
+          nums = lines[i + 1].match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+        }
         if (nums && nums.length > 0) {
           const clean = parseInt(nums[nums.length - 1].replace(/[^\d]/g, ''), 10);
           if (!isNaN(clean) && clean >= 100) {
@@ -93,14 +137,18 @@ export function parseReceiptTextHeuristic(rawText: string): {
 
   // Pass 2: Fallback to Subtotal / Tunai / Cash / EDC / Card if explicit Total line not found
   if (!extractedTotal) {
-    for (const line of [...lines].reverse()) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
       if (
         /\b(sub\s*total|subtotal|subttl|tunai|cash|debit|qris|gopay|ovo|shopeepay|dana|bca|mandiri|cimb|bni|bri|edc)\b/i.test(
           line
         )
       ) {
         if (!/\b(kembali|change|kembalian|disc|discount|diskon|ppn|tax|pb-?1)\b/i.test(line)) {
-          const nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+          let nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+          if (!nums && i + 1 < lines.length) {
+            nums = lines[i + 1].match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+          }
           if (nums && nums.length > 0) {
             const clean = parseInt(nums[nums.length - 1].replace(/[^\d]/g, ''), 10);
             if (!isNaN(clean) && clean >= 100) {
