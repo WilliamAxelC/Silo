@@ -40,6 +40,18 @@ describe('amount utilities', () => {
       expect(formatAmountInput('0123456')).toBe('123,456');
       expect(formatAmountInput('000')).toBe('0');
     });
+
+    it('handles extreme integer and large numeric values correctly', () => {
+      expect(formatAmountInput('9007199254740991')).toBe('9,007,199,254,740,991');
+      expect(formatAmountInput('1000000000000000')).toBe('1,000,000,000,000,000');
+      expect(formatAmountInput('99999999999999999999')).toBe('99,999,999,999,999,999,999');
+    });
+
+    it('handles mixed currency symbols and spaces', () => {
+      expect(formatAmountInput('  Rp  1.250.000   ')).toBe('1,250,000');
+      expect(formatAmountInput('€ 999 999')).toBe('999,999');
+      expect(formatAmountInput('🍔 50.000 🍟')).toBe('50,000');
+    });
   });
 
   describe('roundCurrency', () => {
@@ -70,6 +82,15 @@ describe('amount utilities', () => {
       expect(roundCurrency(null as any)).toBe(0);
       expect(roundCurrency(undefined as any)).toBe(0);
       expect(roundCurrency('123.45' as any)).toBe(0);
+    });
+
+    it('handles extreme integer bounds and very small decimal values', () => {
+      expect(roundCurrency(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+      expect(roundCurrency(Number.MIN_SAFE_INTEGER)).toBe(Number.MIN_SAFE_INTEGER);
+      expect(roundCurrency(0.00001, 2)).toBe(0);
+      expect(roundCurrency(0.00001, 5)).toBe(0.00001);
+      expect(roundCurrency(0.07 * 100)).toBe(7);
+      expect(roundCurrency(1.0000000000000002)).toBe(1);
     });
   });
 
@@ -191,6 +212,27 @@ describe('amount utilities', () => {
       const sum = negativeParts.reduce((a, b) => a + b, 0);
       expect(roundCurrency(sum)).toBe(-10);
     });
+
+    it('handles large participant count without cent loss', () => {
+      const parts30 = splitAmount(100, 30, 2);
+      expect(parts30.length).toBe(30);
+      const sum30 = parts30.reduce((a, b) => a + b, 0);
+      expect(roundCurrency(sum30)).toBe(100);
+    });
+
+    it('handles splitting 1 cent ($0.01) across multiple participants', () => {
+      const parts4 = splitAmount(0.01, 4, 2);
+      expect(parts4).toEqual([0.01, 0, 0, 0]);
+      const sum4 = parts4.reduce((a, b) => a + b, 0);
+      expect(roundCurrency(sum4)).toBe(0.01);
+    });
+
+    it('handles splitting extreme billion amounts', () => {
+      const billionParts = splitAmount(1_000_000_000, 3, 2);
+      expect(billionParts).toEqual([333333333.34, 333333333.33, 333333333.33]);
+      const sumBillion = billionParts.reduce((a, b) => a + b, 0);
+      expect(roundCurrency(sumBillion)).toBe(1_000_000_000);
+    });
   });
 
   describe('calculatePercentage', () => {
@@ -198,6 +240,8 @@ describe('amount utilities', () => {
       expect(calculatePercentage(50, 200)).toBe(25);
       expect(calculatePercentage(1, 3)).toBe(33.33);
       expect(calculatePercentage(100, 100)).toBe(100);
+      expect(calculatePercentage(250, 100)).toBe(250); // Over 100%
+      expect(calculatePercentage(-50, 100)).toBe(-50); // Negative percentage
     });
 
     it('guards against division by zero', () => {
@@ -246,6 +290,14 @@ describe('amount utilities', () => {
       expect(resultNegZero).toBe('Rp 0');
     });
 
+    it('formats extreme amounts in the trillions properly', () => {
+      const trillion = formatDisplayCurrency(1_000_000_000_000, 'IDR');
+      expect(trillion).toMatch(/1\.000\.000\.000\.000/);
+
+      const smallFraction = formatDisplayCurrency(0.01, 'USD');
+      expect(smallFraction).toContain('0,01');
+    });
+
     it('falls back to string formatting when Intl.NumberFormat throws', () => {
       const originalIntl = Intl.NumberFormat;
       try {
@@ -254,6 +306,9 @@ describe('amount utilities', () => {
         });
         const result = formatDisplayCurrency(50000, 'XYZ');
         expect(result).toBe('XYZ 50,000');
+
+        const resultNeg = formatDisplayCurrency(-1000, 'XYZ');
+        expect(resultNeg).toBe('XYZ -1,000');
       } finally {
         Intl.NumberFormat = originalIntl;
       }

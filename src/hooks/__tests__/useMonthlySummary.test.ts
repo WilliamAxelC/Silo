@@ -221,4 +221,150 @@ describe('useMonthlySummary', () => {
 
     harness.unmount();
   });
+
+  describe('Month boundary transitions & Leap years', () => {
+    it('accurately handles leap year Feb 29 boundary (2024)', () => {
+      const feb2024 = new Date(2024, 1, 15); // February 2024 (leap year)
+      const feb29End = new Date(2024, 1, 29, 23, 59, 59, 999).getTime();
+      const mar1Start = new Date(2024, 2, 1, 0, 0, 0, 0).getTime();
+
+      useTransactionStore.setState({
+        transactionsList: [
+          {
+            id: 101,
+            merchantName: 'Leap Day Dinner',
+            totalAmount: -450000,
+            type: 'expense',
+            category: 'Food & Dining',
+            date: feb29End,
+          },
+          {
+            id: 102,
+            merchantName: 'March 1st Coffee',
+            totalAmount: -50000,
+            type: 'expense',
+            category: 'Food & Dining',
+            date: mar1Start,
+          },
+        ],
+      });
+
+      const harnessFeb = renderHookHarness(useMonthlySummary, feb2024);
+      expect(harnessFeb.current.currentMonthData.length).toBe(1);
+      expect(harnessFeb.current.currentMonthData[0].merchantName).toBe('Leap Day Dinner');
+      expect(harnessFeb.current.totalExpense).toBe(450000);
+      harnessFeb.unmount();
+
+      const mar2024 = new Date(2024, 2, 15); // March 2024
+      const harnessMar = renderHookHarness(useMonthlySummary, mar2024);
+      expect(harnessMar.current.currentMonthData.length).toBe(1);
+      expect(harnessMar.current.currentMonthData[0].merchantName).toBe('March 1st Coffee');
+      expect(harnessMar.current.totalExpense).toBe(50000);
+      harnessMar.unmount();
+    });
+
+    it('accurately handles non-leap year Feb 28 boundary (2023)', () => {
+      const feb2023 = new Date(2023, 1, 15); // February 2023 (non-leap year)
+      const feb28End = new Date(2023, 1, 28, 23, 59, 59, 999).getTime();
+      const mar1Start = new Date(2023, 2, 1, 0, 0, 0, 0).getTime();
+
+      useTransactionStore.setState({
+        transactionsList: [
+          {
+            id: 201,
+            merchantName: 'Feb 28 Midnight Expense',
+            totalAmount: -120000,
+            type: 'expense',
+            category: 'Bills',
+            date: feb28End,
+          },
+          {
+            id: 202,
+            merchantName: 'March 1st Expense',
+            totalAmount: -80000,
+            type: 'expense',
+            category: 'Bills',
+            date: mar1Start,
+          },
+        ],
+      });
+
+      const harnessFeb = renderHookHarness(useMonthlySummary, feb2023);
+      expect(harnessFeb.current.currentMonthData.length).toBe(1);
+      expect(harnessFeb.current.currentMonthData[0].merchantName).toBe('Feb 28 Midnight Expense');
+      expect(harnessFeb.current.totalExpense).toBe(120000);
+      harnessFeb.unmount();
+    });
+
+    it('accurately handles year turnover from Dec 31 to Jan 1', () => {
+      const dec2024 = new Date(2024, 11, 15); // December 2024
+      const jan2025 = new Date(2025, 0, 15); // January 2025
+
+      const dec31End = new Date(2024, 11, 31, 23, 59, 59, 999).getTime();
+      const jan1Start = new Date(2025, 0, 1, 0, 0, 0, 0).getTime();
+
+      useTransactionStore.setState({
+        transactionsList: [
+          {
+            id: 301,
+            merchantName: 'New Year Eve Gala',
+            totalAmount: -1500000,
+            type: 'expense',
+            category: 'Entertainment',
+            date: dec31End,
+          },
+          {
+            id: 302,
+            merchantName: 'New Year Day Brunch',
+            totalAmount: -350000,
+            type: 'expense',
+            category: 'Food & Dining',
+            date: jan1Start,
+          },
+        ],
+      });
+
+      const harnessDec = renderHookHarness(useMonthlySummary, dec2024);
+      expect(harnessDec.current.currentMonthData.length).toBe(1);
+      expect(harnessDec.current.currentMonthData[0].merchantName).toBe('New Year Eve Gala');
+      expect(harnessDec.current.totalExpense).toBe(1500000);
+      harnessDec.unmount();
+
+      const harnessJan = renderHookHarness(useMonthlySummary, jan2025);
+      expect(harnessJan.current.currentMonthData.length).toBe(1);
+      expect(harnessJan.current.currentMonthData[0].merchantName).toBe('New Year Day Brunch');
+      expect(harnessJan.current.totalExpense).toBe(350000);
+      harnessJan.unmount();
+    });
+
+    it('handles extreme amount aggregations without precision overflow', () => {
+      const may2024 = new Date(2024, 4, 15);
+      useTransactionStore.setState({
+        transactionsList: [
+          {
+            id: 401,
+            merchantName: 'Large Business Income',
+            totalAmount: 1_000_000_000_000, // 1 Trillion
+            type: 'income',
+            category: 'Investment',
+            date: new Date(2024, 4, 10).getTime(),
+          },
+          {
+            id: 402,
+            merchantName: 'Large Asset Expense',
+            totalAmount: -250_000_000_000, // 250 Billion
+            type: 'expense',
+            category: 'Shopping',
+            date: new Date(2024, 4, 12).getTime(),
+          },
+        ],
+      });
+
+      const harness = renderHookHarness(useMonthlySummary, may2024);
+      expect(harness.current.totalIncome).toBe(1_000_000_000_000);
+      expect(harness.current.totalExpense).toBe(250_000_000_000);
+      expect(harness.current.balance).toBe(750_000_000_000);
+      harness.unmount();
+    });
+  });
 });

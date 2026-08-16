@@ -227,6 +227,9 @@ export const ReportsScreen = () => {
               innerRadius={66}
               data={chartData}
               backgroundColor={theme.background}
+              textColor="#ffffff"
+              textSize={10}
+              fontWeight="700"
               isAnimated
               animationDuration={600}
               centerLabelComponent={() => (

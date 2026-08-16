@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -12,7 +12,7 @@ const PALETTE = ['#0ea5e9', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899
 
 export const ChatChart = React.memo(function ChatChart({ type, data }: ChatChartProps) {
   const theme = useAppTheme();
-  const screenWidth = Dimensions.get('window').width;
+  const { width: screenWidth } = useWindowDimensions();
   const maxChartWidth = Math.min(screenWidth - 60, 320);
 
   let parsedData: any[] = [];

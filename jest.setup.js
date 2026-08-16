@@ -52,3 +52,11 @@ jest.mock('ppu-paddle-ocr/mobile', () => ({
   })),
 }));
 
+// Mock @expo/vector-icons
+jest.mock('@expo/vector-icons', () => ({
+  Ionicons: 'Ionicons',
+  MaterialIcons: 'MaterialIcons',
+  FontAwesome: 'FontAwesome',
+  Feather: 'Feather',
+}));
+

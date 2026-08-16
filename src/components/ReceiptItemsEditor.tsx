@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -95,7 +95,7 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
                     onChangeText={(value) => onUpdateRow(item.id, 'price', value)}
                     placeholder="0"
                     placeholderTextColor={theme.textMuted}
-                    keyboardType="numeric"
+                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                   />
                 </View>
                 <TouchableOpacity

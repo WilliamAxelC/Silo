@@ -502,7 +502,7 @@ export const AddTransactionScreen = () => {
                   placeholderTextColor={theme.textMuted}
                   value={amount}
                   onChangeText={handleAmountChange}
-                  keyboardType="numeric"
+                  keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                   placeholder="0"
                 />
               </View>

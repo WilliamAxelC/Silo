@@ -330,7 +330,7 @@ export const BudgetScreen = () => {
                 <Text style={[styles.currencyPrefix, { color: theme.textMuted }, bodyScale]}>{currencyCode}</Text>
                 <TextInput
                   style={[styles.input, { color: theme.text }, metricScale]}
-                  keyboardType="numeric"
+                  keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                   value={budgetInput}
                   onChangeText={(text) => {
                     const numericValue = text.replace(/[^0-9]/g, '');

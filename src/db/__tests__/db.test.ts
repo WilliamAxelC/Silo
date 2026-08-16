@@ -39,6 +39,41 @@ describe('Database Layer and SQLite Operations', () => {
       expect(sanitized).not.toContain(')');
       expect(sanitized).not.toContain(':');
     });
+
+    it('handles unbalanced, leading, trailing, and repeated quotes gracefully', () => {
+      expect(buildFtsSearchQuery('"unclosed')).toBe('"unclosed"*');
+      expect(buildFtsSearchQuery('unclosed"')).toBe('"unclosed"*');
+      expect(buildFtsSearchQuery('"""""')).toBe('');
+      expect(buildFtsSearchQuery('"quoted" "terms"')).toBe('"quoted"* OR "terms"*');
+      expect(buildFtsSearchQuery("'''single''' 'quotes'")).toBe('"single"* OR "quotes"*');
+    });
+
+    it('handles asterisks and wildcards without crashing or creating invalid syntax', () => {
+      expect(buildFtsSearchQuery('*')).toBe('');
+      expect(buildFtsSearchQuery('***')).toBe('');
+      expect(buildFtsSearchQuery('coffee*')).toBe('"coffee"*');
+      expect(buildFtsSearchQuery('*coffee*')).toBe('"coffee"*');
+    });
+
+    it('handles brackets, braces, and math/regex symbols safely', () => {
+      expect(buildFtsSearchQuery('[groceries]')).toBe('"[groceries]"*');
+      expect(buildFtsSearchQuery('{household}')).toBe('"household"*');
+      expect(buildFtsSearchQuery('(salary OR bonus)')).toBe('"salary"* OR "OR"* OR "bonus"*');
+      expect(buildFtsSearchQuery('^start $end ~approx')).toBe('"start"* OR "$end"* OR "approx"*');
+      expect(buildFtsSearchQuery('a+b=c & d|e')).toBe('"a"* OR "b=c"* OR "&"* OR "d|e"*');
+    });
+
+    it('handles unicode, accents, and emojis correctly', () => {
+      expect(buildFtsSearchQuery('Café Résumé ☕ 🛒')).toBe('"Café"* OR "Résumé"* OR "☕"* OR "🛒"*');
+      expect(buildFtsSearchQuery('ラーメン 100%')).toBe('"ラーメン"* OR "100%"*');
+    });
+
+    it('handles SQL injection patterns safely', () => {
+      const sqlInject = buildFtsSearchQuery("' OR 1=1 --; DROP TABLE transactions;");
+      expect(sqlInject).not.toContain("'");
+      expect(sqlInject).toContain('"OR"*');
+      expect(sqlInject).toContain('"DROP"*');
+    });
   });
 
   describe('In-Memory SQLite Schema, Migrations, Cascades & FTS5', () => {
@@ -268,6 +303,57 @@ describe('Database Layer and SQLite Operations', () => {
       it('returns empty array when search query is empty', () => {
         expect(searchTransactions('', undefined, testDb as any)).toEqual([]);
         expect(searchTransactions('   ', undefined, testDb as any)).toEqual([]);
+      });
+
+      it('handles search queries with special characters, quotes, brackets, and asterisks without crashing', () => {
+        // Double quotes
+        const quoteRes = searchTransactions('"Superindo"', undefined, testDb as any);
+        expect(quoteRes.length).toBe(1);
+        expect(quoteRes[0].merchantName).toBe('Superindo Market');
+
+        // Unbalanced quotes
+        const unclosedQuoteRes = searchTransactions('"Superindo', undefined, testDb as any);
+        expect(unclosedQuoteRes.length).toBe(1);
+
+        // Asterisks only (stripped -> fallback to LIKE %***%)
+        expect(() => searchTransactions('***', undefined, testDb as any)).not.toThrow();
+
+        // Colons, brackets, and parentheses
+        const bracketRes = searchTransactions('(Superindo) [Groceries] : 50%', undefined, testDb as any);
+        expect(bracketRes.length).toBeGreaterThanOrEqual(1);
+
+        // SQL injection payload
+        const sqlRes = searchTransactions("' OR '1'='1' --", undefined, testDb as any);
+        expect(Array.isArray(sqlRes)).toBe(true);
+      });
+
+      it('handles unicode, accented characters, and emojis in transactions and queries', () => {
+        testDb.runSync(
+          `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date, note, line_items_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          [4, 1, 'Café Délices ☕', -60000, 'expense', 1710000003000, 'French bakery 🥐', 'Croissant | 30000\nCafé au lait | 30000']
+        );
+        testDb.runSync(`INSERT INTO transaction_items (transaction_id, category, amount) VALUES (?, ?, ?);`, [4, 'Food & Dining', 60000]);
+
+        const cafeRes = searchTransactions('Café', undefined, testDb as any);
+        expect(cafeRes.length).toBe(1);
+        expect(cafeRes[0].merchantName).toBe('Café Délices ☕');
+
+        const croissantRes = searchTransactions('Croissant', undefined, testDb as any);
+        expect(croissantRes.length).toBe(1);
+        expect(croissantRes[0].id).toBe(4);
+      });
+
+      it('respects limit and offset pagination correctly', () => {
+        const paged = searchTransactions('Market OR Kenangan OR Corp', { limit: 1, offset: 0 }, testDb as any);
+        expect(paged.length).toBe(1);
+
+        const pagedOffset = searchTransactions('Market OR Kenangan OR Corp', { limit: 1, offset: 1 }, testDb as any);
+        expect(pagedOffset.length).toBe(1);
+        expect(pagedOffset[0].id).not.toBe(paged[0].id);
+
+        const outOfRange = searchTransactions('Superindo', { limit: 10, offset: 50 }, testDb as any);
+        expect(outOfRange.length).toBe(0);
       });
     });
 
