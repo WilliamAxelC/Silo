@@ -110,12 +110,12 @@ export function parseReceiptTextHeuristic(rawText: string): {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (
-      /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*sales|total\s*amount|total\s*akhir|total\s*harga|total\s*tagihan|amount\s*due|tagihan|total)\b/i.test(
+      /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*sales|total\s*amount|total\s*akhir|total\s*harga|total\s*tagihan|amount\s*due|tagihan|total|due|tl)\b/i.test(
         line
-      )
+      ) || /\b(total\.)\b/i.test(line)
     ) {
       if (
-        !/\b(sub\s*total|subtotal|subttl|disc|discount|diskon|item|items|qty|ppn|tax|pb-?1|charge|service)\b/i.test(
+        !/\b(sub\s*total|subtotal|subttl|disc|discount|diskon|item|items|qty|ppn|tax|pajak|pb-?1|charge|service|kembali|change|kembalian)\b/i.test(
           line
         )
       ) {
@@ -135,16 +135,38 @@ export function parseReceiptTextHeuristic(rawText: string): {
     }
   }
 
-  // Pass 2: Fallback to Subtotal / Tunai / Cash / EDC / Card if explicit Total line not found
+  // Pass 2: Fallback to Subtotal if no tax/discount or payment methods
+  if (!extractedTotal) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (/\b(sub\s*total|subtotal|subttl)\b/i.test(line)) {
+        if (!/\b(kembali|change|kembalian|disc|discount|diskon|ppn|tax|pajak|pb-?1)\b/i.test(line)) {
+          let nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+          if (!nums && i + 1 < lines.length) {
+            nums = lines[i + 1].match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
+          }
+          if (nums && nums.length > 0) {
+            const clean = parseInt(nums[nums.length - 1].replace(/[^\d]/g, ''), 10);
+            if (!isNaN(clean) && clean >= 100) {
+              extractedTotal = clean;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Pass 3: Fallback to payment method settlement (QRIS, Card, Debit, Cash) excluding change
   if (!extractedTotal) {
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
       if (
-        /\b(sub\s*total|subtotal|subttl|tunai|cash|debit|qris|gopay|ovo|shopeepay|dana|bca|mandiri|cimb|bni|bri|edc)\b/i.test(
+        /\b(debit|qris|gopay|ovo|shopeepay|dana|bca|mandiri|cimb|bni|bri|edc|visa|master|credit|non\s*tunai|tunai|cash|tendered)\b/i.test(
           line
         )
       ) {
-        if (!/\b(kembali|change|kembalian|disc|discount|diskon|ppn|tax|pb-?1)\b/i.test(line)) {
+        if (!/\b(kembali|change|kembalian|disc|discount|diskon|ppn|tax|pajak|pb-?1)\b/i.test(line)) {
           let nums = line.match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
           if (!nums && i + 1 < lines.length) {
             nums = lines[i + 1].match(/\b\d[\d.,]*\d\b|\b\d+\b/g);
