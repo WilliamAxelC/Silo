@@ -1069,8 +1069,8 @@ ${filteredOcrText}
       return {
         merchantName: parsedData.merchantName || ocrResult.extractedMerchant || undefined,
         totalAmount: totalAmount ?? ocrResult.extractedTotal ?? undefined,
-        category: parsedData.category || undefined,
-        lineItemsText: parsedData.lineItemsText || undefined,
+        category: parsedData.category || ocrResult.extractedCategory || undefined,
+        lineItemsText: parsedData.lineItemsText || ocrResult.extractedLineItems || undefined,
         date: parsedData.date || ocrResult.extractedDate || undefined,
       };
     }
@@ -1086,6 +1086,8 @@ ${filteredOcrText}
   return {
     merchantName: ocrResult.extractedMerchant || undefined,
     totalAmount: ocrResult.extractedTotal || undefined,
+    category: ocrResult.extractedCategory || undefined,
+    lineItemsText: ocrResult.extractedLineItems || undefined,
     date: ocrResult.extractedDate || undefined,
   };
 };

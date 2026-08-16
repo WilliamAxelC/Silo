@@ -179,12 +179,16 @@ CASH 170000
         extractedTotal: null,
         extractedMerchant: null,
         extractedDate: null,
+        extractedCategory: null,
+        extractedLineItems: null,
       });
 
       expect(parseReceiptTextHeuristic('   \n  \n  ')).toEqual({
         extractedTotal: null,
         extractedMerchant: null,
         extractedDate: null,
+        extractedCategory: null,
+        extractedLineItems: null,
       });
     });
   });

@@ -76,6 +76,8 @@ export function parseReceiptTextHeuristic(rawText: string): {
   extractedTotal: number | null;
   extractedMerchant: string | null;
   extractedDate: string | null;
+  extractedCategory: string | null;
+  extractedLineItems: string | null;
 } {
   const reconstructedText = reconstructMultiColumnOcrText(rawText);
   const lines = reconstructedText
@@ -84,7 +86,7 @@ export function parseReceiptTextHeuristic(rawText: string): {
     .filter(Boolean);
 
   if (lines.length === 0) {
-    return { extractedTotal: null, extractedMerchant: null, extractedDate: null };
+    return { extractedTotal: null, extractedMerchant: null, extractedDate: null, extractedCategory: null, extractedLineItems: null };
   }
 
   // 1. Extract Merchant Name candidate from top header lines
@@ -197,11 +199,94 @@ export function parseReceiptTextHeuristic(rawText: string): {
     }
   }
 
+  // 4. Infer Category
+  const extractedCategory = inferReceiptCategory(extractedMerchant, reconstructedText);
+
+  // 5. Extract Line Items
+  const extractedLineItems = extractLineItemsHeuristic(reconstructedText);
+
   return {
     extractedTotal,
     extractedMerchant,
     extractedDate,
+    extractedCategory,
+    extractedLineItems,
   };
+}
+
+export function inferReceiptCategory(merchantName: string | null, rawText: string): string {
+  const combined = `${merchantName || ''} ${rawText}`.toLowerCase();
+
+  if (
+    /\b(kopi|coffee|cafe|caffe|resto|restaurant|rumah\s*makan|warung|mie|gacoan|bakso|ayam|nasi|padang|kitchen|bistro|tea|teh|bread|roti|bakery|cake|starbucks|hokben|solaria|mcdonald|kfc|burger|pizza|ramen|sushi|dapur|dimsum|makan|kuliner)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Food & Dining';
+  }
+
+  if (
+    /\b(indomaret|alfamart|superindo|hypermart|transmart|hero|lotte|grand\s*lucky|papaya|pasar|kelontong|minimarket|supermarket|mart|buah|sayur|sembako|telur|beras)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Groceries';
+  }
+
+  if (
+    /\b(spbu|pertamina|shell|bp|bensin|bbm|pertamax|pertalite|solar|parkir|parking|toll|tol|gojek|gocar|goride|grab|bluebird|taxi|kereta|kai|mrt|lrt|flight|pesawat|tiket\.com)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Transport';
+  }
+
+  if (
+    /\b(pln|listrik|pdam|air|bpjs|wifi|indihome|telkom|biznet|first\s*media|asuransi|apotek|kimia\s*farma|guardian|watsons|rs|rumah\s*sakit|klinik|dokter|obat|medika|resep)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Bills';
+  }
+
+  if (
+    /\b(cinema|xxi|cgv|cinepolis|bioskop|timezone|karaoke|game|steam|playstation|netflix|spotify|disney|ticket|tiket)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Entertainment';
+  }
+
+  if (
+    /\b(mall|zara|uniqlo|h&m|matahari|shopee|tokopedia|lazada|fashion|baju|sepatu|pakaian|butik|distro|toko)\b/i.test(
+      combined
+    )
+  ) {
+    return 'Shopping';
+  }
+
+  return 'Food & Dining';
+}
+
+export function extractLineItemsHeuristic(reconstructedText: string): string | null {
+  const lines = reconstructedText.split('\n').map((l) => l.trim()).filter(Boolean);
+  const items: string[] = [];
+
+  for (const line of lines) {
+    if (
+      !/\b(total|subtotal|subttl|grand\s*total|bayar|tunai|cash|kembali|change|kembalian|ppn|tax|pb-?1|diskon|discount|jl\.|jalan|telp|kasir|cashier|npwp|struk|pos|receipt|table|meja|terima\s*kasih)\b/i.test(
+        line
+      )
+    ) {
+      const hasNumbers = /\b\d[\d.,]*\d\b|\b\d+\b/.test(line);
+      const hasText = /[a-zA-Z]{3,}/.test(line);
+      if (hasText && hasNumbers && line.length >= 6 && line.length <= 60) {
+        items.push(line);
+      }
+    }
+  }
+
+  return items.length > 0 ? items.slice(0, 10).join(', ') : null;
 }
 
 export class MlKitEngine implements IOcrEngine {
@@ -215,18 +300,22 @@ export class MlKitEngine implements IOcrEngine {
           extractedTotal: null,
           extractedMerchant: null,
           extractedDate: null,
+          extractedCategory: null,
+          extractedLineItems: null,
           success: false,
           error: 'Empty text returned',
         };
       }
 
-      const { extractedTotal, extractedMerchant, extractedDate } = parseReceiptTextHeuristic(rawText);
+      const { extractedTotal, extractedMerchant, extractedDate, extractedCategory, extractedLineItems } = parseReceiptTextHeuristic(rawText);
 
       return {
         rawText,
         extractedTotal,
         extractedMerchant,
         extractedDate,
+        extractedCategory,
+        extractedLineItems,
         success: true,
       };
     } catch (error: any) {
@@ -235,6 +324,8 @@ export class MlKitEngine implements IOcrEngine {
         extractedTotal: null,
         extractedMerchant: null,
         extractedDate: null,
+        extractedCategory: null,
+        extractedLineItems: null,
         success: false,
         error: error?.message || 'Unknown OCR Error',
       };

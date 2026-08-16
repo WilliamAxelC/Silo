@@ -241,16 +241,16 @@ export const AddTransactionScreen = () => {
     setSourceModalVisible(false);
     let result;
     if (source === 'gallery') {
-      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8, base64: true });
+      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
     } else {
       await ImagePicker.requestCameraPermissionsAsync();
-      result = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: true });
+      result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
     }
 
     if (result.canceled || !result.assets || !result.assets[0].uri) return;
 
     if (sourceModalTarget === 'scan') {
-      processScanReceipt(result.assets[0].uri, result.assets[0].base64 || undefined);
+      processScanReceipt(result.assets[0].uri);
     } else {
       setImageUri(result.assets[0].uri);
     }

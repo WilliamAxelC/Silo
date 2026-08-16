@@ -4,6 +4,8 @@ export interface OcrResult {
   extractedTotal: number | null;
   extractedMerchant: string | null;
   extractedDate?: string | null;
+  extractedCategory?: string | null;
+  extractedLineItems?: string | null;
   success: boolean;
   error?: string;
 }
