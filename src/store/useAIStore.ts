@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
-import { useSettingsStore } from './useSettingsStore';
 import {
   AI_RUNTIME_PHASE_STATUSES,
   AI_STATUS_LABELS,
@@ -164,6 +163,7 @@ export function createInitialRuntimeSnapshot(): AIRuntimeSnapshot {
 export function getAIRuntimeAvailability(
   state: Pick<AIStoreState, 'provisioning' | 'runtimeReady' | 'warmupPending' | 'runtime'>,
 ): AIRuntimeAvailability {
+  const { useSettingsStore } = require('./useSettingsStore');
   const settings = useSettingsStore.getState();
   if (settings?.aiInferenceMode === 'external') {
     return {

@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import { expoDb, type AITransactionRow } from '../../db/index';
 import { getModelLifecycleManager } from './modelLifecycle';
-import { getGenerationService } from './generationService';
 import { getOcrEngine } from '../ocr/index';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
 import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
@@ -1024,6 +1023,7 @@ JSON RESPONSE:`;
   try {
     onStatusChange?.('Structuring receipt with AI inference...');
     await ensureLocalRuntimeReady();
+    const { getGenerationService } = require('./generationService');
     const responseText = await getGenerationService().startGeneration({
       prompt,
       mode: 'chat',
@@ -1051,6 +1051,7 @@ JSON RESPONSE:`;
   } catch (error) {
     console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
   } finally {
+    const { getGenerationService } = require('./generationService');
     getGenerationService().scheduleModelUnload(10000);
   }
 
