@@ -1,11 +1,10 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 
-import type { LocalAiMode } from './agent';
+import type { ExternalChatMessage, LocalAiMode } from './agent';
 import { buildPromptForMode, buildRetrievedContext, buildExternalMessagesForMode } from './agent';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
-  QWEN_MODEL_FILE_NAME,
   QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS,
   QWEN_MODEL_MAX_OUTPUT_TOKENS,
   QWEN_MODEL_GROUNDED_TEMPERATURE,
@@ -13,6 +12,7 @@ import {
   QWEN_MODEL_STOP_TOKENS,
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
+import { getActiveModelFileUri, isActiveModelInstalled, isVisionProjectorInstalled } from './modelLifecycle';
 import { useAIStore, getAIRuntimeAvailability } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import {
@@ -30,6 +30,7 @@ type FileInfoResult = {
 
 type FileSystemLegacyModule = typeof ExpoFileSystemLegacy & {
   getInfoAsync?: (path: string, options?: { size?: boolean }) => Promise<FileInfoResult>;
+  readAsStringAsync?: (path: string, options?: { encoding?: 'base64' | 'utf8' }) => Promise<string>;
 };
 
 const FileSystemModule = ExpoFileSystemLegacy as FileSystemLegacyModule;
@@ -58,7 +59,25 @@ export type StartGenerationParams = {
   topP?: number;
   stop?: string[];
   bypassChatTemplate?: boolean;
+  systemPrompt?: string;
+  jsonSchema?: object;
+  disableThinking?: boolean;
+  imageUri?: string;
 };
+
+export async function isVisionAvailable(): Promise<boolean> {
+  const settings = useSettingsStore.getState();
+  const externalConfigured = isExternalAccessConfigured(settings);
+  if (settings.aiInferenceMode === 'external') {
+    return externalConfigured;
+  }
+  try {
+    const localInstalled = (await isActiveModelInstalled()) && (await isVisionProjectorInstalled());
+    return localInstalled || externalConfigured;
+  } catch {
+    return externalConfigured;
+  }
+}
 
 
 export type PreparePromptParams = {
@@ -77,7 +96,90 @@ function createSnapshot(state: GenerationService['state']): GenerationServiceRun
 
 function getConfiguredModelPath() {
   const provisioningPath = useAIStore.getState().provisioning.modelPath;
-  return provisioningPath ?? `file:///data/user/0/com.LCSdev.silo/files/ai/models/${QWEN_MODEL_FILE_NAME}`;
+  return provisioningPath || getActiveModelFileUri();
+}
+
+function parseExternalUrlParts(rawUrl: string): { protocol: string; hostname: string } | null {
+  const trimmed = rawUrl.trim();
+  const match = trimmed.match(/^(https?):\/\/([^/?#]+)/i);
+  if (!match) {
+    return null;
+  }
+  const protocol = match[1].toLowerCase();
+  const authority = match[2];
+  const hostPort = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority;
+  let hostname: string;
+  if (hostPort.startsWith('[')) {
+    const endBracket = hostPort.indexOf(']');
+    hostname = endBracket > 0 ? hostPort.slice(1, endBracket) : hostPort;
+  } else {
+    hostname = hostPort.split(':')[0];
+  }
+  return { protocol, hostname: hostname.toLowerCase() };
+}
+
+function isLoopbackOrPrivateLanHost(hostname: string): boolean {
+  if (!hostname) {
+    return false;
+  }
+  if (hostname === 'localhost' || hostname === '::1') {
+    return true;
+  }
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4Match) {
+    return false;
+  }
+  const octets = ipv4Match.slice(1).map(Number);
+  if (octets.some((octet) => octet < 0 || octet > 255)) {
+    return false;
+  }
+  const [a, b] = octets;
+  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
+function isExternalAccessConfigured(settings: {
+  externalApiUrl?: string;
+  externalApiModel?: string;
+  externalApiKey?: string;
+}): boolean {
+  const url = (settings.externalApiUrl ?? '').trim();
+  const model = (settings.externalApiModel ?? '').trim();
+  if (!url || !model) {
+    return false;
+  }
+  if ((settings.externalApiKey ?? '').trim().length > 0) {
+    return true;
+  }
+  const parsed = parseExternalUrlParts(url);
+  return Boolean(parsed && isLoopbackOrPrivateLanHost(parsed.hostname));
+}
+
+function stripChatMlToMessages(rawPrompt: string): ExternalChatMessage[] {
+  const messages: ExternalChatMessage[] = [];
+  const blockRegex = /<\|im_start\|>(system|user|assistant)\s*([\s\S]*?)(?=<\|im_start\|>|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = blockRegex.exec(rawPrompt)) !== null) {
+    const role = match[1].toLowerCase() as ExternalChatMessage['role'];
+    const rawBody = match[2];
+    const hasEndTag = rawBody.includes('<|im_end|>');
+    const content = rawBody.replace(/<\|im_end\|>/g, '').replace(/<\|endoftext\|>/g, '').trim();
+    if (!content) {
+      continue;
+    }
+    if (role === 'assistant' && !hasEndTag) {
+      continue;
+    }
+    messages.push({ role, content });
+  }
+  if (messages.length === 0) {
+    const stripped = rawPrompt
+      .replace(/<\|im_start\|>(?:system|user|assistant)?/gi, '')
+      .replace(/<\|im_end\|>/g, '')
+      .replace(/<\|endoftext\|>/g, '')
+      .trim();
+    return [{ role: 'user', content: stripped }];
+  }
+  return messages;
 }
 
 const STREAM_SANITIZER_TOKENS = [
@@ -236,7 +338,7 @@ class GenerationService {
     return createSnapshot(this.state);
   }
 
-  async ensureChatRuntimeReady(): Promise<void> {
+  async ensureChatRuntimeReady(options?: { minContextTokens?: number }): Promise<void> {
     if (this.unloadTimer) {
       clearTimeout(this.unloadTimer);
       this.unloadTimer = null;
@@ -262,6 +364,7 @@ class GenerationService {
         await this.llamaRnAdapter.initContext({
           modelPath: modelInfo.configuredModelPath,
           modelFileSizeBytes: modelInfo.modelFileSizeBytes,
+          contextTokens: options?.minContextTokens,
         });
 
         const runtimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
@@ -283,15 +386,20 @@ class GenerationService {
     if (this.unloadTimer) {
       clearTimeout(this.unloadTimer);
     }
-    
+
     this.unloadTimer = setTimeout(async () => {
       this.unloadTimer = null;
+      const store = useAIStore.getState();
+      if (this.state.isGenerating || store.runtime.activeGenerationRequestId !== null || this.runtimeInitPromise !== null) {
+        void this.scheduleModelUnload(delayMs);
+        return;
+      }
       try {
         await this.llamaRnAdapter.releaseContext();
-        const store = useAIStore.getState();
-        store.setRuntimeModelLoaded(false, await this.llamaRnAdapter.getRuntimeInfo());
-        store.setRuntimeState('model-unloaded'); // or idle/unloaded
-        store.markRuntimeReady(false);
+        const latestStore = useAIStore.getState();
+        latestStore.setRuntimeModelLoaded(false, await this.llamaRnAdapter.getRuntimeInfo());
+        latestStore.setRuntimeState('model-unloaded'); // or idle/unloaded
+        latestStore.markRuntimeReady(false);
       } catch (err) {
         console.error('Failed to automatically unload model context', err);
       }
@@ -299,7 +407,7 @@ class GenerationService {
   }
 
   async startGeneration(params: StartGenerationParams): Promise<string> {
-    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate } = params;
+    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, disableThinking } = params;
     const settings = useSettingsStore.getState();
     if (settings.aiInferenceMode === 'external') {
       return this.startExternalGeneration(params);
@@ -308,9 +416,16 @@ class GenerationService {
     const state = useAIStore.getState();
     const availability = getAIRuntimeAvailability(state);
 
-    if (!availability.hasUsableLocalInferenceBackend && settings.externalApiUrl && settings.externalApiModel) {
-      console.log('Local backend unavailable (e.g. low memory or crash), failing over to external API...');
-      return this.startExternalGeneration(params);
+    if (!availability.hasUsableLocalInferenceBackend) {
+      if (isExternalAccessConfigured(settings)) {
+        return this.startExternalGeneration(params, 'Using external API (local model unavailable)');
+      }
+      throw new LocalInferenceException(
+        'backend-unavailable',
+        'Local model not ready — download it in Settings or configure an external API',
+        undefined,
+        true,
+      );
     }
 
     const requestStartedAtMs = Date.now();
@@ -319,20 +434,8 @@ class GenerationService {
       generationStatus: mode === 'rag' ? 'Retrieving grounded local context...' : 'Checking local inference runtime...',
     });
 
-    await this.ensureChatRuntimeReady();
-    const runtimeReadyAtMs = Date.now();
-
     const store = useAIStore.getState();
-    const requestId = `llama-rn-${runtimeReadyAtMs}`;
-    const runtimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
-
-    store.setActiveGenerationRequestId(requestId);
-    store.setStreamingResponseText('');
-    store.setActiveStatusLabel(mode === 'rag' ? 'Retrieving grounded local context...' : 'Running local inference...');
-    store.setRuntimeError(null);
-    store.setRuntimeInfo(runtimeInfo);
-    store.setRuntimeModelLoaded(Boolean(runtimeInfo.isModelLoaded), runtimeInfo);
-    store.setRuntimeState('busy');
+    let requestId: string | null = null;
 
     let lastStreamUpdateAtMs = 0;
     let lastRawStreamText = '';
@@ -342,38 +445,106 @@ class GenerationService {
     let generationStatusPublished = false;
 
     try {
+      await this.ensureChatRuntimeReady({ minContextTokens: params.imageUri ? 4096 : undefined });
+      const runtimeReadyAtMs = Date.now();
+
+      const activeRequestId = `llama-rn-${runtimeReadyAtMs}`;
+      requestId = activeRequestId;
+      const runtimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
+
+      store.setActiveGenerationRequestId(activeRequestId);
+      store.setStreamingResponseText('');
+      store.setActiveStatusLabel(mode === 'rag' ? 'Retrieving grounded local context...' : 'Running local inference...');
+      store.setRuntimeError(null);
+      store.setRuntimeInfo(runtimeInfo);
+      store.setRuntimeModelLoaded(Boolean(runtimeInfo.isModelLoaded), runtimeInfo);
+      store.setRuntimeState('busy');
+
       const promptStartedAtMs = Date.now();
-      const preparedPrompt = bypassChatTemplate ? prompt : await this.preparePrompt({ userPrompt: prompt, mode });
+      let preparedPrompt: string | undefined;
+      let preparedMessages: Array<{
+        role: string;
+        content?: string | Array<{ type: string; text?: string; image_url?: { url?: string } }>;
+      }> | undefined;
+
+      if (params.imageUri) {
+        preparedMessages = [
+          ...(systemPrompt !== undefined ? [{ role: 'system', content: systemPrompt }] : []),
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: params.imageUri },
+              },
+              {
+                type: 'text',
+                text: prompt,
+              },
+            ],
+          },
+        ];
+      } else if (bypassChatTemplate) {
+        preparedPrompt = prompt;
+      } else if (systemPrompt !== undefined) {
+        preparedMessages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ];
+      } else if (disableThinking) {
+        const formattedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
+        if (formattedPrompt.includes('<|im_start|>')) {
+          preparedMessages = stripChatMlToMessages(formattedPrompt);
+        } else {
+          preparedPrompt = formattedPrompt;
+        }
+      } else {
+        preparedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
+      }
       const promptPreparedAtMs = Date.now();
+      const promptChars = preparedMessages
+        ? preparedMessages.reduce((sum, message) => {
+            if (typeof message.content === 'string') {
+              return sum + message.content.length;
+            }
+            if (Array.isArray(message.content)) {
+              return sum + message.content.reduce((pSum, part) => pSum + (part.text?.length ?? 0), 0);
+            }
+            return sum;
+          }, 0)
+        : (preparedPrompt?.length ?? 0);
 
       traceLatency('llama-rn-generation-start', {
-        requestId,
+        requestId: activeRequestId,
         mode,
         runtimeWaitMs: runtimeReadyAtMs - requestStartedAtMs,
         promptPrepMs: promptPreparedAtMs - promptStartedAtMs,
-        promptChars: preparedPrompt.length,
+        promptChars,
         modelLoaded: runtimeInfo.isModelLoaded ?? null,
       });
 
       const effectiveStop = stop ? Array.from(new Set([...stop, ...QWEN_MODEL_STOP_TOKENS])) : [...QWEN_MODEL_STOP_TOKENS];
 
-      const result = await this.llamaRnAdapter.completion(requestId, {
-        prompt: preparedPrompt,
+      const result = await this.llamaRnAdapter.completion(activeRequestId, {
+        ...(preparedMessages ? { messages: preparedMessages } : { prompt: preparedPrompt }),
+        imageUri: params.imageUri,
         maxTokens: maxTokens ?? (mode === 'rag' ? QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS : QWEN_MODEL_MAX_OUTPUT_TOKENS),
         temperature: temperature ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE),
         topP: topP ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P),
         stop: effectiveStop,
+        jsonSchema,
+        disableThinking,
         onToken: (text) => {
           const now = Date.now();
           const latestState = useAIStore.getState();
-          if (latestState.runtime.activeGenerationRequestId !== requestId) {
+          if (latestState.runtime.activeGenerationRequestId !== activeRequestId) {
             return;
           }
 
           if (firstTokenAtMs === null) {
             firstTokenAtMs = now;
             traceLatency('llama-rn-first-token', {
-              requestId,
+              requestId: activeRequestId,
               firstTokenMs: now - promptPreparedAtMs,
               totalElapsedMs: now - requestStartedAtMs,
             });
@@ -420,7 +591,7 @@ class GenerationService {
       store.setStreamingResponseText(cleanedText);
       store.setActiveStatusLabel(result.stopReason === 'cancelled' ? 'Cancelled' : 'Response ready', null);
       traceLatency('llama-rn-generation-complete', {
-        requestId,
+        requestId: activeRequestId,
         mode,
         totalElapsedMs: Date.now() - requestStartedAtMs,
         runtimeWaitMs: runtimeReadyAtMs - requestStartedAtMs,
@@ -451,7 +622,7 @@ class GenerationService {
       throw error;
     } finally {
       const latestState = useAIStore.getState();
-      if (latestState.runtime.activeGenerationRequestId === requestId) {
+      if (requestId && latestState.runtime.activeGenerationRequestId === requestId) {
         latestState.setActiveGenerationRequestId(null);
       }
       if (this.completionStopPromise) {
@@ -466,17 +637,41 @@ class GenerationService {
     }
   }
 
-  private async startExternalGeneration({ prompt, mode, maxTokens, temperature, topP, stop }: StartGenerationParams): Promise<string> {
+  private async startExternalGeneration(
+    params: StartGenerationParams,
+    initialGenerationStatus?: string,
+  ): Promise<string> {
+    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, imageUri } = params;
+    const settings = useSettingsStore.getState();
+    const url = settings.externalApiUrl.trim().replace(/\/$/, '');
+    const parsedUrl = parseExternalUrlParts(url);
+    if (!parsedUrl) {
+      throw new LocalInferenceException(
+        'external-api-error',
+        'Invalid external API URL. Must start with https:// (or http:// for localhost/private LAN).',
+        { url },
+        true,
+      );
+    }
+    if (parsedUrl.protocol === 'http' && !isLoopbackOrPrivateLanHost(parsedUrl.hostname)) {
+      throw new LocalInferenceException(
+        'external-api-error',
+        'Insecure http:// external API URLs are only allowed for localhost or private LAN hosts. Use https:// instead.',
+        { url },
+        true,
+      );
+    }
+
     const requestStartedAtMs = Date.now();
     this.setState({
       isGenerating: true,
-      generationStatus: mode === 'rag' ? 'Retrieving grounded local context...' : 'Connecting to external API...',
+      generationStatus:
+        initialGenerationStatus ??
+        (mode === 'rag' ? 'Retrieving grounded local context...' : 'Connecting to external API...'),
     });
 
     const store = useAIStore.getState();
-    const settings = useSettingsStore.getState();
     const requestId = `ext-api-${requestStartedAtMs}`;
-    const url = settings.externalApiUrl.trim().replace(/\/$/, '');
     const model = settings.externalApiModel.trim() || 'gpt-4o-mini';
     const apiKey = settings.externalApiKey.trim();
 
@@ -486,8 +681,74 @@ class GenerationService {
     store.setRuntimeError(null);
     store.setRuntimeState('busy');
 
-    const retrievedContext = mode === 'rag' ? buildRetrievedContext(prompt) : undefined;
-    const messages = buildExternalMessagesForMode(prompt, mode, store, retrievedContext);
+    let messages: Array<{
+      role: 'system' | 'user' | 'assistant';
+      content:
+        | string
+        | Array<
+            | { type: 'text'; text: string }
+            | { type: 'image_url'; image_url: { url: string } }
+          >;
+    }>;
+
+    if (imageUri) {
+      let base64Data = '';
+      if (typeof FileSystemModule.readAsStringAsync === 'function') {
+        base64Data = await FileSystemModule.readAsStringAsync(imageUri, { encoding: 'base64' });
+      }
+      const mimeType = imageUri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+      const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
+      messages = [];
+      if (systemPrompt !== undefined) {
+        messages.push({ role: 'system', content: systemPrompt });
+      }
+      messages.push({
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {
+              url: dataUrl,
+            },
+          },
+          {
+            type: 'text',
+            text: prompt,
+          },
+        ],
+      });
+    } else if (bypassChatTemplate && prompt.includes('<|im_start|>')) {
+      messages = stripChatMlToMessages(prompt);
+      if (systemPrompt !== undefined) {
+        const existingSystemIndex = messages.findIndex((message) => message.role === 'system');
+        if (existingSystemIndex >= 0) {
+          messages[existingSystemIndex] = { role: 'system', content: systemPrompt };
+        } else {
+          messages.unshift({ role: 'system', content: systemPrompt });
+        }
+      }
+    } else if (systemPrompt !== undefined) {
+      messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ];
+    } else {
+      const retrievedContext = mode === 'rag' ? buildRetrievedContext(prompt) : undefined;
+      messages = buildExternalMessagesForMode(prompt, mode, store, retrievedContext);
+    }
+
+    if (jsonSchema) {
+      const schemaInstruction = `Respond with JSON matching this schema: ${JSON.stringify(jsonSchema)}`;
+      if (messages[0]?.role === 'system' && typeof messages[0].content === 'string') {
+        messages[0] = {
+          ...messages[0],
+          content: messages[0].content ? `${messages[0].content}\n\n${schemaInstruction}` : schemaInstruction,
+        };
+      } else {
+        messages.unshift({ role: 'system', content: schemaInstruction });
+      }
+    }
 
     let lastStreamUpdateAtMs = 0;
     let lastRawStreamText = '';
@@ -501,6 +762,26 @@ class GenerationService {
       const xhr = new XMLHttpRequest();
       this.activeExternalXhr = xhr;
       const endpoint = `${url}/chat/completions`;
+
+      const finalizeExternalRequest = (
+        statusLabel: string | null,
+        runtimeState?: 'healthy' | 'failed',
+        error?: LocalInferenceException,
+      ) => {
+        const latestStore = useAIStore.getState();
+        this.activeExternalXhr = null;
+        if (error) {
+          latestStore.setRuntimeError(error);
+        }
+        if (runtimeState) {
+          latestStore.setRuntimeState(runtimeState);
+        }
+        latestStore.setActiveStatusLabel(statusLabel, null);
+        this.setState({ isGenerating: false, generationStatus: '' });
+        if (latestStore.runtime.activeGenerationRequestId === requestId) {
+          latestStore.setActiveGenerationRequestId(null);
+        }
+      };
 
       xhr.open('POST', endpoint, true);
       xhr.setRequestHeader('Content-Type', 'application/json');
@@ -522,7 +803,8 @@ class GenerationService {
       }
 
       xhr.onprogress = () => {
-        if (store.runtime.activeGenerationRequestId !== requestId) {
+        const latestStore = useAIStore.getState();
+        if (latestStore.runtime.activeGenerationRequestId !== requestId) {
           xhr.abort();
           return;
         }
@@ -559,7 +841,7 @@ class GenerationService {
 
                   if (!generationStatusPublished) {
                     store.setActiveStatusLabel(`Generating response via ${model}...`);
-                    this.setState({ generationStatus: `Generating response via ${model}...` });
+                    this.setState({ generationStatus: initialGenerationStatus ?? `Generating response via ${model}...` });
                     generationStatusPublished = true;
                   }
                 }
@@ -572,7 +854,6 @@ class GenerationService {
       };
 
       xhr.onload = () => {
-        this.activeExternalXhr = null;
         if (xhr.status >= 200 && xhr.status < 300) {
           const lines = (xhr.responseText || '').split('\n');
           while (processedLineCount < lines.length) {
@@ -599,13 +880,8 @@ class GenerationService {
           }
 
           const cleanedText = sanitizeGeneratedText(fullContent);
-          store.setRuntimeState('healthy');
           store.setStreamingResponseText(cleanedText);
-          store.setActiveStatusLabel('Response ready', null);
-          this.setState({ isGenerating: false, generationStatus: '' });
-          if (store.runtime.activeGenerationRequestId === requestId) {
-            store.setActiveGenerationRequestId(null);
-          }
+          finalizeExternalRequest('Response ready', 'healthy');
           resolve(cleanedText.trim());
         } else {
           let errorMsg = `External API error (${xhr.status})`;
@@ -616,53 +892,37 @@ class GenerationService {
             // ignore
           }
           const error = new LocalInferenceException('external-api-error', errorMsg, { status: xhr.status }, true);
-          store.setRuntimeError(error);
-          store.setRuntimeState('failed');
-          store.setActiveStatusLabel(null, null);
-          this.setState({ isGenerating: false, generationStatus: '' });
-          if (store.runtime.activeGenerationRequestId === requestId) {
-            store.setActiveGenerationRequestId(null);
-          }
+          finalizeExternalRequest(null, 'failed', error);
           reject(error);
         }
       };
 
       xhr.onerror = () => {
-        this.activeExternalXhr = null;
         const error = new LocalInferenceException('external-api-error', 'Network error connecting to external API.', undefined, true);
-        store.setRuntimeError(error);
-        store.setRuntimeState('failed');
-        store.setActiveStatusLabel(null, null);
-        this.setState({ isGenerating: false, generationStatus: '' });
-        if (store.runtime.activeGenerationRequestId === requestId) {
-          store.setActiveGenerationRequestId(null);
-        }
+        finalizeExternalRequest(null, 'failed', error);
         reject(error);
       };
 
       xhr.onabort = () => {
-        this.activeExternalXhr = null;
         const error = new LocalInferenceException('generation-cancelled', 'Generation cancelled by user.', undefined, true);
-        store.setActiveStatusLabel('Cancelled', null);
-        store.setRuntimeError(error);
-        this.setState({ isGenerating: false, generationStatus: '' });
-        if (store.runtime.activeGenerationRequestId === requestId) {
-          store.setActiveGenerationRequestId(null);
-        }
+        finalizeExternalRequest('Cancelled', undefined, error);
         reject(error);
       };
 
-      xhr.send(
-        JSON.stringify({
-          model,
-          messages,
-          stream: true,
-          max_tokens: maxTokens,
-          temperature: temperature ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE),
-          top_p: topP ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P),
-          stop: stop,
-        }),
-      );
+      const payload: Record<string, unknown> = {
+        model,
+        messages,
+        stream: true,
+        max_tokens: maxTokens,
+        temperature: temperature ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TEMPERATURE : QWEN_MODEL_DEFAULT_TEMPERATURE),
+        top_p: topP ?? (mode === 'rag' ? QWEN_MODEL_GROUNDED_TOP_P : QWEN_MODEL_DEFAULT_TOP_P),
+        stop,
+      };
+      if (jsonSchema) {
+        payload.response_format = { type: 'json_object' };
+      }
+
+      xhr.send(JSON.stringify(payload));
     });
   }
 
@@ -731,6 +991,10 @@ class GenerationService {
   }
 
   async dispose(): Promise<void> {
+    if (this.unloadTimer) {
+      clearTimeout(this.unloadTimer);
+      this.unloadTimer = null;
+    }
     this.runtimeInitPromise = null;
     if (this.activeExternalXhr) {
       this.activeExternalXhr.abort();

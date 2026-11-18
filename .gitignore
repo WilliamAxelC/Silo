@@ -78,3 +78,11 @@ project-map.txt
 .aider*
 coverage/
 
+# Benchmark artifacts & local venv
+bench/data/
+bench/cache/
+bench/.venv/
+
+
+bench/**/__pycache__/
+bench/**/*.log

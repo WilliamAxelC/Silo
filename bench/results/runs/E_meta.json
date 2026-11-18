@@ -1,0 +1,6 @@
+{
+  "approach": "E",
+  "model_path": "/home/agent/.cache/silo-bench/models/Qwen3.5-2B-Q4_K_M.gguf",
+  "mmproj_path": "/home/agent/.cache/silo-bench/models/mmproj-2B-F16.gguf",
+  "peak_rss_mb": 3072.4
+}

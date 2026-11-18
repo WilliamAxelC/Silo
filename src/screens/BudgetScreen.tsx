@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,15 +10,17 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { useAppTheme } from '../theme/useAppTheme';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { formatDisplayCurrency } from '../features/transactions/amount';
+import { formatAmountInput, formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
   if (percentage > 100) {
@@ -64,10 +66,38 @@ export const BudgetScreen = () => {
   const fontScale = useSettingsStore((state) => state.fontScale);
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
-  const { budgets, setBudget, getCategoriesByType } = useTransactionStore();
-  const [currentDate] = useState(() => new Date());
+  const {
+    budgets,
+    setBudget,
+    getCategoriesByType,
+    fetchTransactions,
+    fetchBudgets,
+    fetchCategories,
+  } = useTransactionStore();
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [refreshing, setRefreshing] = useState(false);
   const { currentMonthExpenses } = useMonthlySummary(currentDate);
   const expenseCategories = getCategoriesByType('expense');
+
+  const refreshMonthData = useCallback(async () => {
+    setCurrentDate(new Date());
+    await Promise.all([fetchTransactions(), fetchBudgets(), fetchCategories()]);
+  }, [fetchTransactions, fetchBudgets, fetchCategories]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshMonthData();
+    }, [refreshMonthData])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshMonthData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshMonthData]);
 
   const titleScale = useMemo(() => ({ fontSize: 24 * fontScale }), [fontScale]);
   const bodyScale = useMemo(() => ({ fontSize: 13 * fontScale }), [fontScale]);
@@ -114,13 +144,13 @@ export const BudgetScreen = () => {
   const handleOpenModal = (category: string) => {
     setSelectedCategory(category);
     const existingLimit = budgets[category];
-    setBudgetInput(existingLimit && existingLimit > 0 ? existingLimit.toString() : '');
+    setBudgetInput(existingLimit && existingLimit > 0 ? formatAmountInput(Math.round(existingLimit).toString()) : '');
     setModalVisible(true);
   };
 
   const handleSaveBudget = async () => {
-    const numericValue = parseFloat(budgetInput.replace(/,/g, ''));
-    if (!isNaN(numericValue) && numericValue > 0) {
+    const numericValue = Math.abs(parseSignedAmount(budgetInput));
+    if (numericValue > 0) {
       await setBudget(selectedCategory, numericValue);
     } else {
       // 0 or empty clears budget
@@ -157,7 +187,18 @@ export const BudgetScreen = () => {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 132 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: 132 }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
+        }
+      >
         {/* Metric Summary Panel */}
         <View style={[styles.heroPanel, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.heroMetricGrid}>
@@ -317,7 +358,12 @@ export const BudgetScreen = () => {
                     {selectedCategory}
                   </Text>
                 </View>
-                <TouchableOpacity style={styles.modalCloseBtn} onPress={closeModal} accessibilityRole="button">
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={closeModal}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                >
                   <Ionicons name="close" size={22} color={theme.textMuted} />
                 </TouchableOpacity>
               </View>
@@ -333,8 +379,7 @@ export const BudgetScreen = () => {
                   keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                   value={budgetInput}
                   onChangeText={(text) => {
-                    const numericValue = text.replace(/[^0-9]/g, '');
-                    setBudgetInput(numericValue.replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+                    setBudgetInput(formatAmountInput(text));
                   }}
                   placeholder="0"
                   placeholderTextColor={theme.textMuted}
@@ -348,6 +393,7 @@ export const BudgetScreen = () => {
                     style={[styles.clearBtn, { borderColor: theme.expense, backgroundColor: theme.background }]}
                     onPress={handleClearBudget}
                     accessibilityRole="button"
+                    accessibilityLabel="Clear budget limit"
                   >
                     <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 4 }} />
                     <Text style={[styles.clearBtnText, { color: theme.expense }, bodyScale]}>Clear</Text>
@@ -358,6 +404,7 @@ export const BudgetScreen = () => {
                   style={[styles.cancelBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
                   onPress={closeModal}
                   accessibilityRole="button"
+                  accessibilityLabel="Cancel"
                 >
                   <Text style={[styles.cancelText, { color: theme.textMuted }, bodyScale]}>Cancel</Text>
                 </TouchableOpacity>
@@ -366,6 +413,7 @@ export const BudgetScreen = () => {
                   style={[styles.saveBtn, { backgroundColor: theme.primary }]}
                   onPress={handleSaveBudget}
                   accessibilityRole="button"
+                  accessibilityLabel="Save budget limit"
                 >
                   <Text style={[styles.saveText, bodyScale]}>Save Limit</Text>
                 </TouchableOpacity>

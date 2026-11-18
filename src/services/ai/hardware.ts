@@ -1,5 +1,6 @@
 import DeviceInfo from 'react-native-device-info';
 import { useAIStore } from '../../store/useAIStore';
+import { getActiveModelConfig } from './config';
 
 export const LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES = 4 * 1024 * 1024 * 1024;
 export const MODEL_MEMORY_MULTIPLIER = 1.5;
@@ -68,7 +69,8 @@ export async function resolveOptimalQuantization(activeModelSizeBytes?: number |
   const totalRamBytes = await getTotalDeviceMemoryBytes();
   const pssBytes = await getDevicePssMemoryBytes();
   
-  const targetSizeBytes = activeModelSizeBytes ?? QUANTIZATION_PROFILES.Q5_K_M.fileSizeBytes;
+  const activeConfig = getActiveModelConfig();
+  const targetSizeBytes = activeModelSizeBytes ?? activeConfig.sizeBytes ?? QUANTIZATION_PROFILES.Q5_K_M.fileSizeBytes;
   const budgetBytes = buildMemoryBudget(totalRamBytes, targetSizeBytes).allowedBudgetBytes;
   const availableMemory = totalRamBytes > 0 && pssBytes > 0 ? Math.max(0, totalRamBytes - pssBytes) : budgetBytes;
   
@@ -88,7 +90,7 @@ export async function resolveOptimalQuantization(activeModelSizeBytes?: number |
     fallbackTriggered = true;
   }
   
-  const activeQuantization = 'Q5_K_M';
+  const activeQuantization = activeConfig.quantization;
   
   return {
     recommendedQuantization,

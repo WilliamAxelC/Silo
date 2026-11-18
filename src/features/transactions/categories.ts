@@ -8,6 +8,18 @@ import {
   UNCATEGORIZED_INCOME_LABEL,
 } from './constants';
 
+export type ReceiptReadingMode = 'ocr' | 'vision';
+
+declare module './types' {
+  interface AppSettings {
+    receiptReadingMode: ReceiptReadingMode;
+  }
+}
+
+export const RECEIPT_READING_MODE_KEY = 'receiptReadingMode' as const;
+export const DEFAULT_RECEIPT_READING_MODE: ReceiptReadingMode = 'ocr';
+
+
 export const DEFAULT_CATEGORY_SEEDS: Array<Omit<CategoryRecord, 'id' | 'createdAt'>> = [
   ...DEFAULT_EXPENSE_CATEGORIES.map((name) => ({ name, type: 'expense' as const, isSystem: true })),
   ...DEFAULT_INCOME_CATEGORIES.map((name) => ({ name, type: 'income' as const, isSystem: true })),
@@ -99,6 +111,7 @@ export function getInitialAppSettings(): AppSettings {
     externalApiCustomHeaders: DEFAULT_APP_SETTINGS.externalApiCustomHeaders,
     localSystemPrompt: DEFAULT_APP_SETTINGS.localSystemPrompt,
     externalSystemPrompt: DEFAULT_APP_SETTINGS.externalSystemPrompt,
+    receiptReadingMode: DEFAULT_RECEIPT_READING_MODE,
   };
 }
 
@@ -169,6 +182,11 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.externalSystemPrompt:
         base.externalSystemPrompt = row.value ?? DEFAULT_APP_SETTINGS.externalSystemPrompt;
+        break;
+      case RECEIPT_READING_MODE_KEY:
+        if (row.value === 'ocr' || row.value === 'vision') {
+          base.receiptReadingMode = row.value;
+        }
         break;
       default:
         break;

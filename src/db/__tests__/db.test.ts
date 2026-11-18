@@ -142,6 +142,21 @@ describe('Database Layer and SQLite Operations', () => {
       expect(versionRow?.user_version).toBe(8);
     });
 
+    it('skips migrations, seeding, and view recreation on steady-state launch when user_version is current', () => {
+      const execSpy = jest.spyOn(testDb, 'execSync');
+      const runSpy = jest.spyOn(testDb, 'runSync');
+
+      runMigrations(testDb as any);
+
+      const execCalls = execSpy.mock.calls.map((c) => c[0]);
+      expect(execCalls.some((sql) => sql.includes('DROP VIEW IF EXISTS'))).toBe(false);
+      expect(execCalls.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS'))).toBe(false);
+      expect(runSpy).not.toHaveBeenCalled();
+
+      execSpy.mockRestore();
+      runSpy.mockRestore();
+    });
+
     it('cascades deletion from transactions to transaction_items and shared_splits', () => {
       testDb.execSync('PRAGMA foreign_keys = ON;');
 

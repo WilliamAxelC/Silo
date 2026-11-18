@@ -103,7 +103,10 @@ export const AddTransactionScreen = () => {
   const [type, setType] = useState<TransactionType>('expense');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
+  const [amountError, setAmountError] = useState<string | null>(null);
+  const [totalNeedsReview, setTotalNeedsReview] = useState(false);
   const [category, setCategory] = useState('');
+  const [pendingScannedCategory, setPendingScannedCategory] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [lineItems, setLineItems] = useState<ReceiptLineItemDraft[]>([]);
   const [detailsMode, setDetailsMode] = useState<TransactionUIInputMode>('note');
@@ -113,6 +116,8 @@ export const AddTransactionScreen = () => {
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
 
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [rawOcrText, setRawOcrText] = useState<string | null>(null);
+  const [isRawTextExpanded, setIsRawTextExpanded] = useState<boolean>(false);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [sourceModalTarget, setSourceModalTarget] = useState<'attachment' | 'scan' | null>(null);
 
@@ -145,7 +150,10 @@ export const AddTransactionScreen = () => {
     const nextForm = createTransactionInput({ category: fallbackCategory, type });
     setTitle(nextForm.merchantName);
     setAmount('');
+    setAmountError(null);
+    setTotalNeedsReview(false);
     setCategory(nextForm.category);
+    setPendingScannedCategory(null);
     setNote(nextForm.note ?? '');
     setLineItems(parseReceiptLineItemsText(nextForm.lineItemsText ?? ''));
     setDetailsMode('note');
@@ -153,6 +161,8 @@ export const AddTransactionScreen = () => {
     setType(nextForm.type);
     setSelectedDate(new Date());
     setScanStatusLabel(null);
+    setRawOcrText(null);
+    setIsRawTextExpanded(false);
   };
 
   useEffect(() => {
@@ -164,21 +174,41 @@ export const AddTransactionScreen = () => {
         const editableTransaction = buildEditableTransactionInput(tx);
         const editableType = deriveEditableTransactionType(editableTransaction.totalAmount, editableTransaction.type);
         setTitle(editableTransaction.merchantName);
-        setAmount(formatAmountInput(Math.abs(editableTransaction.totalAmount).toString()));
+        setAmount(formatAmountInput(Math.round(Math.abs(editableTransaction.totalAmount)).toString()));
+        setAmountError(null);
+        setTotalNeedsReview(false);
         setType(editableType);
         setCategory(normalizeCategoryForType(editableTransaction.category, editableType));
+        setPendingScannedCategory(null);
         setNote(editableTransaction.note || '');
         setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
         setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
         setSelectedDate(new Date(editableTransaction.date));
         setImageUri(editableTransaction.imageUri || null);
+        setRawOcrText(null);
+        setIsRawTextExpanded(false);
       }
     } else {
       resetForm();
     }
   }, [editingId]);
 
+  const prevTypeRef = React.useRef(type);
   useEffect(() => {
+    const typeChanged = prevTypeRef.current !== type;
+    prevTypeRef.current = type;
+
+    if (typeChanged) {
+      setPendingScannedCategory(null);
+      const nextCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
+      setCategory(nextCategory);
+      return;
+    }
+
+    if (pendingScannedCategory && category === pendingScannedCategory) {
+      return;
+    }
+
     if (availableCategories.length === 0) {
       const fallback = normalizeCategoryForType('', type);
       if (category !== fallback) {
@@ -192,7 +222,7 @@ export const AddTransactionScreen = () => {
         setCategory(nextCategory);
       }
     }
-  }, [availableCategories, category, normalizeCategoryForType, type]);
+  }, [availableCategories, category, normalizeCategoryForType, pendingScannedCategory, type]);
 
   const openPicker = (mode: 'date' | 'time') => {
     setPickerMode(mode);
@@ -205,7 +235,19 @@ export const AddTransactionScreen = () => {
   };
 
   const handleAmountChange = (text: string) => {
-    setAmount(formatAmountInput(text));
+    setTotalNeedsReview(false);
+    const formatted = formatAmountInput(text);
+    setAmount(formatted);
+    if (text.trim().length > 0) {
+      const parsed = Math.abs(parseSignedAmount(text));
+      if (parsed === 0 || Number.isNaN(parsed)) {
+        setAmountError('Amount must be greater than 0');
+      } else {
+        setAmountError(null);
+      }
+    } else {
+      setAmountError(null);
+    }
   };
 
   const setParsedLineItems = (value: string) => {
@@ -238,18 +280,31 @@ export const AddTransactionScreen = () => {
   };
 
   const pickImage = async (source: 'gallery' | 'camera') => {
+    const target = sourceModalTarget;
     setSourceModalVisible(false);
     let result;
-    if (source === 'gallery') {
-      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    } else {
-      await ImagePicker.requestCameraPermissionsAsync();
-      result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    try {
+      if (source === 'gallery') {
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 0.8,
+        });
+      } else {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Camera Permission Required', 'Camera access is required to take photos of receipts.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      }
+    } catch (error) {
+      Alert.alert('Image Error', getErrorMessage(error, 'Failed to pick an image. Please try again.'));
+      return;
     }
 
-    if (result.canceled || !result.assets || !result.assets[0].uri) return;
+    if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
 
-    if (sourceModalTarget === 'scan') {
+    if (target === 'scan') {
       processScanReceipt(result.assets[0].uri);
     } else {
       setImageUri(result.assets[0].uri);
@@ -259,29 +314,51 @@ export const AddTransactionScreen = () => {
   const processScanReceipt = async (uri: string, base64String?: string) => {
     setImageUri(uri);
     setIsScanning(true);
-    setScanStatusLabel('Starting receipt scan...');
+    setScanStatusLabel('Reading text…');
+    setRawOcrText(null);
+    setIsRawTextExpanded(false);
 
     try {
       const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined, (status: string) => {
-        setScanStatusLabel(status);
+        if (status === 'Reading receipt with AI vision…' || status.includes('vision')) {
+          setScanStatusLabel(status);
+        } else if (
+          status.includes('Structuring') ||
+          status.toLowerCase().includes('understanding') ||
+          status.includes('AI')
+        ) {
+          setScanStatusLabel('Understanding receipt…');
+        } else if (status.includes('OCR') || status.toLowerCase().includes('reading')) {
+          setScanStatusLabel('Reading text…');
+        } else {
+          setScanStatusLabel(status);
+        }
       });
 
       if (parsedData) {
+        setTotalNeedsReview(Boolean(parsedData.totalNeedsReview));
+        const rawText = (parsedData as { rawText?: string }).rawText;
+        if (rawText) {
+          setRawOcrText(rawText);
+          setIsRawTextExpanded(false);
+        }
         if (parsedData.merchantName) setTitle(parsedData.merchantName);
-        if (parsedData.totalAmount) setAmount(formatAmountInput(parsedData.totalAmount.toString()));
+        if (parsedData.totalAmount) {
+          setAmount(formatAmountInput(Math.round(Math.abs(parsedData.totalAmount)).toString()));
+          setAmountError(null);
+        }
         if (parsedData.category) {
           const detectedCategory = parsedData.category.trim();
-          const inferredType = getCategoryTypeForTransaction(type);
-          const normalizedDetectedCategory = normalizeCategoryForType(detectedCategory, type);
-          if (!availableCategories.some((item) => item.name.toLowerCase() === detectedCategory.toLowerCase())) {
-            try {
-              await addCategory(detectedCategory, inferredType);
-              setCategory(detectedCategory);
-            } catch {
-              setCategory(normalizedDetectedCategory);
-            }
+          const existingCategory = availableCategories.find(
+            (item) => item.name.toLowerCase() === detectedCategory.toLowerCase()
+          );
+          if (existingCategory) {
+            setCategory(existingCategory.name);
+            setPendingScannedCategory(null);
           } else {
-            setCategory(normalizedDetectedCategory);
+            // Keep in form state, do NOT call addCategory during scan
+            setCategory(detectedCategory);
+            setPendingScannedCategory(detectedCategory);
           }
         }
         if (parsedData.lineItemsText) {
@@ -301,7 +378,10 @@ export const AddTransactionScreen = () => {
       console.warn('OCR error:', error);
       setScanStatusLabel(null);
       if (error?.message === 'NO_TEXT_DETECTED') {
-        Alert.alert('No Text Detected', 'We couldn\'t find any readable text in the image. Please make sure the receipt is clear and try again.');
+        Alert.alert(
+          'No Text Detected',
+          "We couldn't find any readable text in the image. Please make sure the receipt is clear and try again."
+        );
       } else {
         Alert.alert('Scan Failed', 'Failed to scan the receipt automatically. Please enter details manually.');
       }
@@ -320,7 +400,7 @@ export const AddTransactionScreen = () => {
     setSourceModalVisible(true);
   };
 
-  const buildTransactionPayload = (): TransactionInput => {
+  const buildTransactionPayload = (categoryOverride?: string): TransactionInput => {
     const signedType = type === 'transfer' ? 'expense' : type;
 
     return normalizeTransactionInput(
@@ -328,7 +408,7 @@ export const AddTransactionScreen = () => {
         merchantName: title,
         totalAmount: parseSignedAmount(amount, signedType),
         type,
-        category: normalizeCategoryForType(category, type),
+        category: (categoryOverride ?? category).trim() || normalizeCategoryForType('', type),
         date: selectedDate.getTime(),
         note,
         lineItemsText,
@@ -338,21 +418,46 @@ export const AddTransactionScreen = () => {
   };
 
   const handleSave = async () => {
-    if (!title.trim() || !amount) {
-      Alert.alert('Missing Required Fields', 'Please enter a title and amount');
+    if (!title.trim()) {
+      Alert.alert('Missing Required Fields', 'Please enter a title');
       return;
     }
 
-    const data = buildTransactionPayload();
-
-    if (editingId) {
-      await updateTransaction(editingId, data);
-    } else {
-      await addTransaction(data);
+    const parsedAmt = Math.abs(parseSignedAmount(amount));
+    if (!amount || parsedAmt === 0 || Number.isNaN(parsedAmt)) {
+      setAmountError('Amount must be greater than 0');
+      return;
     }
 
-    navigation.navigate('MainTabs', { screen: 'Cashflow' });
-    setTimeout(() => resetForm(), 100);
+    try {
+      let resolvedCategory = category;
+      if (category) {
+        const categoryExists = availableCategories.some(
+          (item) => item.name.toLowerCase() === category.toLowerCase()
+        );
+        if (!categoryExists) {
+          try {
+            resolvedCategory = await addCategory(category, activeCategoryType);
+            setPendingScannedCategory(null);
+          } catch (catErr) {
+            console.warn('Failed to auto-create category on save:', catErr);
+          }
+        }
+      }
+
+      const data = buildTransactionPayload(resolvedCategory);
+
+      if (editingId) {
+        await updateTransaction(editingId, data);
+      } else {
+        await addTransaction(data);
+      }
+
+      navigation.navigate('MainTabs', { screen: 'Cashflow' });
+      setTimeout(() => resetForm(), 100);
+    } catch (error: any) {
+      Alert.alert('Save Failed', error?.message || 'Failed to save transaction. Please try again.');
+    }
   };
 
   const handleDelete = () => {
@@ -363,9 +468,13 @@ export const AddTransactionScreen = () => {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await deleteTransaction(editingId);
-          resetForm();
-          navigation.navigate('MainTabs', { screen: 'Cashflow' });
+          try {
+            await deleteTransaction(editingId);
+            resetForm();
+            navigation.navigate('MainTabs', { screen: 'Cashflow' });
+          } catch (error: any) {
+            Alert.alert('Delete Failed', error?.message || 'Failed to delete transaction. Please try again.');
+          }
         },
       },
     ]);
@@ -379,6 +488,7 @@ export const AddTransactionScreen = () => {
       try {
         const createdCategory = await addCategory(trimmedCategory, activeCategoryType);
         setCategory(createdCategory);
+        setPendingScannedCategory(null);
         setCustomCategory('');
         setCategoryModalVisible(false);
       } catch (error) {
@@ -494,11 +604,25 @@ export const AddTransactionScreen = () => {
             <View style={[styles.fieldCard, styles.amountField]}>
               <Text style={[styles.label, { color: theme.text }]}>Amount *</Text>
               <View style={styles.amountInputContainer}>
-                <View style={[styles.currencyBadge, styles.compactCurrencyBadge, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View
+                  style={[
+                    styles.currencyBadge,
+                    styles.compactCurrencyBadge,
+                    { backgroundColor: theme.surface, borderColor: amountError ? theme.expense : theme.border },
+                  ]}
+                >
                   <Text style={[styles.currencyText, { color: theme.textMuted }]}>{currencyCode}</Text>
                 </View>
                 <TextInput
-                  style={[styles.amountInput, styles.compactAmountInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+                  style={[
+                    styles.amountInput,
+                    styles.compactAmountInput,
+                    {
+                      backgroundColor: theme.surface,
+                      borderColor: amountError ? theme.expense : theme.border,
+                      color: theme.text,
+                    },
+                  ]}
                   placeholderTextColor={theme.textMuted}
                   value={amount}
                   onChangeText={handleAmountChange}
@@ -506,6 +630,17 @@ export const AddTransactionScreen = () => {
                   placeholder="0"
                 />
               </View>
+              {amountError ? (
+                <Text style={[styles.inlineErrorText, { color: theme.expense }]}>{amountError}</Text>
+              ) : totalNeedsReview ? (
+                <Text
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                  style={[styles.inlineWarningText, { color: theme.warning }]}
+                >
+                  Double-check the total — it wasn't found in the scanned text.
+                </Text>
+              ) : null}
             </View>
           </View>
 
@@ -569,6 +704,7 @@ export const AddTransactionScreen = () => {
                       onPress={() => handleDetailsModeChange(option.key)}
                       accessibilityRole="button"
                       accessibilityLabel={`Show ${option.label} details`}
+                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                     >
                       <Text style={[styles.detailsModeText, { color: isActive ? '#fff' : theme.textMuted }]}>
                         {option.label}
@@ -609,13 +745,8 @@ export const AddTransactionScreen = () => {
           <View style={styles.compactRow}>
             <View style={[styles.fieldCard, styles.flexField]}>
               <Text style={[styles.label, { color: theme.text }]}>Receipt Photo</Text>
-              <TouchableOpacity
-                style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}
-                onPress={() => !imageUri && openAttachmentSourceModal()}
-                accessibilityRole="button"
-                accessibilityLabel={imageUri ? 'Attached receipt photo' : 'Add receipt photo'}
-              >
-                {imageUri ? (
+              {imageUri ? (
+                <View style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                   <View style={styles.imagePreviewWrap}>
                     <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
                     <TouchableOpacity
@@ -623,19 +754,57 @@ export const AddTransactionScreen = () => {
                       onPress={() => setImageUri(null)}
                       accessibilityRole="button"
                       accessibilityLabel="Remove photo"
+                      hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
                     >
                       <Ionicons name="close-circle" size={26} color={theme.expense} />
                     </TouchableOpacity>
                   </View>
-                ) : (
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                  onPress={openAttachmentSourceModal}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add receipt photo"
+                >
                   <View style={styles.attachmentCompactEmpty}>
                     <Ionicons name="camera-outline" size={22} color={theme.primary} />
                     <Text style={[styles.attachmentCompactText, { color: theme.textMuted }]}>Attach receipt image</Text>
                   </View>
-                )}
-              </TouchableOpacity>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
+
+          {/* Collapsible Raw OCR Text Section */}
+          {rawOcrText ? (
+            <View style={[styles.rawOcrCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <TouchableOpacity
+                style={styles.rawOcrHeader}
+                onPress={() => setIsRawTextExpanded((prev) => !prev)}
+                accessibilityRole="button"
+                accessibilityLabel={isRawTextExpanded ? 'Collapse raw OCR text' : 'Expand raw OCR text'}
+                accessibilityState={{ expanded: isRawTextExpanded }}
+              >
+                <View style={styles.rawOcrHeaderLeft}>
+                  <Ionicons name="document-text-outline" size={16} color={theme.primary} />
+                  <Text style={[styles.rawOcrTitle, { color: theme.text }]}>Raw OCR text</Text>
+                </View>
+                <Ionicons
+                  name={isRawTextExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={theme.textMuted}
+                />
+              </TouchableOpacity>
+              {isRawTextExpanded && (
+                <View style={[styles.rawOcrBody, { borderTopColor: theme.border }]}>
+                  <Text selectable style={[styles.rawOcrContent, { color: theme.textMuted }]}>
+                    {rawOcrText}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : null}
 
           {/* Save & Delete Action Row */}
           <View style={styles.actionRow}>
@@ -687,6 +856,7 @@ export const AddTransactionScreen = () => {
         selectedCategory={category}
         onSelectCategory={(name) => {
           setCategory(name);
+          setPendingScannedCategory(null);
           setCategoryModalVisible(false);
         }}
         customCategory={customCategory}
@@ -757,6 +927,8 @@ const styles = StyleSheet.create({
   currencyText: { fontSize: 12, fontWeight: '700' },
   amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
+  inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
+  inlineWarningText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   compactPicker: {
     minHeight: 46,
     borderWidth: 1,
@@ -809,7 +981,42 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rawOcrCard: {
+    borderWidth: 1,
     borderRadius: 14,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  rawOcrHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    minHeight: 44,
+  },
+  rawOcrHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rawOcrTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  rawOcrBody: {
+    borderTopWidth: 1,
+    padding: 12,
+  },
+  rawOcrContent: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   actionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   deleteButtonCompact: {

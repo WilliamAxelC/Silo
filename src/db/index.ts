@@ -152,6 +152,9 @@ export function recreateAITransactionsView(sqliteDb: typeof expoDb = expoDb) {
 export function seedDefaultSettings(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.withTransactionSync(() => {
     Object.entries(DEFAULT_APP_SETTINGS).forEach(([key, value]) => {
+      if (key === 'externalApiKey' || key === 'externalApiCustomHeaders') {
+        return;
+      }
       sqliteDb.runSync(`INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?);`, [key, serializeSettingValue(value)]);
     });
   });
@@ -417,10 +420,15 @@ export function searchTransactions(
 
 export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
   initDatabasePragmas(sqliteDb);
-  createBaseSchema(sqliteDb);
 
   const currentVersionRow = sqliteDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
   const currentVersion = currentVersionRow?.user_version ?? 0;
+
+  if (currentVersion >= DB_SCHEMA_VERSION) {
+    return;
+  }
+
+  createBaseSchema(sqliteDb);
 
   if (currentVersion < 2) {
     migrateToVersion2(sqliteDb);

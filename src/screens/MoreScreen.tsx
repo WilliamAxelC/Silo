@@ -49,8 +49,13 @@ export const MoreScreen = () => {
               value={dummyQuery}
               onChangeText={setDummyQuery}
             />
-            <TouchableOpacity style={[styles.chatButton, { backgroundColor: theme.primary }]} onPress={() => navigation.navigate('Chatbot', { initialMessage: dummyQuery })}>
-              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            <TouchableOpacity
+              style={[styles.chatButton, { backgroundColor: theme.primary }]}
+              onPress={() => navigation.navigate('Chatbot', { initialMessage: dummyQuery })}
+              accessibilityRole="button"
+              accessibilityLabel="Open chatbot"
+            >
+              <Ionicons name="arrow-forward" size={18} color={theme.onPrimary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -93,6 +98,10 @@ export const MoreScreen = () => {
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
         </View>
+
+        <View style={styles.footerWrap}>
+          <Text style={[styles.footerText, { color: theme.textMuted }]}>Silo · by CDev</Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -121,4 +130,6 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 14 },
   settingRowLeft: { flexDirection: 'row', alignItems: 'center' },
   settingText: { marginLeft: 10, fontSize: 14, fontWeight: '500' },
+  footerWrap: { alignItems: 'center', marginTop: 16, marginBottom: 8 },
+  footerText: { fontSize: 12, fontWeight: '500' },
 });

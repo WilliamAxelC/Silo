@@ -2,6 +2,7 @@ export const lightTheme = {
   background: '#f8f9fa',
   surface: '#ffffff',
   primary: '#0ea5e9', // Blue
+  onPrimary: '#ffffff',
   primaryMuted: '#e0f2fe',
   text: '#1f2937',    // Dark Gray
   textMuted: '#6b7280',
@@ -19,6 +20,7 @@ export const darkTheme = {
   background: '#121212',
   surface: '#1e1e1e',
   primary: '#38bdf8', // Lighter Blue for contrast
+  onPrimary: '#ffffff',
   primaryMuted: '#082f49',
   text: '#f9fafb',    // Off-White
   textMuted: '#9ca3af',

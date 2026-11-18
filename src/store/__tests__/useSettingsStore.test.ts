@@ -1,4 +1,6 @@
-import { useSettingsStore } from '../useSettingsStore';
+import { Appearance } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { useSettingsStore, handleAppearanceChange } from '../useSettingsStore';
 import { db } from '../../db/index';
 import { useAIStore } from '../useAIStore';
 import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../../features/transactions/constants';
@@ -12,7 +14,12 @@ jest.mock('../../db/index', () => ({
       })),
     })),
     insert: jest.fn(() => ({
-      values: jest.fn(() => Promise.resolve()),
+      values: jest.fn(() => ({
+        onConflictDoUpdate: jest.fn(() => Promise.resolve()),
+      })),
+    })),
+    delete: jest.fn(() => ({
+      where: jest.fn(() => Promise.resolve()),
     })),
     update: jest.fn(() => ({
       set: jest.fn(() => ({
@@ -84,12 +91,48 @@ describe('useSettingsStore', () => {
       expect(state.isDarkMode).toBe(true);
     });
 
-    it('sets theme mode to system and derives isDarkMode as false', async () => {
+    it('sets theme mode to system and derives isDarkMode from Appearance', async () => {
+      const spy = jest.spyOn(Appearance, 'getColorScheme').mockReturnValue('dark');
       await useSettingsStore.getState().setThemeMode('system');
 
-      const state = useSettingsStore.getState();
+      let state = useSettingsStore.getState();
+      expect(state.themeMode).toBe('system');
+      expect(state.isDarkMode).toBe(true);
+
+      spy.mockReturnValue('light');
+      await useSettingsStore.getState().setThemeMode('system');
+      state = useSettingsStore.getState();
       expect(state.themeMode).toBe('system');
       expect(state.isDarkMode).toBe(false);
+
+      spy.mockRestore();
+    });
+
+    it('syncs isDarkMode when Appearance change listener triggers for system theme', () => {
+      useSettingsStore.setState({ themeMode: 'system', isDarkMode: false });
+
+      handleAppearanceChange({ colorScheme: 'dark' });
+      expect(useSettingsStore.getState().isDarkMode).toBe(true);
+
+      handleAppearanceChange({ colorScheme: 'light' });
+      expect(useSettingsStore.getState().isDarkMode).toBe(false);
+
+      // Does not alter dark mode if themeMode is manual
+      useSettingsStore.setState({ themeMode: 'light', isDarkMode: false });
+      handleAppearanceChange({ colorScheme: 'dark' });
+      expect(useSettingsStore.getState().isDarkMode).toBe(false);
+    });
+
+    it('subscribes once to Appearance change listener upon module load', () => {
+      let registeredListener: any;
+      jest.isolateModules(() => {
+        const { Appearance: isolatedAppearance } = require('react-native');
+        const spy = jest.spyOn(isolatedAppearance, 'addChangeListener');
+        require('../useSettingsStore');
+        expect(spy).toHaveBeenCalledWith(expect.any(Function));
+        registeredListener = spy.mock.calls[0][0];
+      });
+      expect(typeof registeredListener).toBe('function');
     });
   });
 
@@ -172,18 +215,44 @@ describe('useSettingsStore', () => {
       expect(useSettingsStore.getState().externalApiProvider).toBe('custom');
     });
 
-    it('sets external API credentials and custom headers', async () => {
+    it('sets external API credentials and custom headers to SecureStore only', async () => {
+      (db.insert as jest.Mock).mockClear();
+
       await useSettingsStore.getState().setExternalApiKey('sk-123456');
       expect(useSettingsStore.getState().externalApiKey).toBe('sk-123456');
+      expect(SecureStore.setItemAsync).toHaveBeenCalledWith('externalApiKey', 'sk-123456');
+      expect(db.insert).not.toHaveBeenCalled();
 
       await useSettingsStore.getState().setExternalApiCustomHeaders('{"Authorization": "Bearer custom"}');
       expect(useSettingsStore.getState().externalApiCustomHeaders).toBe('{"Authorization": "Bearer custom"}');
+      expect(SecureStore.setItemAsync).toHaveBeenCalledWith('externalApiCustomHeaders', '{"Authorization": "Bearer custom"}');
+      expect(db.insert).not.toHaveBeenCalled();
 
       await useSettingsStore.getState().setExternalApiUrl('https://my-custom-proxy.com/v1');
       expect(useSettingsStore.getState().externalApiUrl).toBe('https://my-custom-proxy.com/v1');
+      expect(db.insert).toHaveBeenCalled();
 
       await useSettingsStore.getState().setExternalApiModel('custom-llm-v1');
       expect(useSettingsStore.getState().externalApiModel).toBe('custom-llm-v1');
+    });
+
+    it('migrates legacy plaintext externalApiKey and headers from app_settings to SecureStore and deletes them', async () => {
+      (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => [
+          { key: 'externalApiKey', value: 'sk-legacy-secret' },
+          { key: 'externalApiCustomHeaders', value: '{"X-Legacy": "1"}' },
+          { key: 'themeMode', value: 'dark' },
+        ]),
+      });
+
+      await useSettingsStore.getState().loadSettings();
+
+      expect(SecureStore.setItemAsync).toHaveBeenCalledWith('externalApiKey', 'sk-legacy-secret');
+      expect(SecureStore.setItemAsync).toHaveBeenCalledWith('externalApiCustomHeaders', '{"X-Legacy": "1"}');
+      expect(db.delete).toHaveBeenCalledTimes(2);
+      expect(useSettingsStore.getState().externalApiKey).toBe('sk-legacy-secret');
+      expect(useSettingsStore.getState().externalApiCustomHeaders).toBe('{"X-Legacy": "1"}');
     });
   });
 
@@ -194,6 +263,33 @@ describe('useSettingsStore', () => {
 
       await useSettingsStore.getState().setExternalSystemPrompt('You are an expert cloud financial planner.');
       expect(useSettingsStore.getState().externalSystemPrompt).toBe('You are an expert cloud financial planner.');
+    });
+  });
+
+  describe('Receipt reading mode', () => {
+    it('defaults to ocr', () => {
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+    });
+
+    it('sets receipt reading mode to vision and persists to db', async () => {
+      (db.insert as jest.Mock).mockClear();
+      await useSettingsStore.getState().setReceiptReadingMode('vision');
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('vision');
+      expect(db.insert).toHaveBeenCalled();
+
+      await useSettingsStore.getState().setReceiptReadingMode('ocr');
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+    });
+
+    it('loads receipt reading mode from database rows', async () => {
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => [
+          { key: 'receiptReadingMode', value: 'vision' },
+        ]),
+      });
+
+      await useSettingsStore.getState().loadSettings();
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('vision');
     });
   });
 });

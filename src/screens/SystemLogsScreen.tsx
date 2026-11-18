@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   Alert,
   TextInput,
@@ -20,10 +20,68 @@ import { useAppTheme } from '../theme/useAppTheme';
 
 type LogLevelFilter = 'all' | 'info' | 'warn' | 'error';
 
+interface LogRowProps {
+  entry: AIEventLog;
+  onCopy: (entry: AIEventLog) => void;
+}
+
+const LogRow = React.memo(function LogRow({ entry, onCopy }: LogRowProps) {
+  const theme = useAppTheme();
+
+  const badgeColor =
+    entry.level === 'error' ? theme.expense : entry.level === 'warn' ? theme.warning : theme.primary;
+  const badgeBg =
+    entry.level === 'error' ? theme.expenseMuted : entry.level === 'warn' ? theme.warningMuted : theme.primaryMuted;
+
+  const handleCopy = useCallback(() => {
+    onCopy(entry);
+  }, [entry, onCopy]);
+
+  return (
+    <View style={[styles.logCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={styles.logHeader}>
+        <View style={[styles.levelBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
+          <Text style={[styles.levelBadgeText, { color: badgeColor }]}>{entry.level.toUpperCase()}</Text>
+        </View>
+        <Text style={[styles.logEvent, { color: theme.text }]} numberOfLines={1}>
+          {entry.event}
+        </Text>
+        <Text style={[styles.logTime, { color: theme.textMuted }]}>
+          {new Date(entry.timestamp).toLocaleTimeString()}
+        </Text>
+        <TouchableOpacity
+          onPress={handleCopy}
+          style={styles.copySingleBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Copy this log"
+        >
+          <Ionicons name="copy-outline" size={15} color={theme.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={[styles.logMessage, { color: theme.text }]}>{entry.message}</Text>
+
+      {entry.details ? (
+        <View style={[styles.detailsBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
+          <Text style={[styles.logDetails, { color: theme.textMuted }]}>
+            {JSON.stringify(entry.details, null, 2)}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+});
+
 export const SystemLogsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
-  const { logs, runtime, provisioning, clearLogs } = useAIStore();
+  const logs = useAIStore((state) => state.logs);
+  const clearLogs = useAIStore((state) => state.clearLogs);
+  const provisioningStatus = useAIStore((state) => state.provisioning.status);
+  const runtimeState = useAIStore((state) => state.runtime.runtimeState);
+  const activeStatusLabel = useAIStore((state) => state.runtime.activeStatusLabel);
+  const streamingBufferLength = useAIStore((state) => state.runtime.streamingResponseText?.length ?? 0);
 
   const [selectedLevel, setSelectedLevel] = useState<LogLevelFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,13 +129,13 @@ export const SystemLogsScreen = () => {
     Alert.alert('Copied', `Copied ${systemLogs.length} log ${systemLogs.length === 1 ? 'entry' : 'entries'} to clipboard.`);
   };
 
-  const handleCopySingleLog = async (entry: AIEventLog) => {
+  const handleCopySingleLog = useCallback(async (entry: AIEventLog) => {
     const text = `[${entry.timestamp}] [${entry.level.toUpperCase()}] [${entry.event}] ${entry.message}${
       entry.details ? `\nDetails: ${JSON.stringify(entry.details, null, 2)}` : ''
     }`;
     await Clipboard.setStringAsync(text);
     Alert.alert('Copied', 'Log entry copied to clipboard.');
-  };
+  }, []);
 
   const handleClearLogsConfirm = () => {
     if (logs.length === 0) return;
@@ -93,29 +151,12 @@ export const SystemLogsScreen = () => {
     ]);
   };
 
-  const getLevelBadgeColor = (level: 'info' | 'warn' | 'error') => {
-    switch (level) {
-      case 'error':
-        return theme.expense;
-      case 'warn':
-        return theme.warning;
-      case 'info':
-      default:
-        return theme.primary;
-    }
-  };
+  const keyExtractor = useCallback((item: AIEventLog) => item.id, []);
 
-  const getLevelBadgeBg = (level: 'info' | 'warn' | 'error') => {
-    switch (level) {
-      case 'error':
-        return theme.expenseMuted;
-      case 'warn':
-        return theme.warningMuted;
-      case 'info':
-      default:
-        return theme.primaryMuted;
-    }
-  };
+  const renderLogItem = useCallback(
+    ({ item }: { item: AIEventLog }) => <LogRow entry={item} onCopy={handleCopySingleLog} />,
+    [handleCopySingleLog]
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -172,9 +213,11 @@ export const SystemLogsScreen = () => {
                   },
                 ]}
                 onPress={() => setSelectedLevel(level)}
+                hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
                 accessibilityRole="button"
+                accessibilityLabel={`Filter ${level} logs (${count})`}
               >
-                <Text style={[styles.filterPillText, { color: isSelected ? '#fff' : theme.text }]}>
+                <Text style={[styles.filterPillText, { color: isSelected ? theme.onPrimary : theme.text }]}>
                   {level.toUpperCase()}
                 </Text>
                 <View
@@ -185,7 +228,7 @@ export const SystemLogsScreen = () => {
                     },
                   ]}
                 >
-                  <Text style={[styles.filterCountText, { color: isSelected ? '#fff' : theme.textMuted }]}>
+                  <Text style={[styles.filterCountText, { color: isSelected ? theme.onPrimary : theme.textMuted }]}>
                     {count}
                   </Text>
                 </View>
@@ -206,44 +249,54 @@ export const SystemLogsScreen = () => {
             autoCorrect={false}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              style={styles.clearSearchBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
               <Ionicons name="close-circle" size={16} color={theme.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Runtime Diagnostics Card */}
-        <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.summaryHeader}>
-            <Ionicons name="hardware-chip-outline" size={16} color={theme.primary} />
-            <Text style={[styles.summaryTitle, { color: theme.text }]}>Runtime Diagnostics</Text>
+      <FlatList
+        data={systemLogs}
+        keyExtractor={keyExtractor}
+        renderItem={renderLogItem}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.summaryHeader}>
+              <Ionicons name="hardware-chip-outline" size={16} color={theme.primary} />
+              <Text style={[styles.summaryTitle, { color: theme.text }]}>Runtime Diagnostics</Text>
+            </View>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Provisioning:</Text>
+                <Text style={[styles.summaryValue, { color: theme.text }]}>{provisioningStatus}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Runtime State:</Text>
+                <Text style={[styles.summaryValue, { color: theme.text }]}>{runtimeState}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Active Status:</Text>
+                <Text style={[styles.summaryValue, { color: theme.text }]}>{activeStatusLabel ?? 'Idle'}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Streaming Buffer:</Text>
+                <Text style={[styles.summaryValue, { color: theme.text }]}>
+                  {streamingBufferLength > 0 ? `${streamingBufferLength} chars` : 'Empty'}
+                </Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.summaryGrid}>
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Provisioning:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{provisioning.status}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Runtime State:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{runtime.runtimeState}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Active Status:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{runtime.activeStatusLabel ?? 'Idle'}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Streaming Buffer:</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>
-                {runtime.streamingResponseText ? `${runtime.streamingResponseText.length} chars` : 'Empty'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Logs List */}
-        {systemLogs.length === 0 ? (
+        }
+        ListEmptyComponent={
           <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Ionicons name="document-text-outline" size={32} color={theme.textMuted} style={{ marginBottom: 8 }} />
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No matching logs</Text>
@@ -253,55 +306,8 @@ export const SystemLogsScreen = () => {
                 : 'No logs match your filter criteria.'}
             </Text>
           </View>
-        ) : (
-          systemLogs.map((entry) => {
-            const badgeColor = getLevelBadgeColor(entry.level);
-            const badgeBg = getLevelBadgeBg(entry.level);
-
-            return (
-              <View
-                key={entry.id}
-                style={[
-                  styles.logCard,
-                  { backgroundColor: theme.surface, borderColor: theme.border },
-                ]}
-              >
-                <View style={styles.logHeader}>
-                  <View style={[styles.levelBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
-                    <Text style={[styles.levelBadgeText, { color: badgeColor }]}>
-                      {entry.level.toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={[styles.logEvent, { color: theme.text }]} numberOfLines={1}>
-                    {entry.event}
-                  </Text>
-                  <Text style={[styles.logTime, { color: theme.textMuted }]}>
-                    {new Date(entry.timestamp).toLocaleTimeString()}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => handleCopySingleLog(entry)}
-                    style={styles.copySingleBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Copy this log"
-                  >
-                    <Ionicons name="copy-outline" size={15} color={theme.textMuted} />
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={[styles.logMessage, { color: theme.text }]}>{entry.message}</Text>
-
-                {entry.details ? (
-                  <View style={[styles.detailsBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Text style={[styles.logDetails, { color: theme.textMuted }]}>
-                      {JSON.stringify(entry.details, null, 2)}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            );
-          })
-        )}
-      </ScrollView>
+        }
+      />
     </SafeAreaView>
   );
 };
@@ -316,8 +322,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   headerIconButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -475,6 +481,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   copySingleBtn: {
+    minWidth: 28,
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 4,
   },
   logMessage: {

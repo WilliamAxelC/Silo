@@ -244,12 +244,6 @@ describe('useTransactionStore', () => {
     });
 
     it('updates existing transaction and refreshes state', async () => {
-      (db.update as jest.Mock).mockReturnValue({
-        set: jest.fn(() => ({
-          where: jest.fn(),
-        })),
-      });
-
       const fetchTxSpy = jest.spyOn(useTransactionStore.getState(), 'fetchTransactions').mockResolvedValueOnce();
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValueOnce();
 
@@ -258,7 +252,7 @@ describe('useTransactionStore', () => {
         totalAmount: -175000,
       });
 
-      expect(db.update).toHaveBeenCalled();
+      expect(db.transaction).toHaveBeenCalled();
       expect(fetchTxSpy).toHaveBeenCalled();
       expect(fetchBudgetsSpy).toHaveBeenCalled();
     });
@@ -295,12 +289,6 @@ describe('useTransactionStore', () => {
     });
 
     it('handles rapid consecutive updates to the same transaction', async () => {
-      (db.update as jest.Mock).mockReturnValue({
-        set: jest.fn(() => ({
-          where: jest.fn(),
-        })),
-      });
-
       const fetchTxSpy = jest.spyOn(useTransactionStore.getState(), 'fetchTransactions').mockResolvedValue();
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValue();
 
@@ -310,7 +298,7 @@ describe('useTransactionStore', () => {
 
       await Promise.all([update1, update2, update3]);
 
-      expect(db.update).toHaveBeenCalled();
+      expect(db.transaction).toHaveBeenCalled();
       expect(useTransactionStore.getState().isSaving).toBe(false);
     });
 
@@ -370,6 +358,35 @@ describe('useTransactionStore', () => {
       expect(fetchBudgetsSpy).toHaveBeenCalled();
     });
 
+    it('scopes transactionItems update in renameCategory to matching parent transaction type', async () => {
+      const updateWhereArgs: any[] = [];
+      const mockSet = jest.fn(() => ({
+        where: jest.fn((clause) => {
+          updateWhereArgs.push(clause);
+          return Promise.resolve();
+        }),
+      }));
+      (db.transaction as jest.Mock).mockImplementationOnce(async (cb) => {
+        return cb({
+          update: jest.fn(() => ({ set: mockSet })),
+          select: jest.fn(() => ({
+            from: jest.fn(() => ({
+              where: jest.fn(() => Promise.resolve([])),
+            })),
+          })),
+        });
+      });
+
+      jest.spyOn(useTransactionStore.getState(), 'fetchCategories').mockResolvedValueOnce();
+      jest.spyOn(useTransactionStore.getState(), 'fetchTransactions').mockResolvedValueOnce();
+      jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValueOnce();
+
+      await useTransactionStore.getState().renameCategory(5, 'Crafts & Hobby');
+      expect(updateWhereArgs.length).toBeGreaterThanOrEqual(2);
+      const sub = updateWhereArgs[1].queryChunks[1].queryChunks[2];
+      expect(sub.usedTables).toContain('transactions');
+    });
+
     it('prevents renaming to empty or duplicate name', async () => {
       const emptyRes = await useTransactionStore.getState().renameCategory(5, '');
       expect(emptyRes.ok).toBe(false);
@@ -408,29 +425,18 @@ describe('useTransactionStore', () => {
 
   describe('budgets, search, and data clearing', () => {
     it('sets budget limit for a category', async () => {
-      (db.delete as jest.Mock).mockReturnValueOnce({
-        where: jest.fn(() => Promise.resolve()),
-      });
-      (db.insert as jest.Mock).mockReturnValueOnce({
-        values: jest.fn(() => Promise.resolve()),
-      });
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValueOnce();
 
       await useTransactionStore.getState().setBudget('Food & Dining', 750000);
-      expect(db.delete).toHaveBeenCalled();
-      expect(db.insert).toHaveBeenCalled();
+      expect(db.transaction).toHaveBeenCalled();
       expect(fetchBudgetsSpy).toHaveBeenCalled();
     });
 
     it('deletes budget without inserting when limitAmount is 0 or negative', async () => {
-      (db.delete as jest.Mock).mockReturnValueOnce({
-        where: jest.fn(() => Promise.resolve()),
-      });
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValueOnce();
 
       await useTransactionStore.getState().setBudget('Food & Dining', 0);
-      expect(db.delete).toHaveBeenCalled();
-      expect(db.insert).not.toHaveBeenCalled();
+      expect(db.transaction).toHaveBeenCalled();
       expect(fetchBudgetsSpy).toHaveBeenCalled();
       fetchBudgetsSpy.mockRestore();
     });
@@ -467,14 +473,11 @@ describe('useTransactionStore', () => {
     });
 
     it('clears all transactions and budgets in DB via clearAllData()', async () => {
-      (db.delete as jest.Mock).mockReturnValue({
-        where: jest.fn(() => Promise.resolve()),
-      });
       const fetchTxSpy = jest.spyOn(useTransactionStore.getState(), 'fetchTransactions').mockResolvedValueOnce();
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValueOnce();
 
       await useTransactionStore.getState().clearAllData();
-      expect(db.delete).toHaveBeenCalled();
+      expect(db.transaction).toHaveBeenCalled();
       expect(fetchTxSpy).toHaveBeenCalled();
       expect(fetchBudgetsSpy).toHaveBeenCalled();
     });
@@ -506,9 +509,7 @@ describe('useTransactionStore', () => {
     });
 
     it('handles setBudget errors gracefully', async () => {
-      (db.delete as jest.Mock).mockImplementationOnce(() => {
-        throw new Error('Constraint violation');
-      });
+      (db.transaction as jest.Mock).mockRejectedValueOnce(new Error('Constraint violation'));
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
       await useTransactionStore.getState().setBudget('Food & Dining', 500000);

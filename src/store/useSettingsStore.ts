@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { eq } from 'drizzle-orm';
+import { Appearance, type ColorSchemeName } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 
 import { db } from '../db/index';
 import { appSettings } from '../db/schema';
@@ -29,25 +31,34 @@ interface SettingsState extends AppSettings {
   setExternalApiCustomHeaders: (headers: string) => Promise<void>;
   setLocalSystemPrompt: (prompt: string) => Promise<void>;
   setExternalSystemPrompt: (prompt: string) => Promise<void>;
+  setReceiptReadingMode: (mode: 'ocr' | 'vision') => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
   if (themeMode === 'light') {
     return false;
   }
+  if (themeMode === 'dark') {
+    return true;
+  }
 
-  return themeMode === 'dark';
+  return Appearance.getColorScheme() === 'dark';
 }
 
 async function saveSetting(key: keyof AppSettings, value: string | boolean | number) {
-  const stringValue = serializeSettingValue(value);
-  const existing = await db.select().from(appSettings).where(eq(appSettings.key, key));
-
-  if (existing.length > 0) {
-    await db.update(appSettings).set({ value: stringValue }).where(eq(appSettings.key, key));
-  } else {
-    await db.insert(appSettings).values({ key, value: stringValue });
+  if (key === 'externalApiKey' || key === 'externalApiCustomHeaders') {
+    await SecureStore.setItemAsync(key, String(value));
+    return;
   }
+
+  const stringValue = serializeSettingValue(value);
+  await db
+    .insert(appSettings)
+    .values({ key, value: stringValue })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value: stringValue },
+    });
 }
 
 const initialSettings = getInitialAppSettings();
@@ -60,8 +71,34 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   loadSettings: async () => {
     const rows = await db.select().from(appSettings);
     const parsed = parseSettingsRows(rows);
+
+    let externalApiKey = await SecureStore.getItemAsync('externalApiKey');
+    const legacyApiKeyRow = rows.find((r) => r.key === 'externalApiKey');
+    if (legacyApiKeyRow) {
+      if (externalApiKey === null) {
+        externalApiKey = legacyApiKeyRow.value;
+        await SecureStore.setItemAsync('externalApiKey', externalApiKey);
+      }
+      await db.delete(appSettings).where(eq(appSettings.key, 'externalApiKey'));
+    }
+
+    let externalApiCustomHeaders = await SecureStore.getItemAsync('externalApiCustomHeaders');
+    const legacyHeadersRow = rows.find((r) => r.key === 'externalApiCustomHeaders');
+    if (legacyHeadersRow) {
+      if (externalApiCustomHeaders === null) {
+        externalApiCustomHeaders = legacyHeadersRow.value;
+        await SecureStore.setItemAsync('externalApiCustomHeaders', externalApiCustomHeaders);
+      }
+      await db.delete(appSettings).where(eq(appSettings.key, 'externalApiCustomHeaders'));
+    }
+
+    const resolvedApiKey = externalApiKey ?? parsed.externalApiKey;
+    const resolvedCustomHeaders = externalApiCustomHeaders ?? parsed.externalApiCustomHeaders;
+
     set({
       ...parsed,
+      externalApiKey: resolvedApiKey,
+      externalApiCustomHeaders: resolvedCustomHeaders,
       isDarkMode: deriveIsDarkMode(parsed.themeMode),
       isLoaded: true,
     });
@@ -162,4 +199,22 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     await saveSetting('externalSystemPrompt', externalSystemPrompt);
     set({ externalSystemPrompt });
   },
+
+  setReceiptReadingMode: async (receiptReadingMode) => {
+    await saveSetting('receiptReadingMode', receiptReadingMode);
+    set({ receiptReadingMode });
+  },
 }));
+
+export function handleAppearanceChange(preferences: { colorScheme?: ColorSchemeName | null }) {
+  const current = useSettingsStore.getState();
+  if (current.themeMode === 'system') {
+    const isDark = preferences.colorScheme === 'dark';
+    if (current.isDarkMode !== isDark) {
+      useSettingsStore.setState({ isDarkMode: isDark });
+    }
+  }
+}
+
+Appearance.addChangeListener(handleAppearanceChange);
+

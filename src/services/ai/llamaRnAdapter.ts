@@ -1,5 +1,11 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
-import { initLlama, releaseAllLlama, type LlamaContext } from 'llama.rn';
+import {
+  initLlama,
+  releaseAllLlama,
+  type CompletionParams,
+  type LlamaContext,
+  type RNLlamaOAICompatibleMessage,
+} from 'llama.rn';
 
 import {
   QWEN_MODEL_DEFAULT_BATCH_TOKENS,
@@ -22,13 +28,18 @@ import {
   getTotalDeviceMemoryBytes,
   resolveRecommendedCpuThreads,
 } from './hardware';
+import { getVisionProjectorUri } from './modelLifecycle';
 
 export type LlamaRnCompletionParams = {
-  prompt: string;
+  prompt?: string;
+  messages?: RNLlamaOAICompatibleMessage[];
+  imageUri?: string;
   maxTokens?: number;
   temperature?: number;
   topP?: number;
   stop?: string[];
+  jsonSchema?: object;
+  disableThinking?: boolean;
   onToken?: (text: string) => void;
   onFirstToken?: (durationMs: number) => void;
 };
@@ -36,6 +47,7 @@ export type LlamaRnCompletionParams = {
 export type LlamaRnInitParams = {
   modelPath: string;
   modelFileSizeBytes: number;
+  contextTokens?: number;
 };
 
 type FileInfoResult = {
@@ -148,24 +160,40 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+function hasImageMessagePart(messages?: RNLlamaOAICompatibleMessage[]): boolean {
+  if (!messages || !Array.isArray(messages)) {
+    return false;
+  }
+  return messages.some((msg) =>
+    Array.isArray(msg.content) && msg.content.some((part) => part.type === 'image_url'),
+  );
+}
+
 class LlamaRnAdapter {
   private context: LlamaContext | null = null;
   private initializedModelPath: string | null = null;
   private initializedModelFileSizeBytes = 0;
+  private configuredContextTokens = 0;
+  private resolvedGpuLayers = 0;
+  private multimodalInitialized = false;
   private initPromise: Promise<void> | null = null;
   private activeCompletionRequestId: string | null = null;
   private stoppingRequestId: string | null = null;
   private lastCompletionText = '';
   private lastRuntimeInfo: LocalRuntimeInfo | null = null;
 
-  async initContext({ modelPath, modelFileSizeBytes }: LlamaRnInitParams): Promise<void> {
+  async initContext({ modelPath, modelFileSizeBytes, contextTokens }: LlamaRnInitParams): Promise<void> {
     const normalizedModelPath = normalizeModelPath(modelPath);
-    if (this.context && this.initializedModelPath === normalizedModelPath) {
+    const requestedContextTokens = Math.max(contextTokens ?? 0, QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS);
+    if (this.context && this.initializedModelPath === normalizedModelPath && this.configuredContextTokens >= requestedContextTokens) {
       return;
     }
 
     if (this.initPromise) {
-      return this.initPromise;
+      await this.initPromise;
+      if (this.context && this.initializedModelPath === normalizedModelPath && this.configuredContextTokens >= requestedContextTokens) {
+        return;
+      }
     }
 
     this.initPromise = (async () => {
@@ -207,7 +235,7 @@ class LlamaRnAdapter {
       const baseInitParams = {
         model: normalizedModelPath,
         use_progress_callback: false,
-        n_ctx: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
+        n_ctx: requestedContextTokens,
         n_batch: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         n_threads: resolvedCpuThreads,
         use_mlock: false,
@@ -242,23 +270,26 @@ class LlamaRnAdapter {
       this.context = context;
       this.initializedModelPath = normalizedModelPath;
       this.initializedModelFileSizeBytes = resolvedModelFileSizeBytes;
+      this.configuredContextTokens = requestedContextTokens;
+      this.resolvedGpuLayers = resolvedGpuLayers;
+      this.multimodalInitialized = false;
       this.lastRuntimeInfo = {
         backend: resolvedGpuLayers > 0 ? 'llama.rn' : 'llama.rn-cpu',
         version: null,
         supportsStreaming: true,
-        maxContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
+        maxContextTokens: requestedContextTokens,
         loadedModelPath: normalizedModelPath,
         loadedModelFamily: 'qwen',
         loadedModelQuantization: null,
         isModelLoaded: true,
         abi: null,
-        configuredContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
+        configuredContextTokens: requestedContextTokens,
         configuredCpuThreads: resolvedCpuThreads,
         configuredGpuLayers: resolvedGpuLayers,
         configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         configuredUseFlashAttention: false,
         configuredUseMlock: false,
-        resolvedContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
+        resolvedContextTokens: requestedContextTokens,
         resolvedBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         resolvedThreads: resolvedCpuThreads,
         estimatedGpuOffloadRequested: requestedGpuLayers > 0,
@@ -312,6 +343,42 @@ class LlamaRnAdapter {
     }
   }
 
+  private async ensureMultimodalInitialized(): Promise<void> {
+    if (!this.context) {
+      throw toRuntimeError('load-failed', 'llama.rn context is not initialized.');
+    }
+    if (this.multimodalInitialized) {
+      return;
+    }
+
+    const projectorUri = getVisionProjectorUri();
+    if (!projectorUri) {
+      throw toRuntimeError('model-file-missing', 'Vision projector URI is not available.');
+    }
+
+    const useGpu = this.resolvedGpuLayers > 0;
+    try {
+      if (typeof this.context.initMultimodal !== 'function') {
+        throw new Error('Native initMultimodal method is missing.');
+      }
+      const success = await this.context.initMultimodal({
+        path: projectorUri,
+        use_gpu: useGpu,
+      });
+      if (success === false) {
+        throw new Error('Native initMultimodal returned false.');
+      }
+      this.multimodalInitialized = true;
+    } catch (error) {
+      this.multimodalInitialized = false;
+      throw toRuntimeError(
+        'backend-unavailable',
+        `Failed to initialize vision multimodal projector: ${error instanceof Error ? error.message : String(error)}`,
+        { projectorUri, useGpu, originalError: error },
+      );
+    }
+  }
+
   async completion(requestId: string, params: LlamaRnCompletionParams): Promise<LocalGenerationResult> {
     if (!this.context) {
       throw toRuntimeError('load-failed', 'llama.rn context is not initialized.');
@@ -323,6 +390,24 @@ class LlamaRnAdapter {
       });
     }
 
+    if (!params.prompt && (!params.messages || params.messages.length === 0)) {
+      throw toRuntimeError('generation-failed', 'Prompt or messages is required for llama.rn completion.');
+    }
+
+    const isImageRequest = Boolean(params.imageUri || hasImageMessagePart(params.messages));
+    if (isImageRequest) {
+      if (this.configuredContextTokens < 4096 && this.initializedModelPath) {
+        await this.initContext({
+          modelPath: this.initializedModelPath,
+          modelFileSizeBytes: this.initializedModelFileSizeBytes,
+          contextTokens: 4096,
+        });
+      }
+      if (!this.multimodalInitialized) {
+        await this.ensureMultimodalInitialized();
+      }
+    }
+
     this.activeCompletionRequestId = requestId;
     this.stoppingRequestId = null;
     this.lastCompletionText = '';
@@ -330,14 +415,27 @@ class LlamaRnAdapter {
     try {
       const completionStartedAtMs = Date.now();
       let firstTokenDurationMs: number | undefined;
+      const completionParams: CompletionParams = {
+        ...(params.messages && params.messages.length > 0
+          ? { messages: params.messages }
+          : { prompt: params.prompt ?? '' }),
+        stop: params.stop ?? [...QWEN_MODEL_STOP_TOKENS],
+        n_predict: params.maxTokens,
+        temperature: params.temperature,
+        top_p: params.topP,
+        ...(params.jsonSchema
+          ? {
+              response_format: {
+                type: 'json_schema',
+                json_schema: { schema: params.jsonSchema },
+              },
+            }
+          : {}),
+        ...(params.disableThinking ? { enable_thinking: false } : {}),
+      };
+
       const result = await this.context.completion(
-        {
-          prompt: params.prompt,
-          stop: params.stop ?? [...QWEN_MODEL_STOP_TOKENS],
-          n_predict: params.maxTokens,
-          temperature: params.temperature,
-          top_p: params.topP,
-        },
+        completionParams,
         (data) => {
           if (this.activeCompletionRequestId !== requestId || this.stoppingRequestId === requestId) {
             return;
@@ -424,13 +522,22 @@ class LlamaRnAdapter {
     this.lastCompletionText = '';
 
     if (this.context) {
+      if (this.multimodalInitialized) {
+        if (typeof this.context.releaseMultimodal === 'function') {
+          await this.context.releaseMultimodal().catch(() => undefined);
+        }
+        this.multimodalInitialized = false;
+      }
       await this.context.release().catch(() => undefined);
       this.context = null;
     }
 
-    await releaseAllLlama().catch(() => undefined);
+    if (typeof releaseAllLlama === 'function') {
+      await releaseAllLlama().catch(() => undefined);
+    }
     this.initializedModelPath = null;
     this.initializedModelFileSizeBytes = 0;
+    this.configuredContextTokens = 0;
 
     this.lastRuntimeInfo = this.lastRuntimeInfo
       ? {
@@ -441,13 +548,22 @@ class LlamaRnAdapter {
       : null;
   }
 
+  getContextTokens(): number {
+    return this.configuredContextTokens;
+  }
+
+  isMultimodalReady(): boolean {
+    return this.multimodalInitialized;
+  }
+
   async getRuntimeInfo(): Promise<LocalRuntimeInfo> {
+    const contextTokens = this.configuredContextTokens || QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS;
     return this.lastRuntimeInfo ?? {
       backend: 'llama.rn-cpu',
       version: null,
       supportsStreaming: true,
-      maxContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
-      configuredContextTokens: QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
+      maxContextTokens: contextTokens,
+      configuredContextTokens: contextTokens,
       configuredCpuThreads: resolveRecommendedCpuThreads(0, QWEN_MODEL_DEFAULT_CPU_THREADS),
       configuredGpuLayers: 0,
       configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,

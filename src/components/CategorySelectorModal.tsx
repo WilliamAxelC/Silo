@@ -108,6 +108,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                   onPress={() => setSearchQuery('')}
                   accessibilityRole="button"
                   accessibilityLabel="Clear search"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Ionicons name="close-circle" size={18} color={theme.textMuted} />
                 </TouchableOpacity>
@@ -127,6 +128,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                   style={[styles.instantCreateCard, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
                   onPress={handleInstantCreateFromSearch}
                   accessibilityRole="button"
+                  accessibilityLabel={`Create ${searchQuery.trim()}`}
                 >
                   <View style={[styles.instantCreateIcon, { backgroundColor: theme.primary }]}>
                     <Ionicons name="add" size={18} color="#fff" />
@@ -162,6 +164,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                         setSearchQuery('');
                       }}
                       accessibilityRole="button"
+                      accessibilityLabel={`Select category ${cat.name}`}
                     >
                       <View style={[styles.categoryDot, { backgroundColor: isSelected ? theme.primary : theme.textMuted }]} />
                       <Text

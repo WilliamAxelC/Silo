@@ -1,5 +1,57 @@
 import { IOcrEngine, OcrResult } from './types';
-import { MlKitEngine } from './MlKitEngine';
+import { buildOcrResultFromLines, MlKitEngine } from './MlKitEngine';
+import { OcrLine } from './receiptText';
+
+interface PaddleLineItem {
+  text?: string;
+  box?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+function extractLinesFromPaddleResult(result: { text?: string; lines?: unknown }): OcrLine[] {
+  const lines: OcrLine[] = [];
+
+  if (Array.isArray(result.lines)) {
+    const flatEntries: unknown[] = [];
+    for (const entry of result.lines) {
+      if (Array.isArray(entry)) {
+        flatEntries.push(...entry);
+      } else {
+        flatEntries.push(entry);
+      }
+    }
+
+    for (const entry of flatEntries) {
+      const item = entry as PaddleLineItem | null | undefined;
+      if (!item?.text) continue;
+      lines.push({
+        text: item.text,
+        frame: item.box
+          ? {
+              left: item.box.x,
+              top: item.box.y,
+              width: item.box.width,
+              height: item.box.height,
+            }
+          : undefined,
+      });
+    }
+  }
+
+  if (lines.length === 0 && result.text) {
+    for (const text of result.text.split('\n')) {
+      if (text.trim()) {
+        lines.push({ text });
+      }
+    }
+  }
+
+  return lines;
+}
 
 export class PaddleOcrEngine implements IOcrEngine {
   private fallbackEngine = new MlKitEngine();
@@ -11,7 +63,8 @@ export class PaddleOcrEngine implements IOcrEngine {
       await ocr.init();
       const result = await ocr.recognize(imageUri);
       if (result && result.text) {
-        return { rawText: result.text || '', extractedTotal: null, extractedMerchant: null, success: true };
+        const lines = extractLinesFromPaddleResult(result);
+        return buildOcrResultFromLines(lines, result.text);
       }
       return this.fallbackEngine.processImage(imageUri);
     } catch (e: any) {
@@ -20,4 +73,3 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
   }
 }
-

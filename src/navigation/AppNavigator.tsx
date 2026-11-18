@@ -76,7 +76,7 @@ const TabNavigator = () => {
                 accessibilityRole="button"
                 accessibilityLabel="Add transaction"
               >
-                <Ionicons name="add" size={32} color="#fff" />
+                <Ionicons name="add" size={32} color={theme.onPrimary} />
               </TouchableOpacity>
             </View>
           ),
@@ -90,13 +90,14 @@ const TabNavigator = () => {
 };
 
 export const AppNavigator = () => {
-  const isDarkMode = useSettingsStore((state) => state.isDarkMode);
   const loadSettings = useSettingsStore((state) => state.loadSettings);
   const theme = useAppTheme();
+  const isDarkMode = theme.isDarkMode;
 
   useEffect(() => {
     loadSettings();
     useTransactionStore.getState().initDB();
+    void getModelLifecycleManager().initialize();
 
     return () => {
       void getGenerationService().dispose();
@@ -119,7 +120,7 @@ export const AppNavigator = () => {
   };
 
   const linking = {
-    prefixes: ['silo://', 'https://silo.app'],
+    prefixes: ['silo://'],
     config: {
       screens: {
         MainTabs: { screens: { Cashflow: 'cashflow', Reports: 'reports', Budget: 'budget', More: 'more' } },

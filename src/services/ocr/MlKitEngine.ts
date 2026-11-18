@@ -1,31 +1,26 @@
 import Constants from 'expo-constants';
-import { Alert } from 'react-native';
+import type { TextRecognitionResult } from '@react-native-ml-kit/text-recognition';
 import { IOcrEngine, OcrResult } from './types';
+import { buildReceiptRows, extractAmounts, OcrLine, pickTotalFromRows } from './receiptText';
 
 // Auto-detects: true in Custom Dev Clients, false in Expo Go
-export const IS_NATIVE_OCR_SUPPORTED = Constants.appOwnership !== 'expo'; 
+export const IS_NATIVE_OCR_SUPPORTED = Constants.appOwnership !== 'expo';
 
 // Manual override: switch to 'false' when you build your native client
-export const FORCE_DISABLE_OCR = false; 
+export const FORCE_DISABLE_OCR = false;
+
+async function recognizeNativeResult(imageUri: string): Promise<TextRecognitionResult> {
+  if (FORCE_DISABLE_OCR || !IS_NATIVE_OCR_SUPPORTED) {
+    throw new Error('Native OCR is currently disabled to maintain Expo Go compatibility.');
+  }
+
+  const TextRecognition = require('@react-native-ml-kit/text-recognition').default;
+  return TextRecognition.recognize(imageUri);
+}
 
 export const scanReceiptNative = async (imageUri: string): Promise<string | null> => {
-  if (FORCE_DISABLE_OCR || !IS_NATIVE_OCR_SUPPORTED) {
-    Alert.alert(
-      "OCR Disabled", 
-      "Native OCR is currently disabled to maintain Expo Go compatibility."
-    );
-    return null;
-  }
-
-  try {
-    const TextRecognition = require('@react-native-ml-kit/text-recognition').default;
-    const result = await TextRecognition.recognize(imageUri);
-    return result.text;
-  } catch (error: any) {
-    console.error("Native OCR Error:", error);
-    Alert.alert("OCR Error", "Ensure you are running a custom dev client, not Expo Go.");
-    return null;
-  }
+  const result = await recognizeNativeResult(imageUri);
+  return result?.text ?? null;
 };
 
 
@@ -106,10 +101,11 @@ export function parseReceiptTextHeuristic(rawText: string): {
   }
 
   // 2. Extract Total Amount
-  let extractedTotal: number | null = null;
+  let extractedTotal: number | null = pickTotalFromRows(lines);
 
   // Pass 1: explicit TOTAL / GRAND TOTAL / TOTAL BAYAR / AMOUNT DUE / TAGIHAN / TOTAL BELANJA / TOTAL AKHIR / TOTAL HARGA
-  for (let i = lines.length - 1; i >= 0; i--) {
+  if (!extractedTotal) {
+    for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (
       /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*sales|total\s*amount|total\s*akhir|total\s*harga|total\s*tagihan|amount\s*due|tagihan|total|due|tl)\b/i.test(
@@ -134,6 +130,7 @@ export function parseReceiptTextHeuristic(rawText: string): {
           }
         }
       }
+    }
     }
   }
 
@@ -278,25 +275,99 @@ export function extractLineItemsHeuristic(reconstructedText: string): string | n
         line
       )
     ) {
-      const hasNumbers = /\b\d[\d.,]*\d\b|\b\d+\b/.test(line);
+      const amounts = extractAmounts(line);
       const hasText = /[a-zA-Z]{3,}/.test(line);
-      if (hasText && hasNumbers && line.length >= 6 && line.length <= 60) {
-        items.push(line);
+      if (hasText && amounts.length > 0 && line.length >= 6 && line.length <= 60) {
+        const price = amounts[amounts.length - 1];
+        const name = line
+          .replace(/(?:(?:Rp|IDR)\s*\.?\s*)?\d+(?:[.,]\d+)*(?:,-)?\s*$/i, '')
+          .replace(/[\s\-:|]+$/, '')
+          .trim();
+        if (name) {
+          items.push(`${name} | ${price}`);
+        }
       }
     }
   }
 
-  return items.length > 0 ? items.slice(0, 10).join(', ') : null;
+  return items.length > 0 ? items.slice(0, 10).join('\n') : null;
+}
+
+export function buildOcrResultFromLines(lines: OcrLine[], fallbackText: string): OcrResult {
+  const rows = buildReceiptRows(lines);
+  const rawText = rows.length > 0 ? rows.join('\n') : fallbackText;
+
+  if (!rawText.trim()) {
+    return {
+      rawText: '',
+      rows: [],
+      extractedTotal: null,
+      extractedMerchant: null,
+      extractedDate: null,
+      extractedCategory: null,
+      extractedLineItems: null,
+      success: false,
+      error: 'Empty text returned',
+    };
+  }
+
+  const parsed = parseReceiptTextHeuristic(rawText);
+  const extractedTotal = (rows.length > 0 ? pickTotalFromRows(rows) : null) ?? parsed.extractedTotal;
+
+  return {
+    rawText,
+    rows,
+    extractedTotal,
+    extractedMerchant: parsed.extractedMerchant,
+    extractedDate: parsed.extractedDate,
+    extractedCategory: parsed.extractedCategory,
+    extractedLineItems: parsed.extractedLineItems,
+    success: true,
+  };
+}
+
+function extractLinesFromMlKitResult(result: TextRecognitionResult): OcrLine[] {
+  const lines: OcrLine[] = [];
+  if (Array.isArray(result.blocks)) {
+    for (const block of result.blocks) {
+      if (!Array.isArray(block?.lines)) continue;
+      for (const line of block.lines) {
+        if (!line?.text) continue;
+        lines.push({
+          text: line.text,
+          frame: line.frame
+            ? {
+                left: line.frame.left,
+                top: line.frame.top,
+                width: line.frame.width,
+                height: line.frame.height,
+              }
+            : undefined,
+        });
+      }
+    }
+  }
+
+  if (lines.length === 0 && result.text) {
+    for (const text of result.text.split('\n')) {
+      if (text.trim()) {
+        lines.push({ text });
+      }
+    }
+  }
+
+  return lines;
 }
 
 export class MlKitEngine implements IOcrEngine {
   async processImage(imageUri: string): Promise<OcrResult> {
     try {
-      const rawText = await scanReceiptNative(imageUri);
+      const result = await recognizeNativeResult(imageUri);
 
-      if (!rawText) {
+      if (!result || !result.text) {
         return {
           rawText: '',
+          rows: [],
           extractedTotal: null,
           extractedMerchant: null,
           extractedDate: null,
@@ -307,20 +378,12 @@ export class MlKitEngine implements IOcrEngine {
         };
       }
 
-      const { extractedTotal, extractedMerchant, extractedDate, extractedCategory, extractedLineItems } = parseReceiptTextHeuristic(rawText);
-
-      return {
-        rawText,
-        extractedTotal,
-        extractedMerchant,
-        extractedDate,
-        extractedCategory,
-        extractedLineItems,
-        success: true,
-      };
+      const lines = extractLinesFromMlKitResult(result);
+      return buildOcrResultFromLines(lines, result.text);
     } catch (error: any) {
       return {
         rawText: '',
+        rows: [],
         extractedTotal: null,
         extractedMerchant: null,
         extractedDate: null,

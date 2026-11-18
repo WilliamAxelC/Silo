@@ -60,3 +60,37 @@ jest.mock('@expo/vector-icons', () => ({
   Feather: 'Feather',
 }));
 
+// Mock expo-secure-store
+const mockSecureStoreMap = new Map();
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(async (key) => (mockSecureStoreMap.has(key) ? mockSecureStoreMap.get(key) : null)),
+  setItemAsync: jest.fn(async (key, value) => {
+    mockSecureStoreMap.set(key, String(value));
+  }),
+  deleteItemAsync: jest.fn(async (key) => {
+    mockSecureStoreMap.delete(key);
+  }),
+  isAvailableAsync: jest.fn(async () => true),
+}));
+
+// Mock expo-image-manipulator
+jest.mock('expo-image-manipulator', () => ({
+  SaveFormat: {
+    JPEG: 'jpeg',
+    PNG: 'png',
+    WEBP: 'webp',
+  },
+  manipulateAsync: jest.fn(async (uri, actions = [], _saveOptions = {}) => ({
+    uri: uri.includes('resized') ? uri : `${uri}-resized.jpg`,
+    width: 768,
+    height: 768,
+  })),
+}));
+
+const { Image } = require('react-native');
+if (Image) {
+  Image.getSize = jest.fn((_uri, success) => success(1024, 768));
+}
+
+
+

@@ -1,0 +1,108 @@
+[
+  {
+    "slug": "lawson_2025_09_02",
+    "commons_file": "Receipt_from_Lawson_in_South_Tangerang,_Indonesia_with_QRIS_CPM_(2025-09-02).jpg",
+    "doc_type": "receipt",
+    "merchant": "Lawson (PT. Lancar Wiguna Sejahtera)",
+    "date": "2025-09-02",
+    "subtotal": 15000,
+    "total": 13000,
+    "items": [
+      {
+        "name": "LW S CARB TRFLE",
+        "qty": 1,
+        "price": 15000
+      }
+    ]
+  },
+  {
+    "slug": "bca_2025_08_28",
+    "commons_file": "Receipt_from_BCA_payment_terminal_in_South_Tangerang,_Indonesia_(2025-08-28).jpg",
+    "doc_type": "payment_slip",
+    "merchant": "IDM FG46-VILLA BINTARO",
+    "date": "2025-08-28",
+    "subtotal": null,
+    "total": 79800,
+    "items": []
+  },
+  {
+    "slug": "borobudur_taxi",
+    "commons_file": "Receipt_for_taxi_for_visiting_Borobudur_and_Prambanan_(Yogyakarta,_Indonesia)_(50276342272).jpg",
+    "doc_type": "receipt",
+    "merchant": "Prambanan Guest-House",
+    "date": null,
+    "subtotal": null,
+    "total": 475000,
+    "items": [
+      {
+        "name": "Taxi Borobudur, Prambanan at 5 am (9 hours)",
+        "qty": 1,
+        "price": 475000
+      }
+    ]
+  },
+  {
+    "slug": "kwitansi_ahmad_2018",
+    "commons_file": "Bukti_Kuitansi_Uang_makan_2-7_April_2018_Ahmad.jpg",
+    "doc_type": "kwitansi",
+    "merchant": "PT. Merdeka Mitra Sejati",
+    "date": "2018-04-09",
+    "subtotal": null,
+    "total": 360000,
+    "items": [
+      {
+        "name": "Uang Makan Perjalanan Dinas Ahmad (PAC) Jambi 1 Periode 02-07 April 2018",
+        "qty": 1,
+        "price": 360000
+      }
+    ]
+  },
+  {
+    "slug": "bandung_raya_train_2019",
+    "commons_file": "Ticket_of_Bandung_Raya_Train.jpg",
+    "doc_type": "train_ticket",
+    "merchant": "PT Kereta Api Indonesia",
+    "date": "2019-11-17",
+    "subtotal": null,
+    "total": 5000,
+    "items": [
+      {
+        "name": "Bandung Raya Ekonomi 375 (Kiaracondong - Bandung)",
+        "qty": 1,
+        "price": 5000
+      }
+    ]
+  },
+  {
+    "slug": "kie_2023_entrance",
+    "commons_file": "Tiket_Masuk_Di_Acara_KIE_2023_Di_Alun_Alun_Kebumen_Jl.Merdeka.jpg",
+    "doc_type": "entrance_ticket",
+    "merchant": "Kebumen International Expo 2023",
+    "date": "2023-06-22",
+    "subtotal": null,
+    "total": 2000,
+    "items": [
+      {
+        "name": "Tiket Masuk Kebumen International Expo Hari Ke-6",
+        "qty": 1,
+        "price": 2000
+      }
+    ]
+  },
+  {
+    "slug": "gunung_slamet_entrance",
+    "commons_file": "Tiket_Masuk_View_Slamet_Perhutani.jpg",
+    "doc_type": "entrance_ticket",
+    "merchant": "Pemerintah Kabupaten Purbalingga",
+    "date": null,
+    "subtotal": null,
+    "total": 10000,
+    "items": [
+      {
+        "name": "Karcis Tanda Masuk Pendaki Gunung Slamet",
+        "qty": 1,
+        "price": 10000
+      }
+    ]
+  }
+]

@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, TextInput, StyleSheet, Platform } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { formatDisplayCurrency } from '../features/transactions/amount';
+import { formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
 
 export type ReceiptLineItemDraft = {
   id: string;
@@ -31,7 +31,7 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
 
   const itemsTotal = useMemo(() => {
     return lineItems.reduce((sum, item) => {
-      const parsed = parseFloat(item.price.replace(/[^\d.]/g, ''));
+      const parsed = Math.abs(parseSignedAmount(item.price));
       return sum + (isNaN(parsed) ? 0 : parsed);
     }, 0);
   }, [lineItems]);
@@ -53,6 +53,7 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
           onPress={onAddRow}
           accessibilityRole="button"
           accessibilityLabel="Add line item"
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           <Ionicons name="add" size={16} color={theme.primary} />
           <Text style={[styles.inlineAddButtonText, { color: theme.primary }]}>Add Item</Text>

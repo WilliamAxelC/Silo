@@ -22,35 +22,35 @@ describe('amount utilities', () => {
       expect(formatAmountInput('0')).toBe('0');
       expect(formatAmountInput('9')).toBe('9');
       expect(formatAmountInput('100')).toBe('100');
-      expect(formatAmountInput('1000')).toBe('1,000');
-      expect(formatAmountInput('50000')).toBe('50,000');
-      expect(formatAmountInput('1000000')).toBe('1,000,000');
-      expect(formatAmountInput('1234567890')).toBe('1,234,567,890');
+      expect(formatAmountInput('1000')).toBe('1.000');
+      expect(formatAmountInput('50000')).toBe('50.000');
+      expect(formatAmountInput('1000000')).toBe('1.000.000');
+      expect(formatAmountInput('1234567890')).toBe('1.234.567.890');
     });
 
     it('strips non-numeric characters and symbols', () => {
-      expect(formatAmountInput('Rp 50.000')).toBe('50,000');
-      expect(formatAmountInput('$12,500.00')).toBe('1,250,000');
-      expect(formatAmountInput('abc 123 def 456')).toBe('123,456');
+      expect(formatAmountInput('Rp 50.000')).toBe('50.000');
+      expect(formatAmountInput('$12,500.00')).toBe('1.250.000');
+      expect(formatAmountInput('abc 123 def 456')).toBe('123.456');
       expect(formatAmountInput('!@#$%^&*()_+')).toBe('');
     });
 
     it('strips leading zeros while keeping a single zero if followed by digits', () => {
       expect(formatAmountInput('00050')).toBe('50');
-      expect(formatAmountInput('0123456')).toBe('123,456');
+      expect(formatAmountInput('0123456')).toBe('123.456');
       expect(formatAmountInput('000')).toBe('0');
     });
 
     it('handles extreme integer and large numeric values correctly', () => {
-      expect(formatAmountInput('9007199254740991')).toBe('9,007,199,254,740,991');
-      expect(formatAmountInput('1000000000000000')).toBe('1,000,000,000,000,000');
-      expect(formatAmountInput('99999999999999999999')).toBe('99,999,999,999,999,999,999');
+      expect(formatAmountInput('9007199254740991')).toBe('9.007.199.254.740.991');
+      expect(formatAmountInput('1000000000000000')).toBe('1.000.000.000.000.000');
+      expect(formatAmountInput('99999999999999999999')).toBe('99.999.999.999.999.999.999');
     });
 
     it('handles mixed currency symbols and spaces', () => {
-      expect(formatAmountInput('  Rp  1.250.000   ')).toBe('1,250,000');
-      expect(formatAmountInput('€ 999 999')).toBe('999,999');
-      expect(formatAmountInput('🍔 50.000 🍟')).toBe('50,000');
+      expect(formatAmountInput('  Rp  1.250.000   ')).toBe('1.250.000');
+      expect(formatAmountInput('€ 999 999')).toBe('999.999');
+      expect(formatAmountInput('🍔 50.000 🍟')).toBe('50.000');
     });
   });
 
@@ -137,6 +137,36 @@ describe('amount utilities', () => {
       expect(parseSignedAmount(-Infinity, 'expense')).toBe(0);
       expect(parseSignedAmount('abc-def', 'expense')).toBe(0);
       expect(parseSignedAmount('$$$', 'income')).toBe(0);
+    });
+
+    describe('IDR Rupiah parsing table-driven rules (B3)', () => {
+      const cases: Array<{ input: string; expected: number; description: string }> = [
+        { input: '45.000', expected: 45000, description: 'standard rupiah with thousand dot' },
+        { input: '1.500.000', expected: 1500000, description: 'million rupiah with multiple dots' },
+        { input: '45,000', expected: 45000, description: 'rupiah with comma separator' },
+        { input: '1.500,50', expected: 1500.5, description: 'dot thousand and comma decimal' },
+        { input: 'Rp 45.000,-', expected: 45000, description: 'Rp prefix and trailing ,- sen notation' },
+        { input: '-12.000', expected: -12000, description: 'negative rupiah amount' },
+        { input: '12.5', expected: 12.5, description: 'single dot with 1-2 digits decimal' },
+      ];
+
+      test.each(cases)('$description: parseSignedAmount("$input") -> $expected', ({ input, expected }) => {
+        expect(parseSignedAmount(input)).toBe(expected);
+      });
+
+      test.each(cases)(
+        '$description: parseSignedAmount("$input", "expense") -> negative value',
+        ({ input, expected }) => {
+          expect(parseSignedAmount(input, 'expense')).toBe(-Math.abs(expected));
+        }
+      );
+
+      test.each(cases)(
+        '$description: parseSignedAmount("$input", "income") -> positive value',
+        ({ input, expected }) => {
+          expect(parseSignedAmount(input, 'income')).toBe(Math.abs(expected));
+        }
+      );
     });
   });
 

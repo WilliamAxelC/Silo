@@ -60,7 +60,21 @@ export const EXTERNAL_API_PRESETS: Record<
 
 import type { ModelCatalogEntry } from './types';
 
-export const MODEL_CATALOG: Record<string, ModelCatalogEntry> = {
+export interface VisionProjectorConfig {
+  url: string;
+  fileName: string;
+  sizeBytes: number;
+  md5: string;
+}
+
+export const MODEL_CATALOG: Record<
+  string,
+  ModelCatalogEntry & {
+    sizeBytes: number;
+    md5: string;
+    visionProjector?: VisionProjectorConfig;
+  }
+> = {
   'qwen3.5-2b': {
     id: 'qwen3.5-2b',
     displayName: 'Qwen 3.5 2B (Offline)',
@@ -70,12 +84,20 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry> = {
     capabilities: ['text'],
     fileName: 'Qwen3.5-2B-Q4_K_M.gguf',
     downloadUrl: 'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf',
-    sha256: '',
-    fileSizeBytes: 1503238000,
+    sha256: 'aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223',
+    md5: '6899b2510c7b0c480730d48c3117bd32',
+    sizeBytes: 1280835840,
+    fileSizeBytes: 1280835840,
     minFreeSpaceBytes: 2 * 1024 * 1024 * 1024,
     recommendedRamBytes: 3 * 1024 * 1024 * 1024,
     requiredRamBytes: 2 * 1024 * 1024 * 1024,
     description: 'High performance edge LLM. Fast, accurate, and completely offline.',
+    visionProjector: {
+      url: 'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf',
+      fileName: 'mmproj-F16.gguf',
+      sizeBytes: 668227264,
+      md5: 'bb3eddc16b7f19fd96b9eedf48a7248d',
+    },
   },
 };
 

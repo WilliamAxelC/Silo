@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, SectionList, FlatList, TouchableOpacity, RefreshControl, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,15 +9,26 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { formatDisplayCurrency } from '../features/transactions/amount';
+import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import type { Transaction } from '../features/transactions/types';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NavigationProps } from '../navigation/types';
 
+function formatLocaleDate(date: Date | number, locale: string, options: Intl.DateTimeFormatOptions): string {
+  try {
+    return new Date(date).toLocaleDateString(locale || 'en-GB', options);
+  } catch {
+    return new Date(date).toLocaleDateString('en-GB', options);
+  }
+}
+
 export const CashflowScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const searchTransactions = useTransactionStore((state) => state.searchTransactions);
+  const error = useTransactionStore((state) => state.error);
+  const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -35,7 +46,7 @@ export const CashflowScreen = () => {
   useFocusEffect(
     React.useCallback(() => {
       fetchTransactions();
-    }, [])
+    }, [fetchTransactions])
   );
 
   useEffect(() => {
@@ -72,17 +83,26 @@ export const CashflowScreen = () => {
 
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
+  const dateFormat = useSettingsStore((state) => state.dateFormat);
+  const locale = dateFormat || 'en-GB';
 
   const { currentMonthData, totalIncome, totalExpense, balance } = useMonthlySummary(currentDate);
 
-  const groupedData = currentMonthData.reduce((acc, curr) => {
-    const dateString = new Date(curr.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    if (!acc[dateString]) acc[dateString] = [];
-    acc[dateString].push(curr);
-    return acc;
-  }, {} as Record<string, any[]>);
+  const sectionListData = useMemo(() => {
+    const groupedData = currentMonthData.reduce((acc, curr) => {
+      const dateString = formatLocaleDate(curr.date, locale, {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      if (!acc[dateString]) acc[dateString] = [];
+      acc[dateString].push(curr);
+      return acc;
+    }, {} as Record<string, Transaction[]>);
 
-  const sectionListData = Object.keys(groupedData).map((key) => ({ title: key, data: groupedData[key] }));
+    return Object.keys(groupedData).map((key) => ({ title: key, data: groupedData[key] }));
+  }, [currentMonthData, locale]);
 
   const isCurrentMonthNow = isSameMonth(currentDate, new Date());
 
@@ -129,7 +149,7 @@ export const CashflowScreen = () => {
         <View style={styles.transactionDetails}>
           <Text style={[styles.transactionTitle, { color: theme.text }]} numberOfLines={1}>{item.merchantName || 'Unknown'}</Text>
           <Text style={[styles.transactionSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
-            {item.category || 'Uncategorized'}
+            {item.category || UNCATEGORIZED_EXPENSE_LABEL}
             {item.note ? ` · ${item.note}` : ''}
           </Text>
         </View>
@@ -141,7 +161,7 @@ export const CashflowScreen = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       {/* Search Bar */}
       <View style={[styles.searchBarWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
@@ -161,6 +181,7 @@ export const CashflowScreen = () => {
           <TouchableOpacity
             onPress={() => setSearchQuery('')}
             style={styles.clearSearchBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             accessibilityRole="button"
             accessibilityLabel="Clear search"
           >
@@ -168,6 +189,24 @@ export const CashflowScreen = () => {
           </TouchableOpacity>
         ) : null}
       </View>
+
+      {error ? (
+        <View style={[styles.errorBanner, { backgroundColor: theme.expenseMuted, borderColor: theme.expense }]}>
+          <Ionicons name="alert-circle-outline" size={18} color={theme.expense} style={styles.errorBannerIcon} />
+          <Text style={[styles.errorBannerText, { color: theme.expense }]} numberOfLines={2}>
+            {error}
+          </Text>
+          <TouchableOpacity
+            onPress={clearError}
+            style={styles.errorDismissBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss error"
+          >
+            <Ionicons name="close" size={18} color={theme.expense} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {searchResults !== null ? (
         /* Search Results List */
@@ -198,11 +237,14 @@ export const CashflowScreen = () => {
             <TouchableOpacity
               onPress={resetToCurrentMonth}
               style={styles.monthTextWrap}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="Jump to current month"
             >
-              <Text style={[styles.monthText, { color: theme.text }]}>{currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
+              <Text style={[styles.monthText, { color: theme.text }]}>
+                {formatLocaleDate(currentDate, locale, { month: 'long', year: 'numeric' })}
+              </Text>
               {!isCurrentMonthNow && (
                 <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
                   <Text style={[styles.todayBadgeText, { color: theme.primary }]}>Today</Text>
@@ -244,12 +286,16 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 14, paddingVertical: 0 },
   clearSearchBtn: { padding: 4 },
+  errorBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
+  errorBannerIcon: { marginRight: 8 },
+  errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
+  errorDismissBtn: { minWidth: 32, minHeight: 32, alignItems: 'center', justifyContent: 'center' },
   monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
   monthTextWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   monthText: { fontSize: 16, fontWeight: '600' },
   todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   todayBadgeText: { fontSize: 10, fontWeight: '700' },
-  arrowBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   summaryCard: { flexDirection: 'row', marginHorizontal: 14, marginTop: 12, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1, justifyContent: 'space-between', alignItems: 'center' },
   summaryCol: { alignItems: 'center', flex: 1 },
   summaryDivider: { width: 1, height: 26 },

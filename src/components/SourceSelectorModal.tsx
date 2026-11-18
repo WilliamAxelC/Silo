@@ -12,21 +12,36 @@ interface SourceSelectorModalProps {
 export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visible, onClose, onPickImage }) => {
   const theme = useAppTheme();
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
           <Text style={[styles.modalTitle, { color: theme.text }]}>Select a Source</Text>
           <View style={styles.modalActions}>
-            <TouchableOpacity style={[styles.modalBtn, { backgroundColor: theme.primary }]} onPress={() => onPickImage('gallery')}>
+            <TouchableOpacity
+              style={[styles.modalBtn, { backgroundColor: theme.primary }]}
+              onPress={() => onPickImage('gallery')}
+              accessibilityRole="button"
+              accessibilityLabel="Select from gallery"
+            >
               <Ionicons name="images" size={34} color="#fff" />
               <Text style={styles.modalBtnText}>Gallery</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.modalBtn, { backgroundColor: theme.primary }]} onPress={() => onPickImage('camera')}>
+            <TouchableOpacity
+              style={[styles.modalBtn, { backgroundColor: theme.primary }]}
+              onPress={() => onPickImage('camera')}
+              accessibilityRole="button"
+              accessibilityLabel="Take photo with camera"
+            >
               <Ionicons name="camera" size={34} color="#fff" />
               <Text style={styles.modalBtnText}>Camera</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+          <TouchableOpacity
+            style={styles.cancelBtn}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+          >
             <Text style={[styles.cancelBtnText, { color: theme.expense }]}>Cancel</Text>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -42,6 +57,6 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   modalBtn: { flex: 1, minHeight: 108, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalBtnText: { marginTop: 8, color: '#fff', fontWeight: '700' },
-  cancelBtn: { marginTop: 14, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
+  cancelBtn: { marginTop: 14, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
   cancelBtnText: { fontSize: 14, fontWeight: '700' },
 });

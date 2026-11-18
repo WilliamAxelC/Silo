@@ -190,10 +190,18 @@ describe('hardware utilities and memory budgeting', () => {
       expect(updateTelemetrySpy).toHaveBeenCalledWith(
         expect.objectContaining({
           recommendedQuantization: 'Q5_K_M',
-          activeQuantization: 'Q5_K_M',
+          activeQuantization: 'Q4_K_M',
           fallbackTriggered: false,
         })
       );
+    });
+
+    it('derives activeQuantization from the active catalog entry', async () => {
+      (DeviceInfo.getTotalMemory as jest.Mock).mockResolvedValueOnce(8 * 1024 * 1024 * 1024);
+      (DeviceInfo.getUsedMemory as jest.Mock).mockResolvedValueOnce(1 * 1024 * 1024 * 1024);
+
+      const result = await resolveOptimalQuantization();
+      expect(result.activeQuantization).toBe('Q4_K_M');
     });
 
     it('catches and handles errors in recordMemoryTelemetry gracefully', async () => {

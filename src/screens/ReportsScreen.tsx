@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation, Platform, UIManager } from 'react-native';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PieChart } from 'react-native-gifted-charts';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,10 +10,16 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { formatDisplayCurrency } from '../features/transactions/amount';
-import { useFocusEffect } from '@react-navigation/native';
+import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NavigationProps } from '../navigation/types';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
+function formatLocaleDate(date: Date | number, locale: string, options: Intl.DateTimeFormatOptions): string {
+  try {
+    return new Date(date).toLocaleDateString(locale || 'en-GB', options);
+  } catch {
+    return new Date(date).toLocaleDateString('en-GB', options);
+  }
 }
 
 const EXPENSE_PALETTE = ['#e11d48', '#ea580c', '#d97706', '#7c3aed', '#0284c7', '#059669', '#ec4899', '#475569'];
@@ -25,17 +31,29 @@ const getCategoryColor = (index: number, type: 'expense' | 'income') => {
 };
 
 export const ReportsScreen = () => {
+  const navigation = useNavigation<NavigationProps>();
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const showIncomeInReportsFirst = useSettingsStore((state) => state.showIncomeInReportsFirst);
+  const isLoaded = useSettingsStore((state) => state.isLoaded);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
+  const locale = dateFormat || 'en-GB';
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [reportType, setReportType] = useState<'expense' | 'income'>(showIncomeInReportsFirst ? 'income' : 'expense');
+  const hasUserToggledReportTypeRef = useRef(false);
+  const hasSyncedInitialReportTypeRef = useRef(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isLoaded && !hasSyncedInitialReportTypeRef.current && !hasUserToggledReportTypeRef.current) {
+      setReportType(showIncomeInReportsFirst ? 'income' : 'expense');
+      hasSyncedInitialReportTypeRef.current = true;
+    }
+  }, [isLoaded, showIncomeInReportsFirst]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -75,7 +93,7 @@ export const ReportsScreen = () => {
 
   const categoryData = useMemo(() => {
     return filteredTransactions.reduce((acc, curr) => {
-      const cat = curr.category || 'General';
+      const cat = curr.category || UNCATEGORIZED_EXPENSE_LABEL;
       if (!acc[cat]) {
         acc[cat] = { total: 0, items: [] };
       }
@@ -126,12 +144,13 @@ export const ReportsScreen = () => {
           <TouchableOpacity
             style={styles.monthTextWrap}
             onPress={resetToCurrentMonth}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel="Jump to current month"
           >
             <Text style={[styles.monthText, { color: theme.text }]}>
-              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              {formatLocaleDate(currentDate, locale, { month: 'long', year: 'numeric' })}
             </Text>
             {!isCurrentMonthNow && (
               <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
@@ -157,8 +176,10 @@ export const ReportsScreen = () => {
               styles.toggleBtn,
               reportType === 'expense' ? { backgroundColor: theme.expense } : { backgroundColor: 'transparent' },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             onPress={() => {
               LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              hasUserToggledReportTypeRef.current = true;
               setReportType('expense');
               setExpandedCategories({});
               setSelectedCategoryName(null);
@@ -166,7 +187,7 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Show expense reports"
           >
-            <Text style={[styles.toggleText, { color: reportType === 'expense' ? '#fff' : theme.textMuted }]}>
+            <Text style={[styles.toggleText, { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted }]}>
               Expenses
             </Text>
           </TouchableOpacity>
@@ -176,8 +197,10 @@ export const ReportsScreen = () => {
               styles.toggleBtn,
               reportType === 'income' ? { backgroundColor: theme.income } : { backgroundColor: 'transparent' },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             onPress={() => {
               LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              hasUserToggledReportTypeRef.current = true;
               setReportType('income');
               setExpandedCategories({});
               setSelectedCategoryName(null);
@@ -185,7 +208,7 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Show income reports"
           >
-            <Text style={[styles.toggleText, { color: reportType === 'income' ? '#fff' : theme.textMuted }]}>
+            <Text style={[styles.toggleText, { color: reportType === 'income' ? theme.onPrimary : theme.textMuted }]}>
               Income
             </Text>
           </TouchableOpacity>
@@ -251,7 +274,7 @@ export const ReportsScreen = () => {
             <View style={[styles.emptyChartCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} style={{ marginBottom: 8 }} />
               <Text style={{ color: theme.textMuted, fontSize: 13, fontWeight: '600' }}>
-                No {reportType} records for {currentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}.
+                No {reportType} records for {formatLocaleDate(currentDate, locale, { month: 'short', year: 'numeric' })}.
               </Text>
             </View>
           )}
@@ -336,8 +359,12 @@ export const ReportsScreen = () => {
                       {item.items.length} {item.items.length === 1 ? 'transaction' : 'transactions'}
                     </Text>
                     {item.items.map((tx, txIndex) => (
-                      <View
+                      <TouchableOpacity
                         key={tx.id ?? txIndex}
+                        activeOpacity={0.7}
+                        onPress={() => navigation.navigate('AddTransactionStack', { transactionId: tx.id })}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${tx.merchantName || 'Unnamed'}, ${tx.totalAmount}`}
                         style={[
                           styles.transactionItem,
                           txIndex < item.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.borderLight },
@@ -348,7 +375,7 @@ export const ReportsScreen = () => {
                             {tx.merchantName || 'Unnamed'}
                           </Text>
                           <Text style={[styles.txDate, { color: theme.textMuted }]}>
-                            {new Date(tx.date).toLocaleDateString(dateFormat || 'en-GB', {
+                            {formatLocaleDate(tx.date, locale, {
                               day: 'numeric',
                               month: 'short',
                               year: 'numeric',
@@ -365,7 +392,7 @@ export const ReportsScreen = () => {
                           {reportType === 'income' ? '+' : ''}
                           {formatDisplayCurrency(Math.abs(tx.totalAmount), currencyCode, useThousandsSeparator)}
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
                 )}
@@ -470,6 +497,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    minHeight: 44,
     paddingVertical: 9,
   },
   txMerchant: { fontSize: 13, fontWeight: '600' },

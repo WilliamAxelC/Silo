@@ -1,11 +1,10 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
-import * as Crypto from 'expo-crypto';
+import * as Network from 'expo-network';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 
 import {
   AI_BOOTSTRAP_OPTIONS,
   isSupportedLocalModelPath,
-  QWEN_MODEL_WARMUP_PROMPT,
   validateRuntimeInfo,
   getActiveModelConfig,
 } from './config';
@@ -25,6 +24,8 @@ import {
   createInitialProvisioningSnapshot,
   useAIStore,
 } from '../../store/useAIStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
+import { MODEL_CATALOG, type VisionProjectorConfig } from '../../features/transactions/constants';
 
 type DownloadProgress = {
   totalBytesExpectedToWrite: number;
@@ -50,6 +51,7 @@ type FileInfoResult = {
   exists: boolean;
   size?: number;
   uri: string;
+  md5?: string;
 };
 
 type FileSystemLegacyModule = typeof ExpoFileSystemLegacy & {
@@ -62,7 +64,7 @@ type FileSystemLegacyModule = typeof ExpoFileSystemLegacy & {
     callback?: (progress: DownloadProgress) => void,
     resumeData?: string,
   ) => DownloadResumableLike;
-  getInfoAsync?: (path: string, options?: { size?: boolean }) => Promise<FileInfoResult>;
+  getInfoAsync?: (path: string, options?: { size?: boolean; md5?: boolean }) => Promise<FileInfoResult>;
   makeDirectoryAsync?: (path: string, options?: { intermediates?: boolean }) => Promise<void>;
   deleteAsync?: (path: string, options?: { idempotent?: boolean }) => Promise<void>;
   moveAsync?: (options: { from: string; to: string }) => Promise<void>;
@@ -184,28 +186,63 @@ function createDefaultInferenceAdapter(): LocalInferenceAdapter {
   return Platform.OS === 'android' ? new LlamaRnInferenceAdapter() : new NoopInferenceAdapter();
 }
 
-const DOCUMENT_DIRECTORY = FileSystemModule.documentDirectory ?? '';
-const AI_ROOT_DIRECTORY = `${DOCUMENT_DIRECTORY}ai/`;
-const AI_MODELS_DIRECTORY = `${AI_ROOT_DIRECTORY}models/`;
-const AI_TEMP_DIRECTORY = `${AI_ROOT_DIRECTORY}tmp/`;
-const AI_MANIFEST_FILE = `${AI_ROOT_DIRECTORY}model-manifest.json`;
-const AI_TRANSFER_MANIFEST_FILE = `${AI_ROOT_DIRECTORY}download-manifest.json`;
-const getActiveModelDirectory = () => `${AI_MODELS_DIRECTORY}${getActiveModelConfig().version}/`;
-const getActiveModelPath = () => `${getActiveModelDirectory()}${getActiveModelConfig().fileName}`;
-const getTempDownloadPath = () => `${AI_TEMP_DIRECTORY}${getActiveModelConfig().fileName}.part`;
+const getDocumentDirectory = () => {
+  const dir = FileSystemModule.documentDirectory ?? '';
+  if (!dir) {
+    return '';
+  }
+  const withSlash = dir.endsWith('/') ? dir : `${dir}/`;
+  return /^file:\/\//i.test(withSlash) ? withSlash : `file://${withSlash}`;
+};
+const getAiRootDirectory = () => `${getDocumentDirectory()}ai/`;
+const getAiModelsDirectory = () => `${getAiRootDirectory()}models/`;
+const getAiTempDirectory = () => `${getAiRootDirectory()}tmp/`;
+const getManifestFile = () => `${getAiRootDirectory()}model-manifest.json`;
+const getTransferManifestFile = () => `${getAiRootDirectory()}download-manifest.json`;
+const getActiveModelDirectory = () => `${getAiModelsDirectory()}${getActiveModelConfig().version}/`;
+const getTempDownloadPath = () => `${getAiTempDirectory()}${getActiveModelConfig().fileName}.part`;
+
+/** Absolute file:// URI where the active catalog model is (or will be) installed. Single source of truth. */
+export function getActiveModelFileUri(): string {
+  const docDir = getDocumentDirectory();
+  if (!docDir) {
+    return '';
+  }
+  return `${getActiveModelDirectory()}${getActiveModelConfig().fileName}`;
+}
+
+/** True if the active model file exists at getActiveModelFileUri() with the expected byte size. */
+export async function isActiveModelInstalled(): Promise<boolean> {
+  const modelUri = getActiveModelFileUri();
+  if (!modelUri) {
+    return false;
+  }
+  const info = await safeGetInfo(modelUri);
+  if (!info.exists) {
+    return false;
+  }
+  const expectedSizeBytes = getActiveModelConfig().sizeBytes;
+  if (typeof expectedSizeBytes === 'number' && expectedSizeBytes > 0) {
+    return info.size === expectedSizeBytes;
+  }
+  return true;
+}
 
 export async function checkModelExists(fileName: string, version: string = 'v1'): Promise<boolean> {
-  const path = `${AI_MODELS_DIRECTORY}${version}/${fileName}`;
+  const path = `${getAiModelsDirectory()}${version}/${fileName}`;
   const info = await safeGetInfo(path);
   return info.exists;
 }
 
 const nowIso = () => new Date().toISOString();
-const shouldVerifyChecksum = () => getActiveModelConfig().sha256.trim().length > 0;
-const MAX_JS_SAFE_CHECKSUM_BYTES = 16 * 1024 * 1024;
 
-async function safeGetInfo(path: string): Promise<FileInfoResult> {
-  return FileSystemModule.getInfoAsync ? FileSystemModule.getInfoAsync(path, { size: true }) : { exists: false, uri: path };
+async function safeGetInfo(path: string, options?: { md5?: boolean }): Promise<FileInfoResult> {
+  if (!FileSystemModule.getInfoAsync) {
+    return { exists: false, uri: path };
+  }
+  return options?.md5
+    ? FileSystemModule.getInfoAsync(path, { md5: true })
+    : FileSystemModule.getInfoAsync(path, { size: true });
 }
 
 function normalizeCandidatePath(path: string | null | undefined): string | null {
@@ -232,7 +269,7 @@ function normalizeCandidatePath(path: string | null | undefined): string | null 
 function deriveModelPathCandidates(preferredPath?: string | null): string[] {
   const candidates = new Set<string>();
   const normalizedPreferred = normalizeCandidatePath(preferredPath);
-  const normalizedActive = normalizeCandidatePath(getActiveModelPath());
+  const normalizedActive = normalizeCandidatePath(getActiveModelFileUri());
 
   if (normalizedPreferred && isSupportedLocalModelPath(normalizedPreferred)) {
     candidates.add(normalizedPreferred);
@@ -289,6 +326,231 @@ async function safeDelete(path: string) {
   await FileSystemModule.deleteAsync(path, { idempotent: true });
 }
 
+function getActiveProjectorConfig(): VisionProjectorConfig | undefined {
+  const selectedModelId = useSettingsStore.getState().activeModelId ?? 'qwen3.5-2b';
+  const entry = MODEL_CATALOG[selectedModelId] ?? MODEL_CATALOG['qwen3.5-2b'];
+  return entry?.visionProjector;
+}
+
+const getTempProjectorPath = () => {
+  const projector = getActiveProjectorConfig();
+  const fileName = projector?.fileName ?? 'mmproj-F16.gguf';
+  return `${getAiTempDirectory()}${fileName}.part`;
+};
+
+async function isWifiAllowed(): Promise<boolean> {
+  if (!useSettingsStore.getState().aiWifiOnlyDownload) {
+    return true;
+  }
+
+  let networkType: Network.NetworkStateType | undefined;
+  try {
+    const networkState = await Network.getNetworkStateAsync();
+    networkType = networkState.type;
+  } catch {
+    networkType = undefined;
+  }
+
+  return networkType === Network.NetworkStateType.WIFI;
+}
+
+/** Absolute file:// URI where the vision projector is (or will be) installed. */
+export function getVisionProjectorUri(): string {
+  const docDir = getDocumentDirectory();
+  if (!docDir) {
+    return '';
+  }
+  const projector = getActiveProjectorConfig();
+  const fileName = projector?.fileName ?? 'mmproj-F16.gguf';
+  return `${getActiveModelDirectory()}${fileName}`;
+}
+
+/** True if the vision projector file exists at getVisionProjectorUri() with the expected byte size. */
+export async function isVisionProjectorInstalled(): Promise<boolean> {
+  const projectorUri = getVisionProjectorUri();
+  if (!projectorUri) {
+    return false;
+  }
+  const info = await safeGetInfo(projectorUri);
+  if (!info.exists) {
+    return false;
+  }
+  const projector = getActiveProjectorConfig();
+  const expectedSizeBytes = projector?.sizeBytes;
+  if (typeof expectedSizeBytes === 'number' && expectedSizeBytes > 0) {
+    return info.size === expectedSizeBytes;
+  }
+  return true;
+}
+
+let inFlightProjectorResumable: DownloadResumableLike | null = null;
+let inFlightProjectorPromise: Promise<void> | null = null;
+const projectorProgressListeners = new Set<(fraction: number) => void>();
+
+export async function cancelVisionProjectorDownload(): Promise<void> {
+  const resumable = inFlightProjectorResumable;
+  inFlightProjectorResumable = null;
+  if (resumable) {
+    try {
+      await resumable.cancelAsync();
+    } catch {
+      // ignore
+    }
+  }
+  await safeDelete(getTempProjectorPath());
+}
+
+export async function deleteVisionProjector(): Promise<void> {
+  await cancelVisionProjectorDownload();
+  const projectorUri = getVisionProjectorUri();
+  if (projectorUri) {
+    await safeDelete(projectorUri);
+  }
+  await safeDelete(getTempProjectorPath());
+}
+
+async function runVisionProjectorDownload(
+  resumable: DownloadResumableLike,
+  tempPath: string,
+  projector: VisionProjectorConfig,
+): Promise<void> {
+  const targetPath = getVisionProjectorUri();
+
+  try {
+    if (inFlightProjectorResumable !== resumable) {
+      await safeDelete(tempPath);
+      return;
+    }
+
+    await ensureDirectory(getAiTempDirectory());
+    await ensureDirectory(getActiveModelDirectory());
+    await safeDelete(tempPath);
+
+    if (inFlightProjectorResumable !== resumable) {
+      await safeDelete(tempPath);
+      return;
+    }
+
+    const result = await resumable.downloadAsync();
+    if (!result?.uri) {
+      await safeDelete(tempPath);
+      if (inFlightProjectorResumable !== resumable) {
+        return;
+      }
+      throw new Error('Vision projector download cancelled or failed');
+    }
+
+    const fileInfo = await safeGetInfo(tempPath, { md5: true });
+    if (!fileInfo.exists) {
+      await safeDelete(tempPath);
+      throw new Error('Vision projector verification failed');
+    }
+
+    if (typeof projector.sizeBytes === 'number' && projector.sizeBytes > 0 && fileInfo.size !== projector.sizeBytes) {
+      await safeDelete(tempPath);
+      throw new Error('Vision projector verification failed');
+    }
+
+    const expectedMd5 = projector.md5?.trim().toLowerCase();
+    if (expectedMd5) {
+      if (!fileInfo.md5 || fileInfo.md5.trim().toLowerCase() !== expectedMd5) {
+        await safeDelete(tempPath);
+        throw new Error('Vision projector verification failed');
+      }
+    }
+
+    await safeMove(tempPath, targetPath);
+    for (const listener of projectorProgressListeners) {
+      try {
+        listener(1);
+      } catch {
+        // ignore
+      }
+    }
+  } catch (error) {
+    await safeDelete(tempPath);
+    throw error;
+  } finally {
+    if (inFlightProjectorResumable === resumable) {
+      inFlightProjectorResumable = null;
+    }
+  }
+}
+
+function initiateProjectorDownload(
+  projector: VisionProjectorConfig,
+  downloadResumableFactory: NonNullable<FileSystemLegacyModule['createDownloadResumable']>,
+): Promise<void> {
+  const tempPath = getTempProjectorPath();
+  const backgroundSessionType = FileSystemModule.FileSystemSessionType?.BACKGROUND ?? 1;
+
+  const resumable = downloadResumableFactory(
+    projector.url,
+    tempPath,
+    {
+      sessionType: backgroundSessionType,
+    },
+    (progress) => {
+      const fraction = progress.totalBytesExpectedToWrite > 0
+        ? progress.totalBytesWritten / progress.totalBytesExpectedToWrite
+        : 0;
+      for (const listener of projectorProgressListeners) {
+        try {
+          listener(fraction);
+        } catch {
+          // ignore callback error
+        }
+      }
+    },
+  );
+
+  inFlightProjectorResumable = resumable;
+  return runVisionProjectorDownload(resumable, tempPath, projector);
+}
+
+export function downloadVisionProjector(onProgress?: (fraction: number) => void): Promise<void> {
+  if (onProgress) {
+    projectorProgressListeners.add(onProgress);
+  }
+
+  if (inFlightProjectorPromise) {
+    return inFlightProjectorPromise;
+  }
+
+  const projector = getActiveProjectorConfig();
+  if (!projector?.url) {
+    return Promise.reject(new Error('No vision projector configured for active model'));
+  }
+
+  const downloadResumableFactory = FileSystemModule.createDownloadResumable;
+  if (!downloadResumableFactory) {
+    return Promise.reject(
+      new Error('Download API unavailable in current runtime. Use a custom dev client or production build.'),
+    );
+  }
+
+  if (useSettingsStore.getState().aiWifiOnlyDownload) {
+    inFlightProjectorPromise = (async () => {
+      const wifiAllowed = await isWifiAllowed();
+      if (!wifiAllowed) {
+        throw new Error('Wi-Fi required (change in Settings)');
+      }
+      return initiateProjectorDownload(projector, downloadResumableFactory);
+    })().finally(() => {
+      inFlightProjectorPromise = null;
+      projectorProgressListeners.clear();
+    });
+    return inFlightProjectorPromise;
+  }
+
+  inFlightProjectorPromise = initiateProjectorDownload(projector, downloadResumableFactory).finally(() => {
+    inFlightProjectorPromise = null;
+    projectorProgressListeners.clear();
+  });
+
+  return inFlightProjectorPromise;
+}
+
 async function readJsonFile<T>(path: string): Promise<T | null> {
   if (!FileSystemModule.readAsStringAsync) {
     return null;
@@ -307,32 +569,32 @@ async function writeJsonFile(path: string, value: unknown) {
     return;
   }
 
-  await ensureDirectory(AI_ROOT_DIRECTORY);
+  await ensureDirectory(getAiRootDirectory());
   await FileSystemModule.writeAsStringAsync(path, JSON.stringify(value, null, 2));
 }
 
 async function readManifest(): Promise<ModelManifest | null> {
-  return readJsonFile<ModelManifest>(AI_MANIFEST_FILE);
+  return readJsonFile<ModelManifest>(getManifestFile());
 }
 
 async function writeManifest(manifest: ModelManifest) {
-  await writeJsonFile(AI_MANIFEST_FILE, manifest);
+  await writeJsonFile(getManifestFile(), manifest);
 }
 
 async function clearManifest() {
-  await safeDelete(AI_MANIFEST_FILE);
+  await safeDelete(getManifestFile());
 }
 
 async function readTransferManifest(): Promise<TransferManifest | null> {
-  return readJsonFile<TransferManifest>(AI_TRANSFER_MANIFEST_FILE);
+  return readJsonFile<TransferManifest>(getTransferManifestFile());
 }
 
 async function writeTransferManifest(manifest: TransferManifest) {
-  await writeJsonFile(AI_TRANSFER_MANIFEST_FILE, manifest);
+  await writeJsonFile(getTransferManifestFile(), manifest);
 }
 
 async function clearTransferManifest() {
-  await safeDelete(AI_TRANSFER_MANIFEST_FILE);
+  await safeDelete(getTransferManifestFile());
 }
 
 export async function checkDiskStorageHealth(requiredBytes = getActiveModelConfig().minFreeSpaceBytes): Promise<{
@@ -380,29 +642,6 @@ export async function checkDiskStorageHealth(requiredBytes = getActiveModelConfi
   return health;
 }
 
-async function sha256ForFile(fileUri: string) {
-  const fileInfo = await safeGetInfo(fileUri);
-  const fileSize = fileInfo.size ?? null;
-
-  if (fileSize !== null && fileSize > MAX_JS_SAFE_CHECKSUM_BYTES) {
-    throw new Error(
-      `Model checksum verification requires loading the entire file into JS memory, which is unsafe for large model artifacts (${fileSize} bytes).`,
-    );
-  }
-
-  const readAsStringAsync = FileSystemModule.readAsStringAsync;
-  if (!readAsStringAsync) {
-    throw new Error('Unable to read downloaded model file for checksum verification.');
-  }
-
-  const contents = await readAsStringAsync(fileUri);
-  if (!contents) {
-    throw new Error('Unable to read downloaded model file for checksum verification.');
-  }
-
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, contents);
-}
-
 function createTransferSnapshot(manifest: TransferManifest): AITransferSnapshot {
   return {
     downloadUrl: manifest.downloadUrl,
@@ -428,6 +667,7 @@ export class QModelLifecycleManager {
   private inFlightDownloadPromise: Promise<void> | null = null;
   private inFlightVerificationPromise: Promise<void> | null = null;
   private lastPersistedProgressAt = 0;
+  private downloadToken = 0;
 
   constructor(inferenceAdapter: LocalInferenceAdapter = createDefaultInferenceAdapter()) {
     this.inferenceAdapter = inferenceAdapter;
@@ -530,7 +770,11 @@ export class QModelLifecycleManager {
     }
 
     if (snapshot.status === 'verifying' && snapshot.tempPath) {
-      await this.resumeVerification(snapshot.tempPath);
+      try {
+        await this.resumeVerification(snapshot.tempPath);
+      } catch (error) {
+        this.failProvisioning(error, 'Model verification failed.');
+      }
       return;
     }
 
@@ -546,7 +790,7 @@ export class QModelLifecycleManager {
     await this.provision();
   }
 
-  async pauseDownload(reason = 'Paused by user') {
+  async pauseDownload(reason = 'Cancelled model download and cleared temporary files.') {
     await this.cancelDownload(reason);
   }
 
@@ -555,11 +799,24 @@ export class QModelLifecycleManager {
   }
 
   async cancelDownload(reason = 'Cancelled model download and cleared temporary files.') {
+    const cancelToken = ++this.downloadToken;
+    const resumable = this.downloadResumable;
+    this.downloadResumable = null;
+
     try {
-      await this.downloadResumable?.cancelAsync();
+      await resumable?.cancelAsync();
+      if (this.downloadToken !== cancelToken) {
+        return;
+      }
       await this.resetProvisioningArtifacts();
+      if (this.downloadToken !== cancelToken) {
+        return;
+      }
       this.log('warn', 'download-cancelled', reason);
     } catch (error) {
+      if (this.downloadToken !== cancelToken) {
+        return;
+      }
       this.failProvisioning(error, 'Unable to cancel model download.');
     }
   }
@@ -582,12 +839,12 @@ export class QModelLifecycleManager {
 
       // Delete target model file and any temporary download chunks
       const config = getActiveModelConfig();
-      const targetPath = getActiveModelPath();
+      const targetPath = getActiveModelFileUri();
       const legacyPaths = [
         targetPath,
         getTempDownloadPath(),
-        `${FileSystemModule.documentDirectory ?? ''}${config.fileName}`,
-      ];
+        getDocumentDirectory() ? `${getDocumentDirectory()}${config.fileName}` : '',
+      ].filter(Boolean);
 
       for (const p of legacyPaths) {
         await safeDelete(p);
@@ -619,9 +876,39 @@ export class QModelLifecycleManager {
     }
   }
 
+  private async checkWifiRequirement(): Promise<boolean> {
+    if (!useSettingsStore.getState().aiWifiOnlyDownload) {
+      return true;
+    }
+
+    let networkType: Network.NetworkStateType | undefined;
+    try {
+      const networkState = await Network.getNetworkStateAsync();
+      networkType = networkState.type;
+    } catch {
+      networkType = undefined;
+    }
+
+    if (networkType !== Network.NetworkStateType.WIFI) {
+      const message = 'Wi-Fi required (change in Settings)';
+      this.updateProvisioning({
+        status: 'failed',
+        pausedReason: null,
+        lastError: message,
+        canResume: false,
+      });
+      this.log('warn', 'wifi-required-download-blocked', message, {
+        networkType: networkType ?? 'unknown',
+      });
+      return false;
+    }
+
+    return true;
+  }
+
   private async provision() {
     try {
-      if (!DOCUMENT_DIRECTORY) {
+      if (!getDocumentDirectory()) {
         throw new Error('Document storage is unavailable on this device.');
       }
 
@@ -642,7 +929,7 @@ export class QModelLifecycleManager {
         if (installedModelPath !== useAIStore.getState().provisioning.modelPath) {
           this.updateProvisioning({ modelPath: installedModelPath, lastError: null, pausedReason: null });
         }
-        void this.verifyAndFinalizeInstalledModel(installedModelPath);
+        await this.verifyAndFinalizeInstalledModel(installedModelPath);
         return;
       }
 
@@ -665,14 +952,24 @@ export class QModelLifecycleManager {
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
       }
 
-      void this.beginDownload();
+      await this.beginDownload();
     } catch (error) {
       this.failProvisioning(error, 'Provisioning failed before download started.');
     }
   }
 
   private async beginDownload() {
-    await ensureDirectory(AI_TEMP_DIRECTORY);
+    const token = ++this.downloadToken;
+    const wifiAllowed = await this.checkWifiRequirement();
+    if (this.downloadToken !== token || !wifiAllowed) {
+      return;
+    }
+
+    await ensureDirectory(getAiTempDirectory());
+    if (this.downloadToken !== token) {
+      return;
+    }
+
     this.lastPersistedProgressAt = 0;
     const sessionId = createSessionId();
     const startedAt = nowIso();
@@ -721,19 +1018,36 @@ export class QModelLifecycleManager {
       bytesPerSecond: null,
       updatedAt: startedAt,
     });
+    if (this.downloadToken !== token) {
+      return;
+    }
 
-    this.inFlightDownloadPromise = this.runResumableDownload(null, null).finally(() => {
-      this.inFlightDownloadPromise = null;
+    this.inFlightDownloadPromise = this.runResumableDownload(null, null, token).finally(() => {
+      if (this.downloadToken === token) {
+        this.inFlightDownloadPromise = null;
+      }
     });
   }
 
-  private async runResumableDownload(_resumeData: string | null, _manifest: TransferManifest | null) {
+  private async runResumableDownload(_resumeData: string | null, _manifest: TransferManifest | null, token: number) {
+    if (this.downloadToken !== token) {
+      return;
+    }
+
     const downloadResumableFactory = FileSystemModule.createDownloadResumable;
     if (!downloadResumableFactory) {
       throw new Error('Download API unavailable in current runtime. Use a custom dev client or production build.');
     }
 
+    const wifiAllowed = await this.checkWifiRequirement();
+    if (this.downloadToken !== token || !wifiAllowed) {
+      return;
+    }
+
     const health = await checkDiskStorageHealth(getActiveModelConfig().minFreeSpaceBytes);
+    if (this.downloadToken !== token) {
+      return;
+    }
     if (!health.ok) {
       this.updateProvisioning({
         status: 'failed',
@@ -756,7 +1070,7 @@ export class QModelLifecycleManager {
         sessionType: backgroundSessionType,
       },
       (progress) => {
-        void this.handleProgressUpdate(progress, sessionId, startedAt);
+        void this.handleProgressUpdate(progress, sessionId, startedAt, token);
       },
       _resumeData ?? undefined,
     );
@@ -776,15 +1090,29 @@ export class QModelLifecycleManager {
 
     try {
       const result = await this.downloadResumable.downloadAsync();
+      if (this.downloadToken !== token) {
+        return;
+      }
       this.downloadResumable = null;
-      await this.handleDownloadFinished(result?.uri ?? getTempDownloadPath());
+
+      if (!result?.uri) {
+        await this.resetProvisioningArtifacts();
+        return;
+      }
+
+      await this.handleDownloadFinished(result.uri, token);
     } catch (error) {
+      if (this.downloadToken !== token) {
+        return;
+      }
       this.downloadResumable = null;
       const message = error instanceof Error ? error.message : 'Model download failed.';
-      const current = useAIStore.getState().provisioning;
 
       if (/cancel/i.test(message)) {
         await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
+        if (this.downloadToken !== token) {
+          return;
+        }
         this.updateProvisioning({
           status: 'not-installed',
           lastError: null,
@@ -798,11 +1126,19 @@ export class QModelLifecycleManager {
     }
   }
 
-  private async handleProgressUpdate(progress: DownloadProgress, sessionId: string, startedAt: string) {
+  private async handleProgressUpdate(progress: DownloadProgress, sessionId: string, startedAt: string, token: number) {
+    if (this.downloadToken !== token) {
+      return;
+    }
+
+    const current = useAIStore.getState().provisioning;
+    if (current.status !== 'queued' && current.status !== 'downloading') {
+      return;
+    }
+
     const totalBytes = progress.totalBytesExpectedToWrite > 0 ? progress.totalBytesExpectedToWrite : null;
     const downloadedBytes = progress.totalBytesWritten;
     const percent = totalBytes ? downloadedBytes / totalBytes : 0;
-    const current = useAIStore.getState().provisioning;
     const lastDownloadedBytes = current.downloadedBytes;
     const nowMs = Date.now();
     const previousProgressAt = current.transfer.lastProgressAt ? new Date(current.transfer.lastProgressAt).getTime() : null;
@@ -831,7 +1167,6 @@ export class QModelLifecycleManager {
 
     if (nowMs - this.lastPersistedProgressAt >= AI_BOOTSTRAP_OPTIONS.progressPersistIntervalMs) {
       this.lastPersistedProgressAt = nowMs;
-      const latestTransfer = useAIStore.getState().provisioning.transfer;
       await this.persistTransferManifest({
         status: 'downloading',
         sessionId,
@@ -844,10 +1179,17 @@ export class QModelLifecycleManager {
         resumeData: null,
         updatedAt: timestamp,
       });
+      if (this.downloadToken !== token) {
+        return;
+      }
     }
   }
 
-  private async handleDownloadFinished(downloadedUri: string) {
+  private async handleDownloadFinished(downloadedUri: string, token: number) {
+    if (this.downloadToken !== token) {
+      return;
+    }
+
     const current = useAIStore.getState().provisioning;
     this.downloadResumable = null;
 
@@ -870,16 +1212,19 @@ export class QModelLifecycleManager {
       tempPath: downloadedUri,
       updatedAt: nowIso(),
     });
+    if (this.downloadToken !== token) {
+      return;
+    }
 
-    await this.resumeVerification(downloadedUri);
+    await this.resumeVerification(downloadedUri, token);
   }
 
-  private async resumeVerification(downloadedUri: string) {
+  private async resumeVerification(downloadedUri: string, token?: number) {
     if (this.inFlightVerificationPromise) {
       return this.inFlightVerificationPromise;
     }
 
-    const verificationPromise = this.verifyAndFinalizeInstalledModel(downloadedUri, true).finally(() => {
+    const verificationPromise = this.verifyAndFinalizeInstalledModel(downloadedUri, true, token).finally(() => {
       this.inFlightVerificationPromise = null;
     });
 
@@ -887,59 +1232,89 @@ export class QModelLifecycleManager {
     return verificationPromise;
   }
 
-  private async verifyAndFinalizeInstalledModel(sourcePath: string, moveIntoActiveDirectory = false) {
-    const fileInfo = await safeGetInfo(sourcePath);
+  private async verifyAndFinalizeInstalledModel(sourcePath: string, moveIntoActiveDirectory = false, token?: number) {
+    const isStale = () => token !== undefined && this.downloadToken !== token;
+    if (isStale()) {
+      return;
+    }
+
+    const config = getActiveModelConfig();
+    const activeModelUri = getActiveModelFileUri();
+    const fileInfo = await safeGetInfo(sourcePath, { md5: true });
+    if (isStale()) {
+      return;
+    }
+
     this.log('info', 'verify-started', 'Verifying local Qwen model artifact integrity.', {
       sourcePath,
       resolvedSourceUri: fileInfo.uri ?? sourcePath,
       fileSize: fileInfo.size ?? null,
+      expectedSizeBytes: config.sizeBytes ?? null,
       moveIntoActiveDirectory,
-      checksumEnabled: shouldVerifyChecksum(),
-      activeModelPath: getActiveModelPath(),
-      documentDirectory: DOCUMENT_DIRECTORY,
+      activeModelPath: activeModelUri,
+      documentDirectory: getDocumentDirectory(),
       cacheDirectory: FileSystemModule.cacheDirectory ?? null,
     });
-    if (!fileInfo.exists) {
-      throw new Error('Model artifact missing after download.');
-    }
-
+    let installedModelPath: string | null = null;
     try {
-      if (shouldVerifyChecksum()) {
-        const hash = await sha256ForFile(sourcePath);
-        if (hash !== getActiveModelConfig().sha256) {
-          await safeDelete(sourcePath);
-          await clearTransferManifest();
-          useAIStore.getState().resetTransfer();
-          throw new Error('Model checksum verification failed.');
+      if (!fileInfo.exists) {
+        throw new Error('Model artifact missing after download.');
+      }
+
+      const expectedSizeBytes = config.sizeBytes;
+      if (typeof expectedSizeBytes === 'number' && expectedSizeBytes > 0 && fileInfo.size !== expectedSizeBytes) {
+        throw new Error(
+          `Model size verification failed (expected ${expectedSizeBytes} bytes, got ${fileInfo.size ?? 'unknown'}).`,
+        );
+      }
+
+      const expectedMd5 = config.md5?.trim().toLowerCase();
+      let checksumVerified = false;
+      let lastVerifiedAt: string | null = null;
+
+      if (expectedMd5) {
+        if (fileInfo.md5?.trim().toLowerCase() !== expectedMd5) {
+          throw new Error('Model MD5 checksum verification failed.');
         }
+        checksumVerified = true;
+        lastVerifiedAt = nowIso();
       }
 
       this.updateProvisioning({
-        checksumVerified: true,
-        lastVerifiedAt: nowIso(),
+        checksumVerified,
+        lastVerifiedAt,
         lastError: null,
         canResume: false,
       });
 
       await ensureDirectory(getActiveModelDirectory());
+      if (isStale()) {
+        return;
+      }
 
       if (moveIntoActiveDirectory) {
         this.updateProvisioning({ status: 'unpacking' });
-        const previousInfo = await safeGetInfo(getActiveModelPath());
-        const rollbackPath = `${getActiveModelDirectory()}${getActiveModelConfig().fileName}.rollback`;
+        const previousInfo = await safeGetInfo(activeModelUri);
+        if (isStale()) {
+          return;
+        }
+        const rollbackPath = `${getActiveModelDirectory()}${config.fileName}.rollback`;
 
         if (previousInfo.exists) {
           await safeDelete(rollbackPath);
-          await safeMove(getActiveModelPath(), rollbackPath);
+          await safeMove(activeModelUri, rollbackPath);
+          if (isStale()) {
+            return;
+          }
         }
 
         try {
-          await safeMove(sourcePath, getActiveModelPath());
-          const installedInfo = await safeGetInfo(getActiveModelPath());
+          await safeMove(sourcePath, activeModelUri);
+          const installedInfo = await safeGetInfo(activeModelUri);
           this.log('info', 'install-move-complete', 'Moved verified GGUF model into active directory.', {
             sourcePath,
-            activeModelPath: getActiveModelPath(),
-            activeModelUri: installedInfo.uri ?? getActiveModelPath(),
+            activeModelPath: activeModelUri,
+            activeModelUri: installedInfo.uri ?? activeModelUri,
             activeModelExists: installedInfo.exists,
             activeModelSize: installedInfo.size ?? null,
           });
@@ -947,79 +1322,44 @@ export class QModelLifecycleManager {
         } catch (error) {
           const rollbackInfo = await safeGetInfo(rollbackPath);
           if (rollbackInfo.exists) {
-            await safeMove(rollbackPath, getActiveModelPath());
+            await safeMove(rollbackPath, activeModelUri);
           }
           throw error;
         }
       }
 
-      const installedModelPath = await findExistingModelPath(getActiveModelPath());
-      if (!installedModelPath) {
-        throw new Error(`GGUF model file does not exist at path: ${getActiveModelPath()}`);
-      }
-      await this.registerWarmupAndIndex(installedModelPath);
-    } catch (error) {
-      const isChecksumMemoryRisk = error instanceof Error && /checksum verification requires loading the entire file into js memory/i.test(error.message);
-      if (isChecksumMemoryRisk) {
-        this.log('warn', 'verify-skipped-memory-risk', 'Skipping checksum verification because current Expo file APIs would require loading the full model into JS memory.', {
-          sourcePath,
-          fileSize: fileInfo.size ?? null,
-        });
-
-        this.updateProvisioning({
-          checksumVerified: false,
-          lastVerifiedAt: null,
-          lastError: null,
-          canResume: false,
-        });
-
-        await ensureDirectory(getActiveModelDirectory());
-
-        if (moveIntoActiveDirectory) {
-          this.updateProvisioning({ status: 'unpacking' });
-          const previousInfo = await safeGetInfo(getActiveModelPath());
-          const rollbackPath = `${getActiveModelDirectory()}${getActiveModelConfig().fileName}.rollback`;
-
-          if (previousInfo.exists) {
-            await safeDelete(rollbackPath);
-            await safeMove(getActiveModelPath(), rollbackPath);
-          }
-
-          try {
-            await safeMove(sourcePath, getActiveModelPath());
-            const installedInfo = await safeGetInfo(getActiveModelPath());
-            this.log('info', 'install-move-complete', 'Moved verified GGUF model into active directory.', {
-              sourcePath,
-              activeModelPath: getActiveModelPath(),
-              activeModelUri: installedInfo.uri ?? getActiveModelPath(),
-              activeModelExists: installedInfo.exists,
-              activeModelSize: installedInfo.size ?? null,
-            });
-            await safeDelete(rollbackPath);
-          } catch (moveError) {
-            const rollbackInfo = await safeGetInfo(rollbackPath);
-            if (rollbackInfo.exists) {
-              await safeMove(rollbackPath, getActiveModelPath());
-            }
-            throw moveError;
-          }
-        }
-
-        const installedModelPath = await findExistingModelPath(getActiveModelPath());
-        if (!installedModelPath) {
-          throw new Error(`GGUF model file does not exist at path: ${getActiveModelPath()}`);
-        }
-        await this.registerWarmupAndIndex(installedModelPath);
+      if (isStale()) {
         return;
       }
-      if (moveIntoActiveDirectory) {
-        await safeDelete(sourcePath);
+
+      installedModelPath = await findExistingModelPath(activeModelUri);
+      if (isStale()) {
+        return;
       }
+      if (!installedModelPath) {
+        throw new Error(`GGUF model file does not exist at path: ${activeModelUri}`);
+      }
+    } catch (error) {
+      await safeDelete(sourcePath);
+      await clearTransferManifest();
+      useAIStore.getState().resetTransfer();
+      if (!moveIntoActiveDirectory) {
+        await clearManifest();
+      }
+      this.updateProvisioning({
+        checksumVerified: false,
+        lastVerifiedAt: null,
+        tempPath: null,
+        modelPath: moveIntoActiveDirectory ? useAIStore.getState().provisioning.modelPath : null,
+      });
       throw error;
     }
+
+    await this.registerWarmupAndIndex(installedModelPath, false, token);
   }
 
-  private async registerWarmupAndIndex(modelPath: string, preserveInstalledReadyState = false) {
+  private async registerWarmupAndIndex(modelPath: string, preserveInstalledReadyState = false, token?: number) {
+    const isStale = () => token !== undefined && this.downloadToken !== token;
     const state = useAIStore.getState();
     const existingRuntimeInfo = state.runtime.runtimeInfo;
     const normalizedRequestedPath = normalizeCandidatePath(modelPath);
@@ -1068,6 +1408,9 @@ export class QModelLifecycleManager {
       });
       state.setRuntimeState('loading');
       const resolvedModelPath = await findExistingModelPath(modelPath);
+      if (isStale()) {
+        return;
+      }
       if (!resolvedModelPath) {
         await this.clearInvalidInstalledState('The downloaded GGUF file could not be found at the expected location. The stale installation metadata was cleared so setup can restart safely.', {
           expectedModelPath: modelPath,
@@ -1080,6 +1423,9 @@ export class QModelLifecycleManager {
       }
 
       const resolvedModelInfo = await safeGetInfo(resolvedModelPath);
+      if (isStale()) {
+        return;
+      }
       const registerStartedAt = Date.now();
       this.log('info', 'register-started', 'Registering local Qwen model with inference runtime.', {
         requestedModelPath: modelPath,
@@ -1089,12 +1435,18 @@ export class QModelLifecycleManager {
         fileSize: resolvedModelInfo.size ?? null,
       });
       await this.inferenceAdapter.registerModel(resolvedModelPath);
+      if (isStale()) {
+        return;
+      }
       this.log('info', 'register-finished', 'Local model registration finished.', {
         resolvedModelPath,
         durationMs: Date.now() - registerStartedAt,
       });
 
       const runtimeInfo = await this.inferenceAdapter.getRuntimeInfo();
+      if (isStale()) {
+        return;
+      }
       const runtimeInfoValidation = validateRuntimeInfo(runtimeInfo);
       if (!runtimeInfoValidation.ok) {
         throw new Error(runtimeInfoValidation.reason ?? 'Native runtime returned invalid runtime information.');
@@ -1116,9 +1468,15 @@ export class QModelLifecycleManager {
         implementation: 'noop',
       });
       await this.inferenceAdapter.indexLocalKnowledge();
+      if (isStale()) {
+        return;
+      }
 
       const initializedAt = preserveInstalledReadyState ? state.provisioning.initializedAt ?? nowIso() : nowIso();
       const finalModelPath = await findExistingModelPath(useAIStore.getState().provisioning.modelPath ?? modelPath);
+      if (isStale()) {
+        return;
+      }
       if (!finalModelPath) {
         await this.clearInvalidInstalledState('The GGUF file disappeared before installation metadata could be finalized. Setup metadata was reset to avoid a broken ready state.', {
           expectedModelPath: useAIStore.getState().provisioning.modelPath ?? modelPath,
@@ -1126,13 +1484,17 @@ export class QModelLifecycleManager {
         throw new Error('GGUF model file was not available after registration completed.');
       }
 
+      const latestProvisioning = useAIStore.getState().provisioning;
       await writeManifest({
         version: getActiveModelConfig().version,
         modelPath: finalModelPath,
-        checksumVerified: true,
+        checksumVerified: latestProvisioning.checksumVerified,
         initializedAt,
-        lastVerifiedAt: nowIso(),
+        lastVerifiedAt: latestProvisioning.checksumVerified ? (latestProvisioning.lastVerifiedAt ?? nowIso()) : null,
       });
+      if (isStale()) {
+        return;
+      }
 
       await clearTransferManifest();
       state.resetTransfer();
@@ -1173,9 +1535,9 @@ export class QModelLifecycleManager {
   }
 
   private async ensureFilesystemLayout() {
-    await ensureDirectory(AI_ROOT_DIRECTORY);
-    await ensureDirectory(AI_MODELS_DIRECTORY);
-    await ensureDirectory(AI_TEMP_DIRECTORY);
+    await ensureDirectory(getAiRootDirectory());
+    await ensureDirectory(getAiModelsDirectory());
+    await ensureDirectory(getAiTempDirectory());
   }
 
   private async restorePersistedState() {
@@ -1264,7 +1626,11 @@ export class QModelLifecycleManager {
         lastError: null,
         transfer: createTransferSnapshot(transferManifest),
       });
-      await this.resumeVerification(transferManifest.tempPath);
+      try {
+        await this.resumeVerification(transferManifest.tempPath);
+      } catch (error) {
+        this.failProvisioning(error, 'Restored model verification failed.');
+      }
       return;
     }
 
@@ -1285,7 +1651,12 @@ export class QModelLifecycleManager {
         lastError: null,
         transfer: createTransferSnapshot(transferManifest),
       });
-      this.inFlightDownloadPromise = this.runResumableDownload(transferManifest.resumeData, transferManifest);
+      const restoredToken = ++this.downloadToken;
+      this.inFlightDownloadPromise = this.runResumableDownload(transferManifest.resumeData, transferManifest, restoredToken).finally(() => {
+        if (this.downloadToken === restoredToken) {
+          this.inFlightDownloadPromise = null;
+        }
+      });
       return;
     }
 

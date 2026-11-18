@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Appearance } from 'react-native';
+import { lightTheme, darkTheme } from '../theme/colors';
 
 interface Props {
   children: ReactNode;
@@ -26,17 +27,22 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
+      const isDark = Appearance.getColorScheme() === 'dark';
+      const palette = isDark ? darkTheme : lightTheme;
+
       return (
-        <View style={styles.container}>
-          <Text style={styles.title}>Something went wrong</Text>
+        <View style={[styles.container, { backgroundColor: palette.background }]}>
+          <Text style={[styles.title, { color: palette.text }]}>Something went wrong</Text>
           {__DEV__ && this.state.error && (
-            <Text style={styles.errorText}>{this.state.error.toString()}</Text>
+            <Text style={[styles.errorText, { color: palette.expense }]}>{this.state.error.toString()}</Text>
           )}
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, { backgroundColor: palette.primary }]}
             onPress={() => this.setState({ hasError: false })}
+            accessibilityRole="button"
+            accessibilityLabel="Restart"
           >
-            <Text style={styles.buttonText}>Restart</Text>
+            <Text style={[styles.buttonText, { color: palette.onPrimary }]}>Restart</Text>
           </TouchableOpacity>
         </View>
       );
@@ -52,28 +58,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#fff',
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 10,
-    color: '#000',
   },
   errorText: {
     fontSize: 14,
-    color: 'red',
     marginBottom: 20,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#0ea5e9',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   buttonText: {
-    color: '#fff',
     fontWeight: 'bold',
   },
 });

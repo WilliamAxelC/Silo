@@ -113,7 +113,9 @@ describe('useMonthlySummary', () => {
   });
 
   it('filters out transactions from different months and different years', () => {
-    const targetDate = new Date('2024-05-15T00:00:00.000Z');
+    // Use local calendar dates because useMonthlySummary buckets by the user's local month
+    // (e.g. 2024-04-30T23:59:59.000Z is 2024-05-01T06:59:59+07:00 in UTC+7).
+    const targetDate = new Date(2024, 4, 15);
 
     const transactions: Transaction[] = [
       {
@@ -122,7 +124,7 @@ describe('useMonthlySummary', () => {
         totalAmount: -100000,
         type: 'expense',
         category: 'Bills',
-        date: new Date('2024-04-30T23:59:59.000Z').getTime(),
+        date: new Date(2024, 3, 30, 23, 59, 59, 999).getTime(),
       },
       {
         id: 2,
@@ -130,7 +132,7 @@ describe('useMonthlySummary', () => {
         totalAmount: -200000,
         type: 'expense',
         category: 'Bills',
-        date: new Date('2024-05-01T00:00:00.000Z').getTime(),
+        date: new Date(2024, 4, 1, 0, 0, 0, 0).getTime(),
       },
       {
         id: 3,
@@ -138,7 +140,7 @@ describe('useMonthlySummary', () => {
         totalAmount: -300000,
         type: 'expense',
         category: 'Bills',
-        date: new Date('2024-06-01T00:00:00.000Z').getTime(),
+        date: new Date(2024, 5, 1, 0, 0, 0, 0).getTime(),
       },
       {
         id: 4,
@@ -146,7 +148,7 @@ describe('useMonthlySummary', () => {
         totalAmount: -400000,
         type: 'expense',
         category: 'Bills',
-        date: new Date('2023-05-15T00:00:00.000Z').getTime(),
+        date: new Date(2023, 4, 15, 0, 0, 0, 0).getTime(),
       },
     ];
 

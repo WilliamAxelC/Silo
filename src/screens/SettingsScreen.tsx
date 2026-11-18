@@ -12,6 +12,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,8 +28,16 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
 import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
-import { getModelLifecycleManager, checkModelExists } from '../services/ai/modelLifecycle';
+import {
+  cancelVisionProjectorDownload,
+  deleteVisionProjector,
+  downloadVisionProjector,
+  getModelLifecycleManager,
+  isActiveModelInstalled,
+  isVisionProjectorInstalled,
+} from '../services/ai/modelLifecycle';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
+import appConfig from '../../app.json';
 
 const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
@@ -60,6 +69,7 @@ export const SettingsScreen = () => {
   const externalApiKey = useSettingsStore((s) => s.externalApiKey);
   const aiWifiOnlyDownload = useSettingsStore((s) => s.aiWifiOnlyDownload);
   const ocrEngineId = useSettingsStore((s) => s.ocrEngineId);
+  const receiptReadingMode = useSettingsStore((s) => s.receiptReadingMode);
 
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setCurrencyCode = useSettingsStore((s) => s.setCurrencyCode);
@@ -73,6 +83,7 @@ export const SettingsScreen = () => {
   const setExternalApiModel = useSettingsStore((s) => s.setExternalApiModel);
   const setExternalApiKey = useSettingsStore((s) => s.setExternalApiKey);
   const setOcrEngineId = useSettingsStore((s) => s.setOcrEngineId);
+  const setReceiptReadingMode = useSettingsStore((s) => s.setReceiptReadingMode);
   const setAiWifiOnlyDownload = useSettingsStore((s) => s.setAiWifiOnlyDownload);
 
   const { provisioning, localModelDisplayName, runtime, runtimeReady, warmupPending, logs } = useAIStore();
@@ -85,19 +96,45 @@ export const SettingsScreen = () => {
   const [categoryType, setCategoryType] = useState<CategoryType>('expense');
   const [editingCategory, setEditingCategory] = useState<CategoryRecord | null>(null);
   const [isAiActionLoading, setIsAiActionLoading] = useState(false);
-  const [downloadedModels, setDownloadedModels] = useState<Record<string, boolean>>({});
+  const [isModelInstalled, setIsModelInstalled] = useState(false);
+  const [isProjectorInstalled, setIsProjectorInstalled] = useState(false);
+  const [isProjectorDownloading, setIsProjectorDownloading] = useState(false);
+  const [projectorProgress, setProjectorProgress] = useState(0);
+  const [projectorError, setProjectorError] = useState<string | null>(null);
 
   React.useEffect(() => {
-    const checkModels = async () => {
-      const results: Record<string, boolean> = {};
-      for (const modelId of Object.keys(MODEL_CATALOG)) {
-        const preset = MODEL_CATALOG[modelId];
-        results[modelId] = await checkModelExists(preset.fileName, 'v1');
+    let isMounted = true;
+    const checkInstalled = async () => {
+      const installed = await isActiveModelInstalled();
+      if (isMounted) {
+        setIsModelInstalled(installed);
       }
-      setDownloadedModels(results);
     };
-    checkModels();
+    checkInstalled();
+    return () => {
+      isMounted = false;
+    };
   }, [provisioning.status]);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    const checkProjectorInstalled = async () => {
+      try {
+        const installed = await isVisionProjectorInstalled();
+        if (isMounted) {
+          setIsProjectorInstalled(installed);
+        }
+      } catch {
+        if (isMounted) {
+          setIsProjectorInstalled(false);
+        }
+      }
+    };
+    checkProjectorInstalled();
+    return () => {
+      isMounted = false;
+    };
+  }, [provisioning.status, isModelInstalled]);
 
   const expenseCategories = useMemo(() => getCategoriesByType('expense'), [categories, getCategoriesByType]);
   const incomeCategories = useMemo(() => getCategoriesByType('income'), [categories, getCategoriesByType]);
@@ -124,7 +161,27 @@ export const SettingsScreen = () => {
     getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
   const canStartOrRetryProvisioning =
     hasUsableLocalInferenceBackend && ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
-  const isDownloading = provisioning.status === 'downloading' || provisioning.status === 'queued';
+  const isQwenDownloaded = isModelInstalled || provisioning.status === 'ready';
+  const isDownloading = provisioning.status === 'downloading';
+  const isInProgress = [
+    'queued',
+    'downloading',
+    'verifying',
+    'unpacking',
+    'registering',
+    'warming',
+    'indexing',
+  ].includes(provisioning.status);
+
+  const modelStatusLabel = useMemo(() => {
+    if (isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress) {
+      return 'Ready';
+    }
+    if (provisioning.status === 'downloading') {
+      return `Downloading (${progressPercent}%)`;
+    }
+    return getProvisioningStatusLabel(provisioning.status) || 'Not installed';
+  }, [isQwenDownloaded, provisioning.status, isInProgress, progressPercent]);
 
   const closeModal = () => {
     setModalVisible(false);
@@ -272,11 +329,7 @@ export const SettingsScreen = () => {
               if (typeof manager.deleteInstalledModel === 'function') {
                 await manager.deleteInstalledModel();
               }
-              const results: Record<string, boolean> = {};
-              for (const modelId of Object.keys(MODEL_CATALOG)) {
-                results[modelId] = false;
-              }
-              setDownloadedModels(results);
+              setIsModelInstalled(false);
             } catch (err) {
               Alert.alert('Delete Error', getErrorMessage(err, 'Failed to delete model.'));
             } finally {
@@ -288,7 +341,55 @@ export const SettingsScreen = () => {
     );
   };
 
-  const isQwenDownloaded = downloadedModels['qwen3.5-2b'] || provisioning.status === 'ready';
+  const handleDownloadProjector = async () => {
+    setProjectorError(null);
+    setIsProjectorDownloading(true);
+    setProjectorProgress(0);
+    try {
+      await downloadVisionProjector((fraction) => {
+        setProjectorProgress(fraction);
+      });
+      setIsProjectorInstalled(true);
+      setProjectorProgress(1);
+    } catch (err) {
+      setProjectorError(getErrorMessage(err, 'Failed to download vision add-on.'));
+    } finally {
+      setIsProjectorDownloading(false);
+    }
+  };
+
+  const handleCancelProjectorDownload = async () => {
+    try {
+      await cancelVisionProjectorDownload();
+    } catch {
+      // ignore
+    } finally {
+      setIsProjectorDownloading(false);
+      setProjectorProgress(0);
+    }
+  };
+
+  const handleDeleteProjector = () => {
+    Alert.alert(
+      'Remove Vision Add-on',
+      'Are you sure you want to remove the vision projector (~670 MB)? You will need to download it again to use AI vision.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteVisionProjector();
+              setIsProjectorInstalled(false);
+            } catch (err) {
+              Alert.alert('Delete Error', getErrorMessage(err, 'Failed to remove vision projector.'));
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -341,10 +442,10 @@ export const SettingsScreen = () => {
                     <Ionicons
                       name={option.icon}
                       size={16}
-                      color={isSelected ? '#fff' : theme.textMuted}
+                      color={isSelected ? theme.onPrimary : theme.textMuted}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={[styles.segmentBtnText, { color: isSelected ? '#fff' : theme.text }]}>
+                    <Text style={[styles.segmentBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
                       {option.label}
                     </Text>
                   </TouchableOpacity>
@@ -382,7 +483,7 @@ export const SettingsScreen = () => {
                     onPress={() => setFontScale(option)}
                     accessibilityRole="button"
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? '#fff' : theme.text }]}>
+                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
                       {option === 1.0 ? '100% (Standard)' : `${Math.round(option * 100)}%`}
                     </Text>
                   </TouchableOpacity>
@@ -420,7 +521,7 @@ export const SettingsScreen = () => {
                     onPress={() => setCurrencyCode(option)}
                     accessibilityRole="button"
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? '#fff' : theme.text }]}>{option}</Text>
+                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>{option}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -453,7 +554,7 @@ export const SettingsScreen = () => {
                     onPress={() => setDateFormat(option.key)}
                     accessibilityRole="button"
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? '#fff' : theme.text }]}>
+                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
                       {option.label}
                     </Text>
                   </TouchableOpacity>
@@ -519,10 +620,10 @@ export const SettingsScreen = () => {
                 <Ionicons
                   name="phone-portrait-outline"
                   size={16}
-                  color={aiInferenceMode === 'local' ? '#fff' : theme.textMuted}
+                  color={aiInferenceMode === 'local' ? theme.onPrimary : theme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'local' ? '#fff' : theme.text }]}>
+                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'local' ? theme.onPrimary : theme.text }]}>
                   On-Device (Offline)
                 </Text>
               </TouchableOpacity>
@@ -541,10 +642,10 @@ export const SettingsScreen = () => {
                 <Ionicons
                   name="cloud-outline"
                   size={16}
-                  color={aiInferenceMode === 'external' ? '#fff' : theme.textMuted}
+                  color={aiInferenceMode === 'external' ? theme.onPrimary : theme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'external' ? '#fff' : theme.text }]}>
+                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'external' ? theme.onPrimary : theme.text }]}>
                   External API
                 </Text>
               </TouchableOpacity>
@@ -583,12 +684,20 @@ export const SettingsScreen = () => {
                     style={[
                       styles.statusPill,
                       {
-                        backgroundColor: isQwenDownloaded
+                        backgroundColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
                           ? theme.incomeMuted
-                          : isDownloading
+                          : provisioning.status === 'failed'
+                          ? theme.expenseMuted
+                          : isInProgress
                           ? theme.primaryMuted
                           : theme.surface,
-                        borderColor: isQwenDownloaded ? theme.income : theme.border,
+                        borderColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
+                          ? theme.income
+                          : provisioning.status === 'failed'
+                          ? theme.expense
+                          : isInProgress
+                          ? theme.primary
+                          : theme.border,
                       },
                     ]}
                   >
@@ -596,15 +705,17 @@ export const SettingsScreen = () => {
                       style={[
                         styles.statusPillText,
                         {
-                          color: isQwenDownloaded ? theme.income : isDownloading ? theme.primary : theme.textMuted,
+                          color: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
+                            ? theme.income
+                            : provisioning.status === 'failed'
+                            ? theme.expense
+                            : isInProgress
+                            ? theme.primary
+                            : theme.textMuted,
                         },
                       ]}
                     >
-                      {isQwenDownloaded
-                        ? 'Installed'
-                        : isDownloading
-                        ? `Downloading (${progressPercent}%)`
-                        : 'Not Installed'}
+                      {modelStatusLabel}
                     </Text>
                   </View>
                 </View>
@@ -637,9 +748,28 @@ export const SettingsScreen = () => {
                   </View>
                 )}
 
+                {/* Error message for failed */}
+                {provisioning.status === 'failed' && provisioning.lastError && (
+                  <Text style={[styles.modelErrorText, { color: theme.expense }]}>
+                    {provisioning.lastError}
+                  </Text>
+                )}
+
                 {/* Model Action Buttons */}
                 <View style={styles.modelActionsRow}>
-                  {!isQwenDownloaded && !isDownloading && (
+                  {isInProgress && (
+                    <TouchableOpacity
+                      style={[styles.modelActionButton, { backgroundColor: theme.expense }]}
+                      onPress={handleAiCancel}
+                      disabled={isAiActionLoading}
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
+                      <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Cancel</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {!isInProgress && provisioning.status === 'failed' && (
                     <TouchableOpacity
                       style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
                       onPress={handleAiInstallOrRetry}
@@ -647,29 +777,35 @@ export const SettingsScreen = () => {
                       accessibilityRole="button"
                     >
                       {isAiActionLoading ? (
-                        <ActivityIndicator color="#fff" size="small" />
+                        <ActivityIndicator color={theme.onPrimary} size="small" />
                       ) : (
                         <>
-                          <Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
-                          <Text style={styles.modelActionText}>Download Model</Text>
+                          <Ionicons name="refresh-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
+                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Retry</Text>
                         </>
                       )}
                     </TouchableOpacity>
                   )}
 
-                  {isDownloading && (
+                  {!isInProgress && provisioning.status !== 'failed' && !isQwenDownloaded && (
                     <TouchableOpacity
-                      style={[styles.modelActionButton, { backgroundColor: theme.expense }]}
-                      onPress={handleAiCancel}
+                      style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
+                      onPress={handleAiInstallOrRetry}
                       disabled={isAiActionLoading}
                       accessibilityRole="button"
                     >
-                      <Ionicons name="close-circle-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.modelActionText}>Cancel Download</Text>
+                      {isAiActionLoading ? (
+                        <ActivityIndicator color={theme.onPrimary} size="small" />
+                      ) : (
+                        <>
+                          <Ionicons name="download-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
+                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Download Model</Text>
+                        </>
+                      )}
                     </TouchableOpacity>
                   )}
 
-                  {isQwenDownloaded && !isDownloading && (
+                  {isQwenDownloaded && !isInProgress && (
                     <TouchableOpacity
                       style={[styles.modelSecondaryActionButton, { borderColor: theme.expense }]}
                       onPress={handleAiDelete}
@@ -726,7 +862,7 @@ export const SettingsScreen = () => {
                       }}
                       accessibilityRole="button"
                     >
-                      <Text style={[styles.optionChipText, { color: isSelected ? '#fff' : theme.text }]}>
+                      <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
                         {preset.label}
                       </Text>
                     </TouchableOpacity>
@@ -763,7 +899,9 @@ export const SettingsScreen = () => {
               />
 
               <Text style={[styles.inputLabel, { color: theme.textMuted }]}>
-                API Key (Optional for local Ollama)
+                {EXTERNAL_API_PRESETS[externalApiProvider]?.requiresKey
+                  ? 'API Key (Required)'
+                  : 'API Key (Optional)'}
               </Text>
               <TextInput
                 style={[
@@ -783,13 +921,149 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
+          {/* Receipt Reading Mode Selector */}
+          <View style={styles.rowBlock}>
+            <Text style={[styles.cardSectionHeading, { color: theme.text }, textScale]}>Receipt reading</Text>
+            <View style={[styles.optionRowCompact, { marginTop: 6 }]}>
+              {([
+                { id: 'ocr' as const, label: 'Fast (text OCR)' },
+                { id: 'vision' as const, label: 'Accurate (AI vision)' },
+              ]).map((mode) => {
+                const isSelected = receiptReadingMode === mode.id;
+                return (
+                  <TouchableOpacity
+                    key={mode.id}
+                    style={[
+                      styles.optionChip,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                    onPress={() => setReceiptReadingMode(mode.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={mode.label}
+                  >
+                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                      {mode.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.modelDesc, { color: theme.textMuted, marginTop: 6, marginBottom: 0 }]}>
+              AI vision reads the photo directly: more accurate (90% vs 67% totals in our Indonesian receipt benchmark) but slower, and needs an extra 670 MB download.
+            </Text>
+
+            {receiptReadingMode === 'vision' && (
+              <View style={{ marginTop: 10 }}>
+                {aiInferenceMode === 'external' ? (
+                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0 }]}>
+                    External mode needs no download.
+                  </Text>
+                ) : !isQwenDownloaded ? (
+                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0 }]}>
+                    AI model must be downloaded first (local mode).
+                  </Text>
+                ) : isProjectorDownloading ? (
+                  <View>
+                    <View style={styles.downloadProgressWrap}>
+                      <View style={[styles.downloadTrack, { backgroundColor: theme.border }]}>
+                        <View
+                          style={[
+                            styles.downloadFill,
+                            {
+                              width: `${Math.min(100, Math.max(0, Math.round(projectorProgress * 100)))}%`,
+                              backgroundColor: theme.primary,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={styles.downloadMetaRow}>
+                        <Text style={[styles.downloadMetaText, { color: theme.textMuted }]}>
+                          {`${Math.round(projectorProgress * 100)}% completed`}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.modelActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.modelActionButton, { backgroundColor: theme.expense }]}
+                        onPress={handleCancelProjectorDownload}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel vision download"
+                      >
+                        <Ionicons name="close-circle-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
+                        <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : isProjectorInstalled ? (
+                  <View style={[styles.modelActionsRow, { alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="checkmark-circle" size={18} color={theme.income} />
+                      <Text style={[{ color: theme.income, fontWeight: '600' }, textScale]}>
+                        Vision add-on installed
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.modelActionButton,
+                        {
+                          flex: 0,
+                          paddingHorizontal: 16,
+                          minHeight: 36,
+                          backgroundColor: theme.expenseMuted,
+                          borderWidth: 1,
+                          borderColor: theme.expense,
+                        },
+                      ]}
+                      onPress={handleDeleteProjector}
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove vision add-on"
+                    >
+                      <Text style={[styles.modelActionText, { color: theme.expense }]}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View>
+                    {projectorError && (
+                      <Text style={[styles.modelErrorText, { color: theme.expense, marginBottom: 8 }]}>
+                        {projectorError}
+                      </Text>
+                    )}
+                    <View style={styles.modelActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
+                        onPress={handleDownloadProjector}
+                        accessibilityRole="button"
+                        accessibilityLabel={projectorError ? 'Retry vision download' : 'Download vision add-on (670 MB)'}
+                      >
+                        <Ionicons
+                          name={projectorError ? 'refresh-outline' : 'download-outline'}
+                          size={16}
+                          color={theme.onPrimary}
+                          style={{ marginRight: 6 }}
+                        />
+                        <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>
+                          {projectorError ? 'Retry' : 'Download vision add-on (670 MB)'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
           {/* OCR Engine Selector */}
           <View style={styles.rowBlock}>
             <Text style={[styles.cardSectionHeading, { color: theme.text }, textScale]}>Receipt OCR Engine</Text>
             <View style={[styles.optionRowCompact, { marginTop: 6 }]}>
-              {(['mlkit', 'paddleocr', 'external'] as const).map((engine) => {
+              {(['mlkit', 'paddleocr'] as const).map((engine) => {
                 const isSelected = ocrEngineId === engine;
-                const label = engine === 'mlkit' ? 'ML Kit (Google On-Device)' : engine === 'paddleocr' ? 'PaddleOCR' : 'External OCR';
+                const label = engine === 'mlkit' ? 'ML Kit (Google On-Device)' : 'PaddleOCR';
                 return (
                   <TouchableOpacity
                     key={engine}
@@ -802,8 +1076,9 @@ export const SettingsScreen = () => {
                     ]}
                     onPress={() => setOcrEngineId(engine)}
                     accessibilityRole="button"
+                    accessibilityLabel={label}
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? '#fff' : theme.text }]}>{label}</Text>
+                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -942,6 +1217,23 @@ export const SettingsScreen = () => {
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
+        </View>
+
+        {/* About Section */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>ABOUT</Text>
+        <View style={[styles.sectionCard, styles.aboutCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <Image
+            source={require('../../assets/icon.png')}
+            style={styles.aboutIcon}
+            resizeMode="cover"
+            accessibilityRole="image"
+            accessibilityLabel="Silo app icon"
+          />
+          <Text style={[styles.aboutAppName, { color: theme.text }]}>Silo</Text>
+          <Text style={[styles.aboutVersion, { color: theme.textMuted }]}>
+            Version {appConfig.expo.version}
+          </Text>
+          <Text style={[styles.aboutAuthor, { color: theme.primary }]}>Made by CDev</Text>
         </View>
       </ScrollView>
 
@@ -1095,6 +1387,7 @@ const styles = StyleSheet.create({
   downloadFill: { height: '100%', borderRadius: 4 },
   downloadMetaRow: { flexDirection: 'row', justifyContent: 'space-between' },
   downloadMetaText: { fontSize: 11, fontWeight: '600' },
+  modelErrorText: { fontSize: 12, fontWeight: '600', marginBottom: 8 },
   modelActionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   modelActionButton: {
     flex: 1,
@@ -1105,7 +1398,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
-  modelActionText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  modelActionText: { fontSize: 13, fontWeight: '800' },
   modelSecondaryActionButton: {
     flex: 1,
     minHeight: 44,
@@ -1154,5 +1447,30 @@ const styles = StyleSheet.create({
   modalSecondaryBtn: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modalPrimaryBtn: { flex: 1.2, minHeight: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modalSecondaryText: { fontWeight: '700' },
-  modalPrimaryText: { fontWeight: '800', color: '#fff' },
+  modalPrimaryText: { fontWeight: '800' },
+  aboutCard: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+  },
+  aboutIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  aboutAppName: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  aboutVersion: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  aboutAuthor: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });

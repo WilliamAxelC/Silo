@@ -5,7 +5,7 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -19,7 +19,7 @@ import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 
 import { NavigationProps, ChatbotScreenRouteProp } from '../navigation/types';
-import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
+import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore, type Message } from '../store/useAIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { LocalAiMode } from '../services/ai/agent';
@@ -67,12 +67,84 @@ const QUICK_SUGGESTIONS = [
   { icon: 'trending-up-outline', text: 'How can I save 20% of my income?' },
 ];
 
+interface MessageBubbleProps {
+  message: Message;
+  durationLabel: string | null;
+  onLongPress: (text: string) => void;
+}
+
+const MessageBubble = React.memo(function MessageBubble({
+  message,
+  durationLabel,
+  onLongPress,
+}: MessageBubbleProps) {
+  const theme = useAppTheme();
+  const markdownStyles = useMemo(
+    () => ({
+      body: { fontSize: 15, color: theme.text, lineHeight: 22 },
+      code_inline: { backgroundColor: theme.background, color: theme.primary },
+    }),
+    [theme.background, theme.primary, theme.text]
+  );
+  const parsedParts = useMemo(
+    () => (message.role === 'ai' && message.text ? parseMessageWithCharts(message.text) : null),
+    [message.role, message.text]
+  );
+  const handleLongPress = useCallback(() => {
+    onLongPress(message.text);
+  }, [message.text, onLongPress]);
+
+  return (
+    <View style={styles.messageWrap}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onLongPress={handleLongPress}
+        style={[
+          styles.messageBubble,
+          message.role === 'user'
+            ? [styles.userBubble, { backgroundColor: theme.primary }]
+            : [styles.aiBubble, { backgroundColor: theme.surface, borderColor: theme.border }],
+        ]}
+      >
+        {message.role === 'user' ? (
+          <Text selectable style={{ fontSize: 15, color: theme.onPrimary, lineHeight: 22 }}>
+            {message.text}
+          </Text>
+        ) : parsedParts ? (
+          parsedParts.map((part, partIndex) =>
+            part.type === 'markdown' ? (
+              <Markdown key={partIndex} style={markdownStyles}>
+                {part.content}
+              </Markdown>
+            ) : (
+              <ChatChart key={partIndex} type={part.chartType!} data={part.chartData!} />
+            )
+          )
+        ) : (
+          <View style={styles.messageLoadingRow}>
+            <ActivityIndicator color={theme.primary} size="small" />
+            <Text style={[styles.messageLoadingText, { color: theme.textMuted }]}>Thinking…</Text>
+          </View>
+        )}
+        {message.role === 'ai' && message.status && message.status !== 'complete' && (
+          <Text style={[styles.messageMeta, { color: message.status === 'error' ? theme.expense : theme.textMuted }]}>
+            {message.status === 'streaming' ? 'Generating response…' : message.status === 'cancelled' ? 'Cancelled' : 'Error'}
+          </Text>
+        )}
+      </TouchableOpacity>
+      {durationLabel && <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text>}
+    </View>
+  );
+});
+
 export const ChatbotScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<ChatbotScreenRouteProp>();
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { aiInferenceMode, externalApiProvider, externalApiModel } = useSettingsStore();
+  const aiInferenceMode = useSettingsStore((state) => state.aiInferenceMode);
+  const externalApiProvider = useSettingsStore((state) => state.externalApiProvider);
+  const externalApiModel = useSettingsStore((state) => state.externalApiModel);
 
   const chatHistory = useAIStore((state) => state.chatHistory);
   const addChatMessage = useAIStore((state) => state.addChatMessage);
@@ -85,11 +157,10 @@ export const ChatbotScreen = () => {
   const runtimeReady = useAIStore((state) => state.runtimeReady);
   const warmupPending = useAIStore((state) => state.warmupPending);
   const localModelDisplayName = useAIStore((state) => state.localModelDisplayName);
-  const provisioningStatus = useAIStore((state) => state.provisioning.status);
 
   const generationService = useMemo(() => getGenerationService(), []);
   const chatRuntimePreloadService = useMemo(() => getChatRuntimePreloadService(), []);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<FlatList<Message>>(null);
   const initialMessage = route.params?.initialMessage || '';
   const [inputText, setInputText] = useState(initialMessage);
   const [chatRuntimeRequested, setChatRuntimeRequested] = useState(selectedMode === 'chat');
@@ -129,10 +200,14 @@ export const ChatbotScreen = () => {
     };
   }, [generationService]);
 
-  const handleCopyToClipboard = async (text: string) => {
+  const scrollToEnd = useCallback((animated: boolean) => {
+    flatListRef.current?.scrollToEnd({ animated });
+  }, []);
+
+  const handleCopyToClipboard = useCallback(async (text: string) => {
     await Clipboard.setStringAsync(text);
     Alert.alert('Copied', 'Message copied to clipboard.');
-  };
+  }, []);
 
   const handleClearHistoryWithConfirm = () => {
     if (chatHistory.length === 0) return;
@@ -259,7 +334,7 @@ export const ChatbotScreen = () => {
         status: 'streaming',
       }));
 
-      scrollViewRef.current?.scrollToEnd({ animated: false });
+      scrollToEnd(false);
       return;
     }
 
@@ -281,9 +356,9 @@ export const ChatbotScreen = () => {
         };
       });
       pendingAssistantMessageIdRef.current = null;
-      scrollViewRef.current?.scrollToEnd({ animated: true });
+      scrollToEnd(true);
     }
-  }, [runtime.activeGenerationRequestId, runtime.streamingResponseText, updateChatMessage]);
+  }, [runtime.activeGenerationRequestId, runtime.streamingResponseText, scrollToEnd, updateChatMessage]);
 
   useEffect(() => {
     return () => {
@@ -402,7 +477,7 @@ export const ChatbotScreen = () => {
     addChatMessage({ role: 'ai', text: '', id: assistantMessageId, status: 'streaming', createdAt: new Date(startedAt).toISOString() });
 
     requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
+      scrollToEnd(true);
     });
 
     try {
@@ -431,7 +506,7 @@ export const ChatbotScreen = () => {
       }
     } finally {
       requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+        scrollToEnd(true);
       });
     }
   };
@@ -465,6 +540,21 @@ export const ChatbotScreen = () => {
       Alert.alert('Cancel generation', getErrorMessage(error, 'Unable to cancel generation.'));
     }
   };
+
+  const keyExtractor = useCallback((item: Message, index: number) => item.id ?? String(index), []);
+
+  const renderMessageItem = useCallback(
+    ({ item }: { item: Message }) => {
+      const measuredDuration = item.id ? assistantMessageStartedAtRef.current[item.id] : null;
+      const durationLabel =
+        typeof measuredDuration === 'number' && item.role === 'ai' && item.status === 'complete' && measuredDuration < 600000
+          ? `${(measuredDuration / 1000).toFixed(measuredDuration >= 10000 ? 0 : 1)}s inference`
+          : null;
+
+      return <MessageBubble message={item} durationLabel={durationLabel} onLongPress={handleCopyToClipboard} />;
+    },
+    [handleCopyToClipboard]
+  );
 
   const showChatRuntimeGate = aiMode === 'chat' && chatRuntimeRequested && (!canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning);
   const isNotInstalled = provisioning.status === 'not-installed';
@@ -540,9 +630,13 @@ export const ChatbotScreen = () => {
               <TouchableOpacity
                 style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]}
                 onPress={handleProvisionAction}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 accessibilityRole="button"
+                accessibilityLabel={isNotInstalled ? 'Set up AI model' : 'Retry AI model setup'}
               >
-                <Text style={styles.primaryMiniButtonText}>Retry</Text>
+                <Text style={[styles.primaryMiniButtonText, { color: theme.onPrimary }]}>
+                  {isNotInstalled ? 'Set up' : 'Retry'}
+                </Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -559,11 +653,23 @@ export const ChatbotScreen = () => {
                 )}
               </View>
               {runtime.activeGenerationRequestId ? (
-                <TouchableOpacity onPress={handleCancelGeneration} style={styles.pauseButton} accessibilityRole="button">
+                <TouchableOpacity
+                  onPress={handleCancelGeneration}
+                  style={styles.pauseButton}
+                  hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop generation"
+                >
                   <Text style={[styles.pauseButtonText, { color: theme.expense }]}>Stop</Text>
                 </TouchableOpacity>
               ) : isBusyProvisioning ? (
-                <TouchableOpacity onPress={handleCancelDownload} style={styles.pauseButton} accessibilityRole="button">
+                <TouchableOpacity
+                  onPress={handleCancelDownload}
+                  style={styles.pauseButton}
+                  hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel download"
+                >
                   <Text style={[styles.pauseButtonText, { color: theme.expense }]}>Cancel</Text>
                 </TouchableOpacity>
               ) : null}
@@ -582,9 +688,15 @@ export const ChatbotScreen = () => {
             <Text style={[styles.errorBannerText, { color: theme.expense }]}>
               Previous query encountered an error.
             </Text>
-            <TouchableOpacity style={[styles.retryPill, { backgroundColor: theme.expense }]} onPress={handleRetryLast}>
-              <Ionicons name="refresh" size={14} color="#fff" style={{ marginRight: 4 }} />
-              <Text style={styles.retryPillText}>Retry</Text>
+            <TouchableOpacity
+              style={[styles.retryPill, { backgroundColor: theme.expense }]}
+              onPress={handleRetryLast}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Retry last query"
+            >
+              <Ionicons name="refresh" size={14} color={theme.onPrimary} style={{ marginRight: 4 }} />
+              <Text style={[styles.retryPillText, { color: theme.onPrimary }]}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -593,14 +705,16 @@ export const ChatbotScreen = () => {
         <View style={[styles.toggleContainer, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <TouchableOpacity
             style={[styles.toggleBtn, aiMode === 'rag' && { backgroundColor: theme.primary }]}
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             onPress={() => setSelectedMode('rag')}
             accessibilityRole="button"
             accessibilityLabel="Switch to Grounded mode"
           >
-            <Text style={[styles.toggleText, { color: aiMode === 'rag' ? '#fff' : theme.textMuted }]}>Grounded</Text>
+            <Text style={[styles.toggleText, { color: aiMode === 'rag' ? theme.onPrimary : theme.textMuted }]}>Grounded</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.toggleBtn, aiMode === 'chat' && { backgroundColor: theme.primary }]}
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             onPress={() => {
               setChatRuntimeRequested(true);
               setSelectedMode('chat');
@@ -608,14 +722,17 @@ export const ChatbotScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Switch to Chat mode"
           >
-            <Text style={[styles.toggleText, { color: aiMode === 'chat' ? '#fff' : theme.textMuted }]}>Chat</Text>
+            <Text style={[styles.toggleText, { color: aiMode === 'chat' ? theme.onPrimary : theme.textMuted }]}>Chat</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Chat History Scroll */}
-        <ScrollView
-          ref={scrollViewRef}
+        {/* Chat History List */}
+        <FlatList
+          ref={flatListRef}
           style={styles.chatArea}
+          data={chatHistory}
+          keyExtractor={keyExtractor}
+          renderItem={renderMessageItem}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           contentContainerStyle={{
@@ -625,132 +742,81 @@ export const ChatbotScreen = () => {
           }}
           onContentSizeChange={() => {
             if (runtime.activeGenerationRequestId) {
-              scrollViewRef.current?.scrollToEnd({ animated: false });
+              scrollToEnd(false);
             }
           }}
-        >
-          {showChatRuntimeGate ? (
-            <View style={styles.emptyStateWrap}>
-              <View style={[styles.chatGateCard, styles.chatGateCardCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
-                <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
-                  {stageStatusMessage ?? 'Loading the offline chatbot on device...'}
-                </Text>
-                {canStartOrRetryProvisioning ? (
-                  <TouchableOpacity
-                    style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
-                    onPress={handleProvisionAction}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.chatGateButtonText}>{chatRuntimeActionLabel}</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          ) : chatHistory.length === 0 ? (
-            <View style={styles.emptyStateWrap}>
-              <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
-                {canSendMessage
-                  ? 'Ask anything about your personal finances or tap a quick question:'
-                  : aiMode === 'rag'
-                  ? 'Grounded queries are answered from records stored on this device only.'
-                  : 'Chat mode is disabled because on-device generation is unavailable.'}
-              </Text>
-
-              {/* Interactive Quick Suggestion Pills */}
-              {canSendMessage && (
-                <View style={styles.suggestionGrid}>
-                  {QUICK_SUGGESTIONS.map((suggestion, idx) => (
+          ListHeaderComponent={
+            showChatRuntimeGate ? (
+              <View style={styles.emptyStateWrap}>
+                <View style={[styles.chatGateCard, styles.chatGateCardCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
+                  <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
+                    {stageStatusMessage ?? 'Loading the offline chatbot on device...'}
+                  </Text>
+                  {canStartOrRetryProvisioning ? (
                     <TouchableOpacity
-                      key={idx}
-                      style={[
-                        styles.suggestionPill,
-                        {
-                          backgroundColor: theme.surface,
-                          borderColor: theme.border,
-                        },
-                      ]}
-                      onPress={() => handleSuggestionPress(suggestion.text)}
+                      style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                      onPress={handleProvisionAction}
                       accessibilityRole="button"
+                      accessibilityLabel={chatRuntimeActionLabel}
                     >
-                      <Ionicons
-                        name={suggestion.icon as any}
-                        size={16}
-                        color={theme.primary}
-                        style={{ marginRight: 8 }}
-                      />
-                      <Text style={[styles.suggestionText, { color: theme.text }]}>{suggestion.text}</Text>
+                      <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>{chatRuntimeActionLabel}</Text>
                     </TouchableOpacity>
-                  ))}
+                  ) : null}
                 </View>
-              )}
-
-              {stageStatusMessage && (
-                <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <ActivityIndicator color={theme.primary} />
-                  <Text style={[styles.inlineStatusText, { color: theme.textMuted }]}>{stageStatusMessage}</Text>
-                </View>
-              )}
-            </View>
-          ) : null}
-
-          {/* Messages */}
-          {chatHistory.map((msg, index) => {
-            const measuredDuration = msg.id ? assistantMessageStartedAtRef.current[msg.id] : null;
-            const durationLabel =
-              typeof measuredDuration === 'number' && msg.role === 'ai' && msg.status === 'complete' && measuredDuration < 600000
-                ? `${(measuredDuration / 1000).toFixed(measuredDuration >= 10000 ? 0 : 1)}s inference`
-                : null;
-
-            return (
-              <View key={msg.id ?? index} style={styles.messageWrap}>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onLongPress={() => handleCopyToClipboard(msg.text)}
-                  style={[
-                    styles.messageBubble,
-                    msg.role === 'user'
-                      ? [styles.userBubble, { backgroundColor: theme.primary }]
-                      : [styles.aiBubble, { backgroundColor: theme.surface, borderColor: theme.border }],
-                  ]}
-                >
-                  {msg.role === 'user' ? (
-                    <Text selectable style={{ fontSize: 15, color: '#fff', lineHeight: 22 }}>
-                      {msg.text}
-                    </Text>
-                  ) : msg.text ? (
-                    parseMessageWithCharts(msg.text).map((part, partIndex) =>
-                      part.type === 'markdown' ? (
-                        <Markdown
-                          key={partIndex}
-                          style={{
-                            body: { fontSize: 15, color: theme.text, lineHeight: 22 },
-                            code_inline: { backgroundColor: theme.background, color: theme.primary },
-                          }}
-                        >
-                          {part.content}
-                        </Markdown>
-                      ) : (
-                        <ChatChart key={partIndex} type={part.chartType!} data={part.chartData!} />
-                      )
-                    )
-                  ) : (
-                    <View style={styles.messageLoadingRow}>
-                      <ActivityIndicator color={theme.primary} size="small" />
-                      <Text style={[styles.messageLoadingText, { color: theme.textMuted }]}>Thinking…</Text>
-                    </View>
-                  )}
-                  {msg.role === 'ai' && msg.status && msg.status !== 'complete' && (
-                    <Text style={[styles.messageMeta, { color: msg.status === 'error' ? theme.expense : theme.textMuted }]}>
-                      {msg.status === 'streaming' ? 'Generating response…' : msg.status === 'cancelled' ? 'Cancelled' : 'Error'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-                {durationLabel && <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text>}
               </View>
-            );
-          })}
-        </ScrollView>
+            ) : null
+          }
+          ListEmptyComponent={
+            !showChatRuntimeGate ? (
+              <View style={styles.emptyStateWrap}>
+                <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
+                  {canSendMessage
+                    ? 'Ask anything about your personal finances or tap a quick question:'
+                    : aiMode === 'rag'
+                    ? 'Grounded queries are answered from records stored on this device only.'
+                    : 'Chat mode is disabled because on-device generation is unavailable.'}
+                </Text>
+
+                {/* Interactive Quick Suggestion Pills */}
+                {canSendMessage && (
+                  <View style={styles.suggestionGrid}>
+                    {QUICK_SUGGESTIONS.map((suggestion, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[
+                          styles.suggestionPill,
+                          {
+                            backgroundColor: theme.surface,
+                            borderColor: theme.border,
+                          },
+                        ]}
+                        onPress={() => handleSuggestionPress(suggestion.text)}
+                        accessibilityRole="button"
+                        accessibilityLabel={suggestion.text}
+                      >
+                        <Ionicons
+                          name={suggestion.icon as any}
+                          size={16}
+                          color={theme.primary}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text style={[styles.suggestionText, { color: theme.text }]}>{suggestion.text}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {stageStatusMessage && (
+                  <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                    <ActivityIndicator color={theme.primary} />
+                    <Text style={[styles.inlineStatusText, { color: theme.textMuted }]}>{stageStatusMessage}</Text>
+                  </View>
+                )}
+              </View>
+            ) : null
+          }
+        />
 
         {/* Input Bar */}
         <View
@@ -797,7 +863,7 @@ export const ChatbotScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Stop generation"
             >
-              <Ionicons name="stop" size={18} color="#fff" />
+              <Ionicons name="stop" size={18} color={theme.onPrimary} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -815,7 +881,7 @@ export const ChatbotScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Send message"
             >
-              <Ionicons name="send" size={18} color="#fff" />
+              <Ionicons name="send" size={18} color={theme.onPrimary} />
             </TouchableOpacity>
           )}
         </View>
@@ -856,7 +922,7 @@ const styles = StyleSheet.create({
   statusMessage: { fontSize: 11, lineHeight: 15, marginTop: 2, flex: 1 },
   statusMessageTight: { marginTop: 0 },
   metaLine: { fontSize: 10, lineHeight: 14, marginTop: 4 },
-  pauseButton: { paddingHorizontal: 8, paddingVertical: 4, minHeight: 44, justifyContent: 'center' },
+  pauseButton: { paddingHorizontal: 8, paddingVertical: 4, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   pauseButtonText: { fontSize: 12, fontWeight: '700' },
   primaryMiniButton: { borderRadius: 999, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center', alignItems: 'center' },
   primaryMiniButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
@@ -871,7 +937,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
-  retryPill: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  retryPill: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, minHeight: 32 },
   retryPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   toggleContainer: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1 },
   toggleBtn: { flex: 1, minHeight: 38, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },

@@ -202,7 +202,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
     await db.transaction(async (tx) => {
       await tx.update(categories).set({ name: normalizedName }).where(eq(categories.id, id));
-      await tx.update(transactionItems).set({ category: normalizedName }).where(eq(transactionItems.category, current.name));
+      await tx
+        .update(transactionItems)
+        .set({ category: normalizedName })
+        .where(
+          and(
+            eq(transactionItems.category, current.name),
+            sql`${transactionItems.transactionId} IN (SELECT ${transactions.id} FROM ${transactions} WHERE ${transactions.type} = ${current.type})`
+          )
+        );
 
       if (current.type === 'expense') {
         const matchingBudgetRows = await tx.select().from(budgets).where(eq(budgets.category, current.name));
@@ -291,38 +299,40 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         ? get().normalizeCategoryForType(normalizedTx.category, nextType)
         : existingTransaction?.category;
 
-      if (
-        tx.merchantName !== undefined ||
-        tx.totalAmount !== undefined ||
-        tx.date !== undefined ||
-        tx.type !== undefined ||
-        tx.imageUri !== undefined ||
-        tx.note !== undefined ||
-        tx.lineItemsText !== undefined
-      ) {
-        await db
-          .update(transactions)
-          .set({
-            merchantName: tx.merchantName !== undefined ? normalizedTx.merchantName : undefined,
-            totalAmount: tx.totalAmount,
-            type: tx.type,
-            date: tx.date,
-            imageUri: tx.imageUri,
-            note: tx.note !== undefined ? normalizedTx.note : undefined,
-            lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : undefined,
-          })
-          .where(eq(transactions.id, id));
-      }
+      await db.transaction(async (txDb) => {
+        if (
+          tx.merchantName !== undefined ||
+          tx.totalAmount !== undefined ||
+          tx.date !== undefined ||
+          tx.type !== undefined ||
+          tx.imageUri !== undefined ||
+          tx.note !== undefined ||
+          tx.lineItemsText !== undefined
+        ) {
+          await txDb
+            .update(transactions)
+            .set({
+              merchantName: tx.merchantName !== undefined ? normalizedTx.merchantName : undefined,
+              totalAmount: tx.totalAmount,
+              type: tx.type,
+              date: tx.date,
+              imageUri: tx.imageUri,
+              note: tx.note !== undefined ? normalizedTx.note : undefined,
+              lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : undefined,
+            })
+            .where(eq(transactions.id, id));
+        }
 
-      if (tx.category !== undefined || tx.totalAmount !== undefined || tx.type !== undefined) {
-        await db
-          .update(transactionItems)
-          .set({
-            category: nextCategory,
-            amount: tx.totalAmount !== undefined ? Math.abs(tx.totalAmount) : undefined,
-          })
-          .where(eq(transactionItems.transactionId, id));
-      }
+        if (tx.category !== undefined || tx.totalAmount !== undefined || tx.type !== undefined) {
+          await txDb
+            .update(transactionItems)
+            .set({
+              category: nextCategory,
+              amount: tx.totalAmount !== undefined ? Math.abs(tx.totalAmount) : undefined,
+            })
+            .where(eq(transactionItems.transactionId, id));
+        }
+      });
 
       await get().fetchTransactions();
       await get().fetchBudgets();
@@ -352,10 +362,12 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   setBudget: async (category, limitAmount) => {
     try {
       const normalizedCategory = normalizeCategoryName(category);
-      await db.delete(budgets).where(eq(budgets.category, normalizedCategory));
-      if (limitAmount > 0) {
-        await db.insert(budgets).values({ category: normalizedCategory, limitAmount, walletId: DEFAULT_WALLET_ID });
-      }
+      await db.transaction(async (txDb) => {
+        await txDb.delete(budgets).where(eq(budgets.category, normalizedCategory));
+        if (limitAmount > 0) {
+          await txDb.insert(budgets).values({ category: normalizedCategory, limitAmount, walletId: DEFAULT_WALLET_ID });
+        }
+      });
       await get().fetchBudgets();
     } catch (error) {
       console.error('Failed to set budget:', error);
@@ -365,9 +377,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
   clearAllData: async () => {
     try {
-      await db.delete(transactionItems);
-      await db.delete(transactions);
-      await db.delete(budgets);
+      await db.transaction(async (txDb) => {
+        await txDb.delete(transactionItems);
+        await txDb.delete(transactions);
+        await txDb.delete(budgets);
+      });
       await get().fetchTransactions();
       await get().fetchBudgets();
     } catch (error) {

@@ -25,6 +25,7 @@ export type LocalInferenceError = {
 export type LocalGenerationRequest = {
   requestId?: string;
   prompt: string;
+  imageUri?: string;
   maxTokens?: number;
   temperature?: number;
   topP?: number;

@@ -1,31 +1,20 @@
-import { Platform } from 'react-native';
+import { Image } from 'react-native';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { expoDb, type AITransactionRow } from '../../db/index';
-import { getModelLifecycleManager } from './modelLifecycle';
+import { isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
-import { reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
-import { getLlamaRnAdapter } from './llamaRnAdapter';
-import { useAIStore, type Message, getAIRuntimeAvailability } from '../../store/useAIStore';
+import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
+import { isGrounded, pickTotalFromRows } from '../ocr/receiptText';
+import { parseSignedAmount } from '../../features/transactions/amount';
+import { useAIStore, type Message } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import {
-  QWEN_MODEL_DEFAULT_TEMPERATURE,
-  QWEN_MODEL_DEFAULT_TOP_P,
-  QWEN_MODEL_GROUNDED_TEMPERATURE,
-  QWEN_MODEL_GROUNDED_TOP_P,
   QWEN_MODEL_HISTORY_TURN_LIMIT,
-  QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS,
-  QWEN_MODEL_MAX_OUTPUT_TOKENS,
   QWEN_MODEL_MAX_PROMPT_CHARS,
   QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
   QWEN_MODEL_RETRIEVAL_ITEM_LIMIT,
-  QWEN_MODEL_STOP_TOKENS,
 } from './config';
-import {
-  getErrorMessage,
-  type LocalGenerationMetrics,
-  type LocalGenerationRequest,
-  type LocalGenerationResult,
-  type LocalRuntimeInfo,
-} from './localInferenceTypes';
+import type { LocalRuntimeInfo } from './localInferenceTypes';
 
 export type LocalAiMode = 'rag' | 'chat';
 
@@ -37,7 +26,6 @@ export interface RetrievedContextItem {
   score: number;
 }
 
-const injectionPatterns = [/ignore all previous/i, /forget your instructions/i, /you are now a/i, /system prompt/i];
 const STOP_WORDS = new Set([
   'a',
   'an',
@@ -89,16 +77,6 @@ function findCategorySpending(userPrompt: string): { category: string | null; da
   };
 }
 
-function getRecentTransactions(limit = 5) {
-  return expoDb.getAllSync<Pick<AITransactionRow, 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
-    `SELECT merchant_name, total_amount, category, date, note
-     FROM ai_transactions_view
-     ORDER BY date DESC
-     LIMIT ?`,
-    [limit],
-  );
-}
-
 function getCategorySpending(category: string, days: number) {
   const now = Date.now();
   const from = now - days * 24 * 60 * 60 * 1000;
@@ -113,22 +91,6 @@ function getCategorySpending(category: string, days: number) {
 function getTotalBalance() {
   const rows = expoDb.getAllSync<{ total: number | null }>('SELECT SUM(total_amount) as total FROM ai_transactions_view');
   return rows[0]?.total ?? 0;
-}
-
-function buildOfflineProvisioningMessage() {
-  const { provisioning, runtime } = useAIStore.getState();
-  const runtimeReason = runtime.lastRuntimeError ? ` Runtime error: ${runtime.lastRuntimeError.message}` : '';
-  const provisioningReason = provisioning.lastError ? ` Last error: ${provisioning.lastError}` : '';
-  return `Silo AI local inference is unavailable. Current provisioning status: ${provisioning.status}.${provisioningReason}${runtimeReason}`;
-}
-
-function buildLocalInferenceUnavailableMessage() {
-  return [
-    'Local conversational generation is unavailable in this build.',
-    'Please run on an Android device with local model support.',
-    'Grounded local retrieval still works from data stored on this device only.',
-    'Use Grounded mode for balances, category spending, and recent transaction questions.',
-  ].join('\n\n');
 }
 
 function tokenizePrompt(userPrompt: string) {
@@ -228,27 +190,6 @@ export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[
     .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT + 1);
 }
 
-function formatGroundedResponse(userPrompt: string, retrievedContext: RetrievedContextItem[]) {
-  const topContext = retrievedContext.slice(0, 3);
-  const bulletLines = topContext.map((item) => `- ${item.content}`).join('\n');
-
-  if (/recent transactions|latest transactions/i.test(userPrompt)) {
-    return `Here are the most relevant recent local records for your question:\n${bulletLines}`;
-  }
-
-  if (/balance|money left overall/i.test(userPrompt)) {
-    const balanceItem = retrievedContext.find((item) => item.kind === 'balance');
-    return balanceItem?.content ?? `I found grounded local context, but not a matching balance summary.\n${bulletLines}`;
-  }
-
-  const categoryItem = retrievedContext.find((item) => item.kind === 'category-spending');
-  if (categoryItem) {
-    return `${categoryItem.content}\n\nSupporting local context:\n${bulletLines}`;
-  }
-
-  return `Grounded local context for your question:\n${bulletLines}`;
-}
-
 function trimCollapsedText(value: string, maxChars: number) {
   const collapsed = value.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= maxChars) {
@@ -344,88 +285,6 @@ function buildChatHistorySummary(chatHistory: Message[]) {
   const { activeTurns, summaryText } = manageContextWindow(chatHistory);
   const turnLines = activeTurns.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${trimCollapsedText(message.text, 220)}`);
   return [summaryText, ...turnLines].filter(Boolean).join('\n');
-}
-
-function hasUsableLocalInferenceBackend() {
-  const settings = useSettingsStore.getState();
-  if (settings.aiInferenceMode === 'external') {
-    return true;
-  }
-  return Platform.OS === 'android';
-}
-
-function canUseNativeLocalInference() {
-  if (!hasUsableLocalInferenceBackend()) {
-    return false;
-  }
-
-  const state = useAIStore.getState();
-  const runtimeAvailability = getAIRuntimeAvailability({
-    provisioning: state.provisioning,
-    runtimeReady: state.runtimeReady,
-    warmupPending: state.warmupPending,
-    runtime: state.runtime,
-  });
-  return runtimeAvailability.canRunNativeChat;
-}
-
-export async function ensureLocalRuntimeReady(onStatusChange?: (status: string) => void) {
-  const settings = useSettingsStore.getState();
-  if (settings.aiInferenceMode === 'external') {
-    onStatusChange?.('External API mode ready.');
-    return;
-  }
-
-  if (!hasUsableLocalInferenceBackend()) {
-    onStatusChange?.('Local inference backend unavailable.');
-    throw new Error(buildLocalInferenceUnavailableMessage());
-  }
-
-  const manager = getModelLifecycleManager();
-  await manager.initialize();
-
-  if (!canUseNativeLocalInference()) {
-    onStatusChange?.('Preparing local model...');
-    await manager.startProvisioningIfNeeded();
-  }
-
-  if (!canUseNativeLocalInference()) {
-    throw new Error(buildOfflineProvisioningMessage());
-  }
-}
-
-function answerStructuredPrompt(userPrompt: string): string | null {
-  const normalizedPrompt = userPrompt.toLowerCase();
-
-  if (normalizedPrompt.includes('total balance') || normalizedPrompt.includes('money left overall')) {
-    const total = getTotalBalance();
-    return `Your total balance is ${formatCurrency(total)} based on your local records.`;
-  }
-
-  if (normalizedPrompt.includes('recent transactions') || normalizedPrompt.includes('latest transactions')) {
-    const rows = getRecentTransactions();
-    if (rows.length === 0) {
-      return 'You do not have any transactions recorded yet.';
-    }
-
-    const lines = rows
-      .map((row) => `- ${row.merchant_name || 'Unknown merchant'} · ${formatCurrency(row.total_amount)} · ${row.category || 'Uncategorized'}`)
-      .join('\n');
-
-    return `Here are your most recent transactions:\n${lines}`;
-  }
-
-  if (normalizedPrompt.includes('spent on') || normalizedPrompt.includes('spend on')) {
-    const { category, days } = findCategorySpending(userPrompt);
-    if (!category) {
-      return 'Tell me which category you want to check, for example: How much did I spend on food in the last 30 days?';
-    }
-
-    const total = getCategorySpending(category, days);
-    return `You spent ${formatCurrency(total)} on ${category} in the last ${days} days based on your offline records.`;
-  }
-
-  return null;
 }
 
 function escapeChatSegment(value: string) {
@@ -571,418 +430,236 @@ export function buildExternalMessagesForMode(
   return messages;
 }
 
-function publishGenerationText(text: string, requestId: string, onStatusChange?: (status: string) => void) {
-  const state = useAIStore.getState();
-  if (state.runtime.activeGenerationRequestId !== requestId) {
-    throw Object.assign(new Error('Local generation was cancelled.'), { code: 'generation-cancelled' });
-  }
-
-  state.setStreamingResponseText(text);
-  onStatusChange?.('Assistant response ready.');
-  return text;
-}
-
-export async function cancelActiveLocalGeneration(reason = 'Generation cancelled by user.') {
-  const state = useAIStore.getState();
-  const requestId = state.runtime.activeGenerationRequestId;
-  if (!requestId) {
-    return false;
-  }
-
-  state.appendLog({
-    level: 'warn',
-    event: 'generation-cancel-requested',
-    message: reason,
-    details: { requestId },
-  });
-
-  try {
-    await getLlamaRnAdapter().stopCompletion();
-  } catch (error) {
-    state.appendLog({
-      level: 'warn',
-      event: 'generation-cancel-bridge-error',
-      message: getErrorMessage(error, 'Native cancelGeneration() failed.'),
-      details: { requestId },
-    });
-  } finally {
-    const latestState = useAIStore.getState();
-    latestState.setActiveGenerationRequestId(null);
-    latestState.setStreamingResponseText('');
-    latestState.setActiveStatusLabel('Cancelled', null);
-    latestState.setRuntimeError({
-      code: 'generation-cancelled',
-      message: reason,
-      recoverable: true,
-    });
-  }
-
-  return true;
-}
-
-function buildGenerationStatusLabel(result: LocalGenerationResult) {
-  if (typeof result.tokensPerSecond === 'number' && result.tokensPerSecond > 0) {
-    return `Generating response locally... ${result.tokensPerSecond} tok/s`;
-  }
-
-  return 'Generating response locally...';
-}
-
-function appendGenerationLog(metrics: LocalGenerationMetrics) {
-  useAIStore.getState().appendLog({
-    level: metrics.status === 'error' ? 'error' : metrics.status === 'cancelled' ? 'warn' : 'info',
-    event: `generation-${metrics.status}`,
-    message: `Local assistant generation ${metrics.status}.`,
-    details: metrics as unknown as Record<string, unknown>,
-  });
-}
-
-function appendInferenceTraceLog(
-  level: 'info' | 'warn' | 'error',
-  event: string,
-  message: string,
-  details?: Record<string, unknown>,
-) {
-  useAIStore.getState().appendLog({
-    level,
-    event,
-    message,
-    details,
-  });
-}
-
-function appendRuntimeDiagnosticsLog(
-  requestId: string,
-  runtimeInfo: LocalRuntimeInfo | null | undefined,
-  mode: LocalAiMode,
-  generationResult?: LocalGenerationResult,
-) {
-  if (!runtimeInfo) {
-    return;
-  }
-
-  useAIStore.getState().appendLog({
-    level: 'info',
-    event: 'runtime-generation-diagnostics',
-    message: 'Native runtime diagnostics captured for local generation.',
-    details: {
-      requestId,
-      mode,
-      backend: runtimeInfo.backend,
-      version: runtimeInfo.version ?? null,
-      loadedModelPath: runtimeInfo.loadedModelPath ?? null,
-      loadedModelFamily: runtimeInfo.loadedModelFamily ?? null,
-      loadedModelQuantization: runtimeInfo.loadedModelQuantization ?? null,
-      abi: runtimeInfo.abi ?? null,
-      supportsStreaming: runtimeInfo.supportsStreaming,
-      maxContextTokens: runtimeInfo.maxContextTokens ?? null,
-      isModelLoaded: runtimeInfo.isModelLoaded ?? null,
-      configuredContextTokens: runtimeInfo.configuredContextTokens ?? null,
-      configuredCpuThreads: runtimeInfo.configuredCpuThreads ?? null,
-      configuredGpuLayers: runtimeInfo.configuredGpuLayers ?? null,
-      configuredBatchTokens: runtimeInfo.configuredBatchTokens ?? null,
-      configuredUseFlashAttention: runtimeInfo.configuredUseFlashAttention ?? null,
-      configuredUseMlock: runtimeInfo.configuredUseMlock ?? null,
-      resolvedContextTokens: runtimeInfo.resolvedContextTokens ?? null,
-      resolvedBatchTokens: runtimeInfo.resolvedBatchTokens ?? null,
-      resolvedMicroBatchTokens: runtimeInfo.resolvedMicroBatchTokens ?? null,
-      resolvedThreads: runtimeInfo.resolvedThreads ?? null,
-      resolvedThreadsBatch: runtimeInfo.resolvedThreadsBatch ?? null,
-      resolvedOffloadKqv: runtimeInfo.resolvedOffloadKqv ?? null,
-      estimatedGpuOffloadRequested: runtimeInfo.estimatedGpuOffloadRequested ?? null,
-      gpuOffloadSupportedByBuild: runtimeInfo.gpuOffloadSupportedByBuild ?? null,
-      detectedBackendDeviceCount: runtimeInfo.detectedBackendDeviceCount ?? null,
-      detectedVulkanDeviceCount: runtimeInfo.detectedVulkanDeviceCount ?? null,
-      detectedBackendSummary: runtimeInfo.detectedBackendSummary ?? null,
-      detectedVulkanDevices: runtimeInfo.detectedVulkanDevices ?? null,
-      likelyCpuOnlyRuntime: runtimeInfo.likelyCpuOnlyRuntime ?? null,
-      lastPromptTokens: runtimeInfo.lastPromptTokens ?? null,
-      lastCompletionTokens: runtimeInfo.lastCompletionTokens ?? null,
-      lastPromptEvalDurationMs: runtimeInfo.lastPromptEvalDurationMs ?? null,
-      lastGenerationEvalDurationMs: runtimeInfo.lastGenerationEvalDurationMs ?? null,
-      lastTotalDurationMs: runtimeInfo.lastTotalDurationMs ?? null,
-      lastStopReason: runtimeInfo.lastStopReason ?? null,
-      generationResultPromptTokens: generationResult?.promptTokens ?? null,
-      generationResultCompletionTokens: generationResult?.completionTokens ?? null,
-      generationResultPromptEvalDurationMs: generationResult?.promptEvalDurationMs ?? null,
-      generationResultGenerationEvalDurationMs: generationResult?.generationEvalDurationMs ?? null,
-      generationResultTotalDurationMs: generationResult?.totalDurationMs ?? null,
-      generationResultStopReason: generationResult?.stopReason ?? null,
-      runtimeMatchesGeneration:
-        generationResult == null
-          ? null
-          : {
-              promptTokens:
-                runtimeInfo.lastPromptTokens === undefined || generationResult.promptTokens === undefined
-                  ? null
-                  : runtimeInfo.lastPromptTokens === generationResult.promptTokens,
-              completionTokens:
-                runtimeInfo.lastCompletionTokens === undefined || generationResult.completionTokens === undefined
-                  ? null
-                  : runtimeInfo.lastCompletionTokens === generationResult.completionTokens,
-              promptEvalDurationMs:
-                runtimeInfo.lastPromptEvalDurationMs === undefined || generationResult.promptEvalDurationMs === undefined
-                  ? null
-                  : runtimeInfo.lastPromptEvalDurationMs === generationResult.promptEvalDurationMs,
-              generationEvalDurationMs:
-                runtimeInfo.lastGenerationEvalDurationMs === undefined || generationResult.generationEvalDurationMs === undefined
-                  ? null
-                  : runtimeInfo.lastGenerationEvalDurationMs === generationResult.generationEvalDurationMs,
-              totalDurationMs:
-                runtimeInfo.lastTotalDurationMs === undefined || generationResult.totalDurationMs === undefined
-                  ? null
-                  : runtimeInfo.lastTotalDurationMs === generationResult.totalDurationMs,
-              stopReason:
-                runtimeInfo.lastStopReason == null || generationResult.stopReason == null
-                  ? null
-                  : runtimeInfo.lastStopReason === generationResult.stopReason,
-            },
-    },
-  });
-}
-
-async function runLocalGeneration(request: LocalGenerationRequest, mode: LocalAiMode, onStatusChange?: (status: string) => void) {
-  const state = useAIStore.getState();
-  const bridge = {
-    generate: async (_req: unknown): Promise<LocalGenerationResult> => ({
-      text: '',
-      queueDurationMs: 0,
-      promptEvalDurationMs: 0,
-      generationEvalDurationMs: 0,
-      totalDurationMs: 0,
-      tokensPerSecond: 0,
-      stopReason: 'stop' as const,
-      promptTokens: 0,
-      completionTokens: 0,
-    }),
-    getRuntimeInfo: async (): Promise<LocalRuntimeInfo> => getLlamaRnAdapter().getRuntimeInfo(),
-  };
-  const requestId = request.requestId ?? `req-${Date.now()}`;
-  const startedAt = new Date().toISOString();
-  const startedAtMs = Date.now();
-  const metrics: LocalGenerationMetrics = {
-    requestId,
-    startedAt,
-    promptChars: request.prompt.length,
-    mode,
-    status: 'running',
-  };
-
-  appendInferenceTraceLog('info', 'generation-request-received', 'Local generation request received by JS orchestrator.', {
-    requestId,
-    mode,
-    promptChars: request.prompt.length,
-    maxTokens: request.maxTokens ?? null,
-    temperature: request.temperature ?? null,
-    topP: request.topP ?? null,
-    stopTokens: request.stop ?? [],
-    stream: request.stream ?? false,
-    runtimeState: state.runtime.runtimeState,
-    runtimeReady: state.runtimeReady,
-    modelLoaded: state.runtime.modelLoaded,
-    generationHealthy: state.runtime.generationHealthy,
-    activeGenerationRequestId: state.runtime.activeGenerationRequestId,
-  });
-
-  state.setActiveGenerationRequestId(requestId);
-  state.setStreamingResponseText('');
-  state.setActiveStatusLabel('Generating response locally...');
-  state.setRuntimeError(null);
-  appendGenerationLog({ ...metrics, status: 'queued' });
-  appendInferenceTraceLog('info', 'generation-enqueued', 'Generation request enqueued in JS state and dispatched to native bridge.', {
-    requestId,
-    queuedAt: startedAt,
-  });
-  onStatusChange?.('Generating response locally...');
-
-  try {
-    appendInferenceTraceLog('info', 'generation-dispatch-native', 'Dispatching generation request to native bridge.', {
-      requestId,
-      dispatchDelayMs: Date.now() - startedAtMs,
-    });
-    const result = await bridge.generate({
-      ...request,
-      requestId,
-    });
-
-    appendInferenceTraceLog('info', 'generation-native-resolved', 'Native bridge generation call resolved.', {
-      requestId,
-      nativeRoundTripMs: Date.now() - startedAtMs,
-      queueDurationMs: result.queueDurationMs ?? null,
-      promptEvalDurationMs: result.promptEvalDurationMs ?? null,
-      generationEvalDurationMs: result.generationEvalDurationMs ?? null,
-      totalDurationMs: result.totalDurationMs ?? null,
-      tokensPerSecond: result.tokensPerSecond ?? null,
-      stopReason: result.stopReason ?? null,
-      promptTokens: result.promptTokens ?? null,
-      completionTokens: result.completionTokens ?? null,
-      textChars: result.text.length,
-    });
-
-    const runtimeInfo = await bridge.getRuntimeInfo();
-    state.setRuntimeInfo(runtimeInfo);
-    appendRuntimeDiagnosticsLog(requestId, runtimeInfo, mode, result);
-    appendInferenceTraceLog('info', 'generation-runtime-snapshot', 'Captured runtime snapshot after native generation.', {
-      requestId,
-      backend: runtimeInfo.backend,
-      loadedModelPath: runtimeInfo.loadedModelPath ?? null,
-      configuredGpuLayers: runtimeInfo.configuredGpuLayers ?? null,
-      estimatedGpuOffloadRequested: runtimeInfo.estimatedGpuOffloadRequested ?? null,
-      gpuOffloadSupportedByBuild: runtimeInfo.gpuOffloadSupportedByBuild ?? null,
-      detectedBackendDeviceCount: runtimeInfo.detectedBackendDeviceCount ?? null,
-      detectedVulkanDeviceCount: runtimeInfo.detectedVulkanDeviceCount ?? null,
-      detectedBackendSummary: runtimeInfo.detectedBackendSummary ?? null,
-      detectedVulkanDevices: runtimeInfo.detectedVulkanDevices ?? null,
-      likelyCpuOnlyRuntime: runtimeInfo.likelyCpuOnlyRuntime ?? null,
-      fallbackReason:
-        runtimeInfo.estimatedGpuOffloadRequested && runtimeInfo.likelyCpuOnlyRuntime
-          ? runtimeInfo.gpuOffloadSupportedByBuild
-            ? 'gpu-requested-but-no-vulkan-devices-detected'
-            : 'gpu-requested-but-build-has-no-gpu-offload-support'
-          : null,
-    });
-
-    const cleanedText = sanitizeModelText(result.text);
-    onStatusChange?.(buildGenerationStatusLabel(result));
-    const streamedText = publishGenerationText(cleanedText, requestId, onStatusChange);
-    state.setStreamingResponseText(streamedText);
-    state.setActiveStatusLabel('Response ready', null);
-
-    appendGenerationLog({
-      ...metrics,
-      finishedAt: new Date().toISOString(),
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      totalDurationMs: result.totalDurationMs,
-      queueDurationMs: result.queueDurationMs,
-      promptEvalDurationMs: result.promptEvalDurationMs,
-      generationEvalDurationMs: result.generationEvalDurationMs,
-      tokensPerSecond: result.tokensPerSecond,
-      status: result.stopReason === 'cancelled' ? 'cancelled' : 'complete',
-      stopReason: result.stopReason ?? null,
-    });
-    appendInferenceTraceLog('info', 'generation-complete', 'JS orchestration completed local generation successfully.', {
-      requestId,
-      totalElapsedMs: Date.now() - startedAtMs,
-      finalTextChars: streamedText.length,
-      stopReason: result.stopReason ?? null,
-    });
-
-    return streamedText.trim();
-  } catch (error) {
-    const latestState = useAIStore.getState();
-    const message = getErrorMessage(error, 'Local assistant generation failed.');
-    const isCancelled = typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'generation-cancelled';
-
-    appendGenerationLog({
-      ...metrics,
-      finishedAt: new Date().toISOString(),
-      status: isCancelled ? 'cancelled' : 'error',
-      errorMessage: message,
-    });
-    appendInferenceTraceLog(isCancelled ? 'warn' : 'error', isCancelled ? 'generation-cancelled' : 'generation-failed', 'Local generation failed inside JS orchestration.', {
-      requestId,
-      totalElapsedMs: Date.now() - startedAtMs,
-      errorMessage: message,
-      errorCode: typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code ?? null : null,
-    });
-
-    if (!isCancelled) {
-      latestState.setRuntimeError({
-        code: 'generation-failed',
-        message,
-        recoverable: true,
-      });
-    }
-
-    throw error;
-  } finally {
-    const latestState = useAIStore.getState();
-    if (latestState.runtime.activeGenerationRequestId === requestId) {
-      latestState.setActiveGenerationRequestId(null);
-    }
-    latestState.setActiveStatusLabel(null, null);
-    appendInferenceTraceLog('info', 'generation-finalized', 'JS generation finalizer completed.', {
-      requestId,
-      totalElapsedMs: Date.now() - startedAtMs,
-      runtimeState: latestState.runtime.runtimeState,
-      activeGenerationRequestId: latestState.runtime.activeGenerationRequestId,
-    });
-  }
-}
-
-export const askFinancialAgent = async (
-  userPrompt: string,
-  _apiKey: string | null,
-  _modelName: string | null,
-  mode: LocalAiMode,
-  onStatusChange?: (status: string) => void,
-): Promise<string> => {
-  for (const pattern of injectionPatterns) {
-    if (pattern.test(userPrompt)) {
-      return '🛡️ **GUARDRAIL TRIGGERED:** Potential prompt injection detected. Request blocked.';
-    }
-  }
-
-  const shouldRequireNativeRuntime = mode === 'chat';
-
-  if (shouldRequireNativeRuntime) {
-    await ensureLocalRuntimeReady(onStatusChange);
-    onStatusChange?.('Running local inference...');
-  } else {
-    onStatusChange?.('Retrieving grounded local context...');
-  }
-
-  const structuredAnswer = answerStructuredPrompt(userPrompt);
-  if (structuredAnswer) {
-    return structuredAnswer;
-  }
-
-  if (mode === 'rag') {
-    const retrievedContext = buildRetrievedContext(userPrompt);
-    if (retrievedContext.length === 0) {
-      return 'No grounded local context matched your question yet. Try asking about a merchant, category, balance, or recent transactions already stored on this device.';
-    }
-
-    if (!canUseNativeLocalInference()) {
-      return formatGroundedResponse(userPrompt, retrievedContext);
-    }
-
-    const prompt = buildPromptForMode(userPrompt, mode, useAIStore.getState(), retrievedContext);
-    return runLocalGeneration(
-      {
-        prompt,
-        maxTokens: QWEN_MODEL_MAX_GROUNDED_OUTPUT_TOKENS,
-        temperature: QWEN_MODEL_GROUNDED_TEMPERATURE,
-        topP: QWEN_MODEL_GROUNDED_TOP_P,
-        stop: [...QWEN_MODEL_STOP_TOKENS],
-      },
-      mode,
-      onStatusChange,
-    );
-  }
-
-  const prompt = buildPromptForMode(userPrompt, mode, useAIStore.getState());
-
-  return runLocalGeneration(
-    {
-      prompt,
-      maxTokens: QWEN_MODEL_MAX_OUTPUT_TOKENS,
-      temperature: QWEN_MODEL_DEFAULT_TEMPERATURE,
-      topP: QWEN_MODEL_DEFAULT_TOP_P,
-      stop: [...QWEN_MODEL_STOP_TOKENS],
-    },
-    mode,
-    onStatusChange,
-  );
-};
-
 export interface ParsedReceiptResult {
   merchantName?: string;
   totalAmount?: number;
   category?: string;
   lineItemsText?: string;
   date?: string;
+  rawText?: string;
+  totalNeedsReview?: boolean;
+}
+
+const RECEIPT_PROMPT_MAX_CHARS = 3000;
+
+const RECEIPT_SCHEMA_SYSTEM_PROMPT =
+  'You extract structured fields from Indonesian receipt OCR text. Output JSON matching the schema. ' +
+  'Indonesian amounts like 60.000 or 60,000 mean 60000 IDR (integers, no decimals). ' +
+  'Do not invent numbers not present in the OCR text. Use null for unknown merchant or date (YYYY-MM-DD).';
+
+export const VLM_SYSTEM_PROMPT =
+  'You extract structured fields from Indonesian receipt images. Output JSON matching the schema. ' +
+  'Indonesian amounts like 60.000 or 60,000 mean 60000 IDR (integers, no decimals). ' +
+  'Use null for unknown merchant or date (YYYY-MM-DD).';
+
+export const VLM_RECEIPT_PROMPT =
+  'Extract merchant, date (YYYY-MM-DD or null), total (integer IDR), and items (name, qty, price in integer IDR).';
+
+async function downscaleReceiptImage(uri: string): Promise<string> {
+  try {
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      if (typeof Image.getSize !== 'function') {
+        return reject(new Error('Image.getSize unavailable'));
+      }
+      Image.getSize(
+        uri,
+        (width, height) => resolve({ width, height }),
+        (err) => reject(err),
+      );
+    });
+
+    const longest = Math.max(dimensions.width, dimensions.height);
+    if (longest <= 768) {
+      return uri;
+    }
+
+    const resize = dimensions.width >= dimensions.height ? { width: 768 } : { height: 768 };
+    const manipResult = await manipulateAsync(uri, [{ resize }], {
+      compress: 0.85,
+      format: SaveFormat.JPEG,
+    });
+    return manipResult.uri;
+  } catch (error) {
+    console.warn('Failed to downscale receipt image with dimensions, attempting fallback resize:', error);
+    try {
+      const manipResult = await manipulateAsync(uri, [{ resize: { width: 768 } }], {
+        compress: 0.85,
+        format: SaveFormat.JPEG,
+      });
+      return manipResult.uri;
+    } catch {
+      return uri;
+    }
+  }
+}
+
+const RECEIPT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    merchant: { type: ['string', 'null'] },
+    date: { type: ['string', 'null'] },
+    total: { type: 'integer' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          qty: { type: ['integer', 'null'] },
+          price: { type: 'integer' },
+        },
+        required: ['name', 'qty', 'price'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['merchant', 'date', 'total', 'items'],
+  additionalProperties: false,
+};
+
+interface LlmReceiptPayload {
+  merchant?: string | null;
+  date?: string | null;
+  total?: number | string | null;
+  items?: Array<{ name?: unknown; qty?: unknown; price?: unknown }>;
+}
+
+function parseReceiptJsonWithRepair(content: string): LlmReceiptPayload | null {
+  const stripped = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(stripped) as LlmReceiptPayload;
+  } catch {
+    // Try trimming back to the last complete item object inside "items": [...]
+  }
+
+  const itemsIdx = stripped.indexOf('"items"');
+  if (itemsIdx !== -1) {
+    const bracketIdx = stripped.indexOf('[', itemsIdx);
+    if (bracketIdx !== -1) {
+      const lastBrace = stripped.lastIndexOf('}', bracketIdx);
+      if (lastBrace !== -1) {
+        try {
+          return JSON.parse(`${stripped.slice(0, lastBrace + 1)}\n  ]\n}`) as LlmReceiptPayload;
+        } catch {
+          // fall through
+        }
+      }
+      try {
+        return JSON.parse(`${stripped.slice(0, bracketIdx + 1)}]\n}`) as LlmReceiptPayload;
+      } catch {
+        // fall through
+      }
+    }
+  }
+
+  const totalMatch = stripped.match(/"total"\s*:\s*(-?\d+)/);
+  if (totalMatch) {
+    const merchantMatch = stripped.match(/"merchant"\s*:\s*(".*?"|null)/);
+    const dateMatch = stripped.match(/"date"\s*:\s*(".*?"|null)/);
+    let merchant: string | null = null;
+    let date: string | null = null;
+    if (merchantMatch) {
+      try {
+        merchant = JSON.parse(merchantMatch[1]);
+      } catch {
+        merchant = null;
+      }
+    }
+    if (dateMatch) {
+      try {
+        date = JSON.parse(dateMatch[1]);
+      } catch {
+        date = null;
+      }
+    }
+    return {
+      merchant,
+      date,
+      total: Number(totalMatch[1]),
+      items: [],
+    };
+  }
+
+  return null;
+}
+
+function formatReceiptItemsText(items: unknown): string | undefined {
+  if (!Array.isArray(items) || items.length === 0) {
+    return undefined;
+  }
+
+  const formatted: string[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { name?: unknown; qty?: unknown; price?: unknown };
+    const rawName = typeof record.name === 'string' ? record.name.trim() : '';
+    if (!rawName) continue;
+
+    const qty =
+      typeof record.qty === 'number' && Number.isFinite(record.qty) && record.qty > 1
+        ? Math.round(record.qty)
+        : null;
+    const name = qty ? `${qty}x ${rawName}` : rawName;
+
+    const rawPrice =
+      typeof record.price === 'number' && Number.isFinite(record.price)
+        ? Math.round(Math.abs(record.price))
+        : typeof record.price === 'string'
+          ? Math.round(Math.abs(parseSignedAmount(record.price)))
+          : 0;
+
+    if (rawPrice > 0) {
+      formatted.push(`${name} | ${rawPrice}`);
+    } else {
+      formatted.push(name);
+    }
+  }
+
+  return formatted.length > 0 ? formatted.join('\n') : undefined;
+}
+
+function isExternalConfiguredForReceipt(): boolean {
+  const settings = useSettingsStore.getState();
+  const url = (settings.externalApiUrl ?? '').trim();
+  const model = (settings.externalApiModel ?? '').trim();
+  if (!url || !model) {
+    return false;
+  }
+  if ((settings.externalApiKey ?? '').trim().length > 0) {
+    return true;
+  }
+  return /^https?:\/\/(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(url);
+}
+
+function isDateGrounded(isoDate: string, ocrText: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) return false;
+  const [, year, , day] = match;
+  const hasDay = new RegExp(`(^|\\D)0?${Number(day)}(\\D|$)`).test(ocrText);
+  return hasDay && (ocrText.includes(year) || new RegExp(`(^|\\D)${year.slice(2)}(\\D|$)`).test(ocrText));
+}
+
+async function canRunReceiptLlm(): Promise<boolean> {
+  const settings = useSettingsStore.getState();
+  if (settings.aiInferenceMode === 'external') {
+    return true;
+  }
+
+  const aiState = useAIStore.getState();
+  if (aiState.provisioning.status === 'ready' || (aiState.runtimeReady && aiState.runtime.modelLoaded)) {
+    return true;
+  }
+
+  if (await isActiveModelInstalled()) {
+    return true;
+  }
+
+  return isExternalConfiguredForReceipt();
 }
 
 export function filterReceiptOcrTextForAi(rawText: string): string {
@@ -1005,14 +682,13 @@ export function filterReceiptOcrTextForAi(rawText: string): string {
 
 export const analyzeReceiptImage = async (
   imageUri?: string,
-  base64Image?: string,
+  _base64Image?: string,
   onStatusChange?: (status: string) => void,
 ): Promise<ParsedReceiptResult | null> => {
   if (!imageUri) return null;
 
-  onStatusChange?.('Running MLKit OCR on image...');
+  onStatusChange?.('Reading text…');
 
-  // 1. Run local OCR
   const engineId = useSettingsStore.getState().ocrEngineId;
   const ocrEngine = getOcrEngine(engineId);
   const ocrResult = await ocrEngine.processImage(imageUri);
@@ -1020,74 +696,156 @@ export const analyzeReceiptImage = async (
     throw new Error('NO_TEXT_DETECTED');
   }
 
-  onStatusChange?.('Structuring receipt with AI...');
+  const rows =
+    ocrResult.rows && ocrResult.rows.length > 0
+      ? ocrResult.rows
+      : ocrResult.rawText
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+  const rawText = rows.join('\n') || ocrResult.rawText;
+  const heuristicTotal = pickTotalFromRows(rows) ?? ocrResult.extractedTotal ?? undefined;
 
-  // 2. Filter raw OCR text to keep prompt small and fast for the LLM
-  const filteredOcrText = filterReceiptOcrTextForAi(ocrResult.rawText);
+  const heuristicResult: ParsedReceiptResult = {
+    merchantName: ocrResult.extractedMerchant || undefined,
+    totalAmount: heuristicTotal,
+    category: ocrResult.extractedCategory || inferReceiptCategory(ocrResult.extractedMerchant ?? null, rawText) || undefined,
+    lineItemsText: ocrResult.extractedLineItems || undefined,
+    date: ocrResult.extractedDate || undefined,
+    rawText,
+  };
 
-  // 3. Construct direct prompt with assistant prefill to prevent <think> reasoning tokens
-  const prompt = `<|im_start|>system
-You are a fast financial receipt parser. Extract fields from the receipt into a single raw JSON object with keys: "merchantName" (string), "totalAmount" (integer number), "category" (one of ["Food & Dining","Groceries","Transport","Bills","Entertainment","Shopping"]), "date" (YYYY-MM-DD), "lineItemsText" (comma-separated items). In Indonesian receipts, amounts with dots like 60.000 mean 60000. Do NOT think or explain. Output JSON directly.<|im_end|>
-<|im_start|>user
-Receipt text:
-${filteredOcrText}
-<|im_end|>
-<|im_start|>assistant
-{"merchantName":`;
+  const { getGenerationService, isVisionAvailable } =
+    require('./generationService') as typeof import('./generationService');
 
-  try {
-    await ensureLocalRuntimeReady();
-    const { getGenerationService } = require('./generationService');
-    const responseText = await getGenerationService().startGeneration({
-      prompt,
-      mode: 'chat',
-      maxTokens: 80,
-      temperature: 0.1,
-      stop: ['}', '<|im_end|>'],
-      bypassChatTemplate: true,
-    });
+  if (useSettingsStore.getState().receiptReadingMode === 'vision' && (await isVisionAvailable())) {
+    onStatusChange?.('Reading receipt with AI vision…');
+    try {
+      const processedUri = await downscaleReceiptImage(imageUri);
+      const responseText = await getGenerationService().startGeneration({
+        imageUri: processedUri,
+        prompt: VLM_RECEIPT_PROMPT,
+        mode: 'chat',
+        systemPrompt: VLM_SYSTEM_PROMPT,
+        jsonSchema: RECEIPT_JSON_SCHEMA,
+        disableThinking: true,
+        maxTokens: 512,
+        temperature: 0,
+      });
 
-    let fullJsonText = responseText.trim();
-    if (!fullJsonText.startsWith('{')) {
-      fullJsonText = `{"merchantName":${fullJsonText}`;
-    }
-    if (!fullJsonText.endsWith('}')) {
-      fullJsonText = `${fullJsonText}}`;
-    }
-
-    const jsonMatch = fullJsonText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsedData = JSON.parse(jsonMatch[0]);
-      let totalAmount: number | undefined = undefined;
-      if (typeof parsedData.totalAmount === 'number') {
-        totalAmount = parsedData.totalAmount;
-      } else if (typeof parsedData.totalAmount === 'string') {
-        const clean = parseInt(parsedData.totalAmount.replace(/[^\d]/g, ''), 10);
-        if (!isNaN(clean) && clean > 0) totalAmount = clean;
+      const parsedData = parseReceiptJsonWithRepair(responseText);
+      if (!parsedData) {
+        throw new Error('FAILED_TO_PARSE_VISION_JSON');
       }
 
+      let visionTotal: number | undefined;
+      if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
+        visionTotal = Math.round(parsedData.total);
+      } else if (typeof parsedData.total === 'string') {
+        const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
+        if (clean > 0) visionTotal = clean;
+      }
+
+      const finalTotal = typeof visionTotal === 'number' && visionTotal > 0 ? visionTotal : heuristicTotal;
+      const totalNeedsReview = typeof finalTotal === 'number' ? !isGrounded(finalTotal, rows) : undefined;
+
+      const merchantName =
+        (typeof parsedData.merchant === 'string' && parsedData.merchant.trim()) ||
+        ocrResult.extractedMerchant ||
+        undefined;
+      const date =
+        (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
+        ocrResult.extractedDate ||
+        undefined;
+      const lineItemsText = formatReceiptItemsText(parsedData.items) || ocrResult.extractedLineItems || undefined;
+      const category =
+        ocrResult.extractedCategory ||
+        inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
+        undefined;
+
       return {
-        merchantName: parsedData.merchantName || ocrResult.extractedMerchant || undefined,
-        totalAmount: totalAmount ?? ocrResult.extractedTotal ?? undefined,
-        category: parsedData.category || ocrResult.extractedCategory || undefined,
-        lineItemsText: parsedData.lineItemsText || ocrResult.extractedLineItems || undefined,
-        date: parsedData.date || ocrResult.extractedDate || undefined,
+        merchantName,
+        totalAmount: finalTotal,
+        category,
+        lineItemsText,
+        date,
+        rawText,
+        totalNeedsReview,
+      };
+    } catch (visionError) {
+      console.warn('Vision extraction failed, falling back to text LLM / OCR heuristics:', visionError);
+    } finally {
+      getGenerationService().scheduleModelUnload(300_000);
+    }
+  }
+
+  if (!(await canRunReceiptLlm())) {
+    return heuristicResult;
+  }
+
+  onStatusChange?.('Structuring receipt with AI...');
+
+  try {
+    const responseText = await getGenerationService().startGeneration({
+      prompt: rawText.slice(0, RECEIPT_PROMPT_MAX_CHARS),
+      mode: 'chat',
+      maxTokens: 384,
+      temperature: 0,
+      systemPrompt: RECEIPT_SCHEMA_SYSTEM_PROMPT,
+      jsonSchema: RECEIPT_JSON_SCHEMA,
+      disableThinking: true,
+    });
+
+    const parsedData = parseReceiptJsonWithRepair(responseText);
+    if (parsedData) {
+      let llmTotal: number | undefined;
+      if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
+        llmTotal = Math.round(parsedData.total);
+      } else if (typeof parsedData.total === 'string') {
+        const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
+        if (clean > 0) llmTotal = clean;
+      }
+
+      let finalTotal: number | undefined = heuristicTotal;
+      if (typeof llmTotal === 'number' && llmTotal > 0) {
+        if (isGrounded(llmTotal, rows)) {
+          finalTotal = llmTotal;
+        } else {
+          console.warn(
+            `Receipt LLM total (${llmTotal}) is not grounded in OCR rows; falling back to heuristic total (${heuristicTotal ?? 'none'}).`,
+          );
+        }
+      }
+
+      const merchantName =
+        (typeof parsedData.merchant === 'string' && parsedData.merchant.trim()) ||
+        ocrResult.extractedMerchant ||
+        undefined;
+      // Small models invent plausible dates (bench: Qwen3.5-0.8B on 34/39 receipts); keep only dates visible in the OCR text.
+      const date =
+        (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
+        ocrResult.extractedDate ||
+        undefined;
+      const lineItemsText = formatReceiptItemsText(parsedData.items) || ocrResult.extractedLineItems || undefined;
+      const category =
+        ocrResult.extractedCategory ||
+        inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
+        undefined;
+
+      return {
+        merchantName,
+        totalAmount: finalTotal,
+        category,
+        lineItemsText,
+        date,
+        rawText,
       };
     }
   } catch (error) {
     console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
   } finally {
-    const { getGenerationService } = require('./generationService');
-    // Keep model resident in RAM for 5 minutes for consecutive receipt scans
     getGenerationService().scheduleModelUnload(300_000);
   }
 
-  // Fallback to high-accuracy OCR heuristics
-  return {
-    merchantName: ocrResult.extractedMerchant || undefined,
-    totalAmount: ocrResult.extractedTotal || undefined,
-    category: ocrResult.extractedCategory || undefined,
-    lineItemsText: ocrResult.extractedLineItems || undefined,
-    date: ocrResult.extractedDate || undefined,
-  };
+  return heuristicResult;
 };

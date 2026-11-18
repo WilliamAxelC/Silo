@@ -1,6 +1,6 @@
+import { Alert } from 'react-native';
 import { parseReceiptTextHeuristic, MlKitEngine } from '../MlKitEngine';
 import { PaddleOcrEngine } from '../PaddleOcrEngine';
-import { ExternalOcrEngine } from '../ExternalOcrEngine';
 import { getOcrEngine, scanReceiptNative } from '../index';
 
 describe('OCR Service & Receipt Heuristics', () => {
@@ -174,6 +174,19 @@ CASH 170000
       expect(result.extractedTotal).toBe(170000);
     });
 
+    it('formats extractedLineItems as newline-separated Name | integer rupiah lines', () => {
+      const rawText = [
+        'KOPI KENANGAN',
+        '1x Kopi Kenangan Mantan Rp 24.000',
+        '2x Roti Bakar 30.000',
+        'TOTAL BAYAR 54.000',
+      ].join('\n');
+
+      const result = parseReceiptTextHeuristic(rawText);
+      expect(result.extractedLineItems).toBe('1x Kopi Kenangan Mantan | 24000\n2x Roti Bakar | 30000');
+      expect(result.extractedTotal).toBe(54000);
+    });
+
     it('handles empty or whitespace-only receipt text gracefully', () => {
       expect(parseReceiptTextHeuristic('')).toEqual({
         extractedTotal: null,
@@ -201,6 +214,45 @@ CASH 170000
       expect(result.success).toBe(true);
       expect(result.rawText).toContain('TOTAL 50000');
       expect(result.extractedTotal).toBe(50000);
+      expect(result.rows).toEqual(['TOTAL 50000', 'CASH 50000']);
+    });
+
+    it('builds visual rows from ML Kit blocks[].lines[] frames and extracts total & line items', async () => {
+      const TextRecognition = require('@react-native-ml-kit/text-recognition').default;
+      TextRecognition.recognize.mockResolvedValueOnce({
+        text: 'WARUNG NASI\nNasi Goreng\n50.000\nTotal Belanja\n50.000',
+        blocks: [
+          {
+            text: 'WARUNG NASI\nNasi Goreng\nTotal Belanja',
+            lines: [
+              { text: 'WARUNG NASI', frame: { left: 20, top: 10, width: 120, height: 22 } },
+              { text: 'Nasi Goreng', frame: { left: 10, top: 60, width: 110, height: 20 } },
+              { text: 'Total Belanja', frame: { left: 10, top: 110, width: 120, height: 20 } },
+            ],
+          },
+          {
+            text: '50.000\n50.000',
+            lines: [
+              { text: '50.000', frame: { left: 220, top: 61, width: 60, height: 20 } },
+              { text: '50.000', frame: { left: 220, top: 111, width: 60, height: 20 } },
+            ],
+          },
+        ],
+      });
+
+      const engine = new MlKitEngine();
+      const result = await engine.processImage('file:///mock/blocks.jpg');
+
+      expect(result.success).toBe(true);
+      expect(result.rows).toEqual([
+        'WARUNG NASI',
+        'Nasi Goreng  50.000',
+        'Total Belanja  50.000',
+      ]);
+      expect(result.rawText).toBe('WARUNG NASI\nNasi Goreng  50.000\nTotal Belanja  50.000');
+      expect(result.extractedMerchant).toBe('WARUNG NASI');
+      expect(result.extractedTotal).toBe(50000);
+      expect(result.extractedLineItems).toBe('Nasi Goreng | 50000');
     });
 
     it('handles empty text return from scanner gracefully', async () => {
@@ -215,7 +267,8 @@ CASH 170000
       expect(result.rawText).toBe('');
     });
 
-    it('handles scanner exceptions gracefully', async () => {
+    it('handles scanner exceptions gracefully without calling Alert.alert', async () => {
+      const alertSpy = jest.spyOn(Alert, 'alert');
       const TextRecognition = require('@react-native-ml-kit/text-recognition').default;
       TextRecognition.recognize.mockRejectedValueOnce(new Error('Scanner hardware failure'));
 
@@ -223,25 +276,36 @@ CASH 170000
       const result = await engine.processImage('file:///mock/error.jpg');
 
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).toBe('Scanner hardware failure');
+      expect(alertSpy).not.toHaveBeenCalled();
+      alertSpy.mockRestore();
     });
   });
 
-  describe('PaddleOcrEngine & ExternalOcrEngine', () => {
-    it('instantiates PaddleOcrEngine and handles errors safely', async () => {
+  describe('PaddleOcrEngine', () => {
+    it('runs row and heuristic parsing when PaddleOCR succeeds', async () => {
       const engine = new PaddleOcrEngine();
       const result = await engine.processImage('file:///mock/paddle.jpg');
-      // In jest environment without native module, it catches error and returns success: false
-      expect(result).toBeDefined();
-      expect(typeof result.success).toBe('boolean');
-    });
-
-    it('falls back to ML Kit engine for ExternalOcrEngine', async () => {
-      const engine = new ExternalOcrEngine();
-      const result = await engine.processImage('file:///mock/ext.jpg');
 
       expect(result.success).toBe(true);
-      expect(result.rawText).toBeDefined();
+      expect(result.rawText).toContain('TOTAL 50000');
+      expect(result.extractedTotal).toBe(50000);
+      expect(result.rows).toEqual(['TOTAL 50000']);
+    });
+
+    it('falls back to ML Kit when PaddleOCR throws', async () => {
+      const { PaddleOCR } = require('ppu-paddle-ocr/mobile');
+      (PaddleOCR as jest.Mock).mockImplementationOnce(() => ({
+        init: jest.fn(async () => {
+          throw new Error('ONNX unavailable');
+        }),
+        recognize: jest.fn(),
+      }));
+
+      const engine = new PaddleOcrEngine();
+      const result = await engine.processImage('file:///mock/paddle-fallback.jpg');
+      expect(result.success).toBe(true);
+      expect(result.extractedTotal).toBe(50000);
     });
   });
 
@@ -249,7 +313,6 @@ CASH 170000
     it('returns appropriate engine according to OcrEngineId', () => {
       expect(getOcrEngine('mlkit')).toBeInstanceOf(MlKitEngine);
       expect(getOcrEngine('paddleocr')).toBeInstanceOf(PaddleOcrEngine);
-      expect(getOcrEngine('external')).toBeInstanceOf(ExternalOcrEngine);
       expect(getOcrEngine('unknown' as any)).toBeInstanceOf(MlKitEngine);
     });
   });
