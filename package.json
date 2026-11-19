@@ -40,6 +40,7 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-device-info": "^15.0.2",
+    "react-native-document-scanner-plugin": "^2.0.4",
     "react-native-gifted-charts": "^1.4.76",
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "~5.6.0",

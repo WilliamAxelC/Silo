@@ -33,7 +33,8 @@ const DATE_DOT_YMD_REGEX = /\b(?:19|20)\d{2}\.(?:0?[1-9]|1[0-2])\.(?:0?[1-9]|[12
 const TIME_REGEX = /\b\d{1,2}:\d{2}(?::\d{2})?\b/g;
 const AMOUNT_TOKEN_REGEX = /(?<![A-Za-z0-9])(?:(?:Rp|IDR|@)\s*\.?\s*)?(\d+(?:[.,]\d+)*)(?![A-Za-z0-9])/gi;
 
-const TOTAL_CANDIDATE_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar|total|jumlah|tagihan|amount|netto)\b/i;
+// `TL` is the total line on Casio/Sharp cash registers (e.g. "TL  139,000"); only at row start.
+const TOTAL_CANDIDATE_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar|total|jumlah|tagihan|amount|netto)\b|^\s*tl\b/i;
 const TOTAL_PREFERRED_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar)\b/i;
 const TOTAL_EXCLUDE_REGEX =
   /\b(sub\s*total|subtotal|sub-total|sub_total|subttl|total\s*items?|total\s*qty|total\s*disc\.?|diskon|discount|kembali|kembalian|change|tunai|cash|ppn|tax|dpp|service)\b/i;

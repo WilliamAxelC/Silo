@@ -6,6 +6,7 @@ import { addMonths, isSameMonth } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { formatDisplayCurrency } from '../features/transactions/amount';
@@ -30,6 +31,7 @@ export const CashflowScreen = () => {
   const error = useTransactionStore((state) => state.error);
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
+  const queueItems = useReceiptQueueStore((s) => s.items);
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [refreshing, setRefreshing] = useState(false);
@@ -160,6 +162,9 @@ export const CashflowScreen = () => {
     );
   };
 
+  const queueReady = queueItems.filter((item) => item.status === 'done').length;
+  const queueWaiting = queueItems.filter((item) => item.status === 'pending' || item.status === 'processing').length;
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       {/* Search Bar */}
@@ -189,6 +194,22 @@ export const CashflowScreen = () => {
           </TouchableOpacity>
         ) : null}
       </View>
+
+      {queueReady + queueWaiting > 0 ? (
+        <TouchableOpacity
+          style={[styles.errorBanner, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
+          onPress={() => navigation.navigate('ReceiptInbox')}
+          accessibilityRole="button"
+          accessibilityLabel="Open Receipt Inbox"
+        >
+          <Ionicons name="receipt-outline" size={18} color={theme.primary} style={styles.errorBannerIcon} />
+          <Text style={[styles.errorBannerText, { color: theme.primary }]} numberOfLines={1}>
+            {queueReady > 0 ? `${queueReady} receipt${queueReady === 1 ? '' : 's'} ready to review` : 'Reading receipts…'}
+            {queueReady > 0 && queueWaiting > 0 ? ` · ${queueWaiting} reading` : ''}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.primary} />
+        </TouchableOpacity>
+      ) : null}
 
       {error ? (
         <View style={[styles.errorBanner, { backgroundColor: theme.expenseMuted, borderColor: theme.expense }]}>

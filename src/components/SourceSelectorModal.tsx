@@ -7,15 +7,22 @@ interface SourceSelectorModalProps {
   visible: boolean;
   onClose: () => void;
   onPickImage: (source: 'gallery' | 'camera') => void;
+  /** Receipt scanning: the camera button opens the document scanner and the gallery allows several photos. */
+  scanMode?: boolean;
 }
 
-export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visible, onClose, onPickImage }) => {
+export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visible, onClose, onPickImage, scanMode }) => {
   const theme = useAppTheme();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.modalTitle, { color: theme.text }]}>Select a Source</Text>
+          <Text style={[styles.modalTitle, { color: theme.text }]}>{scanMode ? 'Add receipts' : 'Select a Source'}</Text>
+          {scanMode ? (
+            <Text style={[styles.modalHint, { color: theme.textMuted }]}>
+              Scan or pick several at once; they are read in the background.
+            </Text>
+          ) : null}
           <View style={styles.modalActions}>
             <TouchableOpacity
               style={[styles.modalBtn, { backgroundColor: theme.primary }]}
@@ -32,8 +39,8 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
               accessibilityRole="button"
               accessibilityLabel="Take photo with camera"
             >
-              <Ionicons name="camera" size={34} color="#fff" />
-              <Text style={styles.modalBtnText}>Camera</Text>
+              <Ionicons name={scanMode ? 'scan' : 'camera'} size={34} color="#fff" />
+              <Text style={styles.modalBtnText}>{scanMode ? 'Scan' : 'Camera'}</Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
@@ -54,6 +61,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
   modalContent: { borderRadius: 18, padding: 18 },
   modalTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
+  modalHint: { fontSize: 12, textAlign: 'center', marginTop: -8, marginBottom: 14 },
   modalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   modalBtn: { flex: 1, minHeight: 108, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalBtnText: { marginTop: 8, color: '#fff', fontWeight: '700' },

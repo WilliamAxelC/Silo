@@ -86,3 +86,10 @@ if (Image) {
 
 
 
+
+jest.mock('react-native-document-scanner-plugin', () => ({
+  __esModule: true,
+  default: { scanDocument: jest.fn(() => Promise.resolve({ status: 'cancel', scannedImages: [] })) },
+  ResponseType: { Base64: 'base64', ImageFilePath: 'imageFilePath' },
+  ScanDocumentResponseStatus: { Success: 'success', Cancel: 'cancel' },
+}));

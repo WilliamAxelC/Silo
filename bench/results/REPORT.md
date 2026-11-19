@@ -119,3 +119,33 @@ Largest remaining item: llama.rn ships 7 CPU-feature variants of llama.cpp (~62 
 †Run on ai-renderer while Android builds shared the CPU; latencies are pessimistic.
 
 Donut on all 197 images: CORD 142/143, CORD-degraded 31/39, non-CORD 0/7. It reads CORD-layout receipts almost perfectly and fails every other receipt; the CORD test split is held out from its training, so this is overfitting to the layout, not leakage. The CORD-tuned Qwen3-VL extracts line items better (93% vs 80%) but loses totals on non-CORD receipts and is 4x slower than the 0.8B. **Decision: keep the general Qwen3.5 VLM for "Accurate" mode.** The 7 non-CORD receipts are too few to rank models on generalization alone; adding the user's own receipt photos to `labels.jsonl` is the most valuable next dataset step.
+
+## Addendum 3: owner's own receipts, confidence score, document-scanner crop
+
+16 phone photos of real receipts from the app's owner (kept out of git under `bench/data/`, which is ignored; they contain personal data).
+14 have a scorable IDR total (one photo has the total cut off, one is in Malaysian ringgit); two photos hold two receipts each, where either receipt's total counts.
+OCR here is RapidOCR, a stand-in for ML Kit.
+
+| Approach | Totals | Item prices | Median time (4 CPU threads) |
+|---|---|---|---|
+| Fast mode (OCR + `receiptText.ts`, with the new `TL` keyword) | 10/14 (71%) | n/a | ~7 s OCR |
+| Qwen3.5-0.8B vision, 768 px | **13/14 (93%)** | 27/34 (79%) | 22 s |
+| Qwen3.5-0.8B vision, 1280 px | 13/14 (93%) | 28/34 (82%) | 53 s |
+| Qwen3.5-2B vision, 768 px | 11/14 (79%) | 26/34 (76%) | 53 s |
+| Qwen3.5-2B vision, 1280 px | 13/14 (93%) | 26/34 (76%) | 140 s |
+| 0.8B, 768 px, OpenCV auto-crop | 12/14 (86%) | 26/34 (76%) | 25 s |
+| 0.8B, 768 px, hand crop (best-case document scanner) | 12/14 (86%) | 30/34 (88%) | 21 s |
+
+Cropping to the receipt did not improve totals on these photos (they are already reasonably framed) but raised item-price recall.
+The app therefore offers the system document scanner (ML Kit Document Scanner / VisionKit) as the camera path for its capture UX and batch scanning, not as mandatory preprocessing.
+
+**Confidence score** (`src/services/ocr/receiptConfidence.ts`), evaluated on subset S plus these photos with the app's own code:
+
+| Mode | high | medium | low |
+|---|---|---|---|
+| Vision 0.8B (n=53) | 34/35 correct | 6/6 | 8/12 |
+| Fast mode (n=203) | 69/72 correct | 78/109 | 2/22 |
+
+Rules: the total must appear in the OCR text (else low); it is high when it also matches the OCR TOTAL line (vision mode) or the items sum to within 0.8–1.3× of it; fewer than 4 readable rows is low.
+
+Scripts: `bench/eval/score_runs.py` (scores run JSONL against any labels file, `SILO_LABELS`), `bench/eval/docscan_normalize.py` (OpenCV crop). `SILO_LABELS`, `SILO_RUNS_DIR` and `SILO_OCR_CACHE` point the existing scripts at another dataset.

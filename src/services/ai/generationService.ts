@@ -313,6 +313,9 @@ class GenerationService {
   private activeExternalXhr: XMLHttpRequest | null = null;
   private readonly llamaRnAdapter = getLlamaRnAdapter();
   private unloadTimer: ReturnType<typeof setTimeout> | null = null;
+  // One model context: chat, single scans and the background receipt queue take turns.
+  private generationTail: Promise<unknown> = Promise.resolve();
+  private pendingGenerations = 0;
 
   private applyLlamaRuntimeLoading(runtimeInfo?: LocalRuntimeInfo | null) {
     const state = useAIStore.getState();
@@ -406,7 +409,21 @@ class GenerationService {
     }, delayMs);
   }
 
-  async startGeneration(params: StartGenerationParams): Promise<string> {
+  startGeneration(params: StartGenerationParams): Promise<string> {
+    const start = () => this.runGeneration(params);
+    // Start synchronously when idle; otherwise wait for every earlier request to settle.
+    const run = this.pendingGenerations === 0 ? start() : this.generationTail.then(start, start);
+    this.pendingGenerations += 1;
+    this.generationTail = run.then(
+      () => undefined,
+      () => undefined,
+    ).then(() => {
+      this.pendingGenerations -= 1;
+    });
+    return run;
+  }
+
+  private async runGeneration(params: StartGenerationParams): Promise<string> {
     const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, disableThinking } = params;
     const settings = useSettingsStore.getState();
     if (settings.aiInferenceMode === 'external') {

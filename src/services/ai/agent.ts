@@ -5,6 +5,7 @@ import { isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
 import { isGrounded, pickTotalFromRows } from '../ocr/receiptText';
+import { assessReceiptConfidence, type ReceiptConfidence } from '../ocr/receiptConfidence';
 import { parseSignedAmount } from '../../features/transactions/amount';
 import { useAIStore, type Message } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -437,7 +438,30 @@ export interface ParsedReceiptResult {
   lineItemsText?: string;
   date?: string;
   rawText?: string;
-  totalNeedsReview?: boolean;
+  /** How far the total can be trusted; see receiptConfidence.ts. */
+  confidence?: ReceiptConfidence;
+  confidenceReasons?: string[];
+}
+
+function itemPricesFromText(lineItemsText: string | null | undefined): number[] {
+  return (lineItemsText ?? '')
+    .split('\n')
+    .map((line) => Number(line.split('|')[1]))
+    .filter((price) => Number.isFinite(price) && price > 0);
+}
+
+function withConfidence(
+  result: ParsedReceiptResult,
+  rows: string[],
+  independentTotal: number | null,
+): ParsedReceiptResult {
+  const { level, reasons } = assessReceiptConfidence({
+    total: result.totalAmount,
+    rows,
+    independentTotal,
+    itemPrices: itemPricesFromText(result.lineItemsText),
+  });
+  return { ...result, confidence: level, confidenceReasons: reasons };
 }
 
 const RECEIPT_PROMPT_MAX_CHARS = 3000;
@@ -703,7 +727,8 @@ export const analyzeReceiptImage = async (
           .map((line) => line.trim())
           .filter(Boolean);
   const rawText = rows.join('\n') || ocrResult.rawText;
-  const heuristicTotal = pickTotalFromRows(rows) ?? ocrResult.extractedTotal ?? undefined;
+  const keywordTotal = pickTotalFromRows(rows);
+  const heuristicTotal = keywordTotal ?? ocrResult.extractedTotal ?? undefined;
 
   const heuristicResult: ParsedReceiptResult = {
     merchantName: ocrResult.extractedMerchant || undefined,
@@ -745,8 +770,8 @@ export const analyzeReceiptImage = async (
         if (clean > 0) visionTotal = clean;
       }
 
-      const finalTotal = typeof visionTotal === 'number' && visionTotal > 0 ? visionTotal : heuristicTotal;
-      const totalNeedsReview = typeof finalTotal === 'number' ? !isGrounded(finalTotal, rows) : undefined;
+      const usedVisionTotal = typeof visionTotal === 'number' && visionTotal > 0;
+      const finalTotal = usedVisionTotal ? visionTotal : heuristicTotal;
 
       const merchantName =
         (typeof parsedData.merchant === 'string' && parsedData.merchant.trim()) ||
@@ -762,15 +787,11 @@ export const analyzeReceiptImage = async (
         inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
         undefined;
 
-      return {
-        merchantName,
-        totalAmount: finalTotal,
-        category,
-        lineItemsText,
-        date,
-        rawText,
-        totalNeedsReview,
-      };
+      return withConfidence(
+        { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
+        rows,
+        usedVisionTotal ? keywordTotal : null,
+      );
     } catch (visionError) {
       console.warn('Vision extraction failed, falling back to text LLM / OCR heuristics:', visionError);
     } finally {
@@ -779,7 +800,7 @@ export const analyzeReceiptImage = async (
   }
 
   if (!(await canRunReceiptLlm())) {
-    return heuristicResult;
+    return withConfidence(heuristicResult, rows, null);
   }
 
   onStatusChange?.('Structuring receipt with AI...');
@@ -806,9 +827,11 @@ export const analyzeReceiptImage = async (
       }
 
       let finalTotal: number | undefined = heuristicTotal;
+      let usedLlmTotal = false;
       if (typeof llmTotal === 'number' && llmTotal > 0) {
         if (isGrounded(llmTotal, rows)) {
           finalTotal = llmTotal;
+          usedLlmTotal = true;
         } else {
           console.warn(
             `Receipt LLM total (${llmTotal}) is not grounded in OCR rows; falling back to heuristic total (${heuristicTotal ?? 'none'}).`,
@@ -831,14 +854,11 @@ export const analyzeReceiptImage = async (
         inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
         undefined;
 
-      return {
-        merchantName,
-        totalAmount: finalTotal,
-        category,
-        lineItemsText,
-        date,
-        rawText,
-      };
+      return withConfidence(
+        { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
+        rows,
+        usedLlmTotal ? keywordTotal : null,
+      );
     }
   } catch (error) {
     console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
@@ -846,5 +866,5 @@ export const analyzeReceiptImage = async (
     getGenerationService().scheduleModelUnload(300_000);
   }
 
-  return heuristicResult;
+  return withConfidence(heuristicResult, rows, null);
 };

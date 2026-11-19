@@ -12,7 +12,7 @@ function load(p) {
   return m.exports;
 }
 const rt = load(R + '/src/services/ocr/receiptText.ts');
-const labels = fs.readFileSync(R + '/bench/labels.jsonl', 'utf8').trim().split('\n').map(JSON.parse).filter((g) => g.total != null);
+const labels = fs.readFileSync(process.env.SILO_LABELS || R + '/bench/labels.jsonl', 'utf8').trim().split('\n').map(JSON.parse).filter((g) => g.total != null);
 const S = new Set(JSON.parse(fs.readFileSync(R + '/bench/eval/subsets.json')).S || []);
 const pct = (a, n) => `${a}/${n} = ${n ? Math.round((100 * a) / n) : 0}%`;
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
@@ -23,7 +23,8 @@ for (const dir of process.argv.slice(2)) {
     const o = JSON.parse(fs.readFileSync(f)); if (o.ms != null) ms.push(o.ms);
     const lines = (o.boxes || []).map((b) => { const xs = b.box.map((p) => p[0]), ys = b.box.map((p) => p[1]);
       return { text: b.text, frame: { left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) } }; });
-    const rows = rt.buildReceiptRows(lines); const hit = rt.pickTotalFromRows(rows) === g.total;
+    const rows = rt.buildReceiptRows(lines); const got = rt.pickTotalFromRows(rows); const hit = (g.total_accept || [g.total]).includes(got);
+    if (process.env.VERBOSE) console.log(`  ${hit ? 'ok ' : 'BAD'} ${g.id} want ${g.total} got ${got}`);
     n++; ok += hit; ceil += rt.isGrounded(g.total, rows);
     if (S.has(g.id)) { nS++; okS += hit; }
     (bySrc[g.source] ??= [0, 0])[1]++; bySrc[g.source][0] += hit;

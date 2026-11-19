@@ -22,6 +22,8 @@ import { MoreScreen } from '../screens/MoreScreen';
 import { ChatbotScreen } from '../screens/ChatbotScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { SystemLogsScreen } from '../screens/SystemLogsScreen';
+import { ReceiptInboxScreen } from '../screens/ReceiptInboxScreen';
+import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -97,6 +99,7 @@ export const AppNavigator = () => {
   useEffect(() => {
     loadSettings();
     useTransactionStore.getState().initDB();
+    useReceiptQueueStore.getState().load();
     void getModelLifecycleManager().initialize();
 
     return () => {
@@ -128,6 +131,7 @@ export const AppNavigator = () => {
         AddTransactionStack: 'add/:transactionId?',
         Settings: 'settings',
         SystemLogs: 'logs',
+        ReceiptInbox: 'receipts',
       },
     },
   };
@@ -148,6 +152,7 @@ export const AppNavigator = () => {
           <Stack.Screen name="AddTransactionStack" component={AddTransactionScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
+          <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

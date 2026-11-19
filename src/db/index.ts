@@ -19,7 +19,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 8;
+const DB_SCHEMA_VERSION = 9;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -114,6 +114,21 @@ export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
     END;
 
     INSERT OR IGNORE INTO wallets (id, name, type) VALUES (1, 'Main Wallet', 'cash');
+  `);
+  createReceiptQueueTable(sqliteDb);
+}
+
+/** Receipts imported in bulk and read in the background; rows are removed once saved as transactions. */
+export function createReceiptQueueTable(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS receipt_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      image_uri TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      result_json TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    );
   `);
 }
 

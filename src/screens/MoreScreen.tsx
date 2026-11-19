@@ -80,6 +80,16 @@ export const MoreScreen = () => {
         ) : null}
 
         <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('ReceiptInbox')} accessibilityRole="button">
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="receipt-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text }]}>Receipt Inbox</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('SystemLogs')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="document-text-outline" size={20} color={theme.primary} />

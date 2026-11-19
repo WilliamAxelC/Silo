@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { AddTransactionScreen } from '../AddTransactionScreen';
 import { analyzeReceiptImage } from '../../services/ai/agent';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -148,6 +149,8 @@ describe('AddTransactionScreen', () => {
     expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith({
       mediaTypes: ['images'],
       quality: 0.8,
+      allowsMultipleSelection: false,
+      selectionLimit: 1,
     });
   });
 
@@ -264,7 +267,7 @@ describe('AddTransactionScreen', () => {
     expect(Alert.alert).toHaveBeenCalledWith('Delete Failed', 'Delete boom');
   });
 
-  it('shows warning hint when scan result has totalNeedsReview and clears on amount edit', async () => {
+  it('shows the low-confidence notice from a scan and clears it on amount edit', async () => {
     (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
       canceled: false,
       assets: [{ uri: 'file:///receipt.jpg' }],
@@ -273,7 +276,8 @@ describe('AddTransactionScreen', () => {
     (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({
       merchantName: 'Warung Vision',
       totalAmount: 85000,
-      totalNeedsReview: true,
+      confidence: 'low',
+      confidenceReasons: ["This total doesn't appear in the text read from the photo."],
       rawText: 'WARUNG VISION\nTOTAL BAYAR 85.000',
     });
 
@@ -291,11 +295,13 @@ describe('AddTransactionScreen', () => {
       await galleryBtn.props.onPress();
     });
 
-    const warningHint = renderer.root
-      .findAllByType(Text)
-      .find((t: any) => t.props.children === "Double-check the total — it wasn't found in the scanned text.");
-    expect(warningHint).toBeDefined();
-    expect(warningHint.props.accessibilityRole).toBe('alert');
+    const findNotice = () =>
+      renderer.root.findAllByType(Text).find((t: any) => t.props.children === 'Compare the total with the receipt');
+    expect(findNotice()).toBeDefined();
+    expect(
+      renderer.root.findAllByType(Text).some((t: any) => t.props.children === "This total doesn't appear in the text read from the photo.")
+    ).toBe(true);
+    expect(renderer.root.findAllByProps({ accessibilityRole: 'alert' }).length).toBeGreaterThan(0);
 
     // Clears when user edits the amount
     const amountInput = renderer.root.findByProps({ placeholder: '0' });
@@ -303,9 +309,32 @@ describe('AddTransactionScreen', () => {
       amountInput.props.onChangeText('90000');
     });
 
-    const warningHintAfterEdit = renderer.root
-      .findAllByType(Text)
-      .find((t: any) => t.props.children === "Double-check the total — it wasn't found in the scanned text.");
-    expect(warningHintAfterEdit).toBeUndefined();
+    expect(findNotice()).toBeUndefined();
+  });
+
+  it('sends several gallery picks from Scan to the Receipt Inbox instead of scanning one', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///a.jpg' }, { uri: 'file:///b.jpg' }],
+    });
+    const enqueue = jest.spyOn(useReceiptQueueStore.getState(), 'enqueue').mockResolvedValue();
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ allowsMultipleSelection: true, selectionLimit: 0 })
+    );
+    expect(enqueue).toHaveBeenCalledWith(['file:///a.jpg', 'file:///b.jpg']);
+    expect(analyzeReceiptImage).not.toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
   });
 });

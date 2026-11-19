@@ -23,7 +23,11 @@ import { createTransactionInput, deriveEditableTransactionType, normalizeTransac
 import { buildEditableTransactionInput } from '../features/transactions/mappers';
 import type { TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
-import { analyzeReceiptImage } from '../services/ai/agent';
+import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
+import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfidence';
+import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
+import { ConfidenceNotice } from '../components/ConfidenceBadge';
+import { scanReceiptDocuments } from '../services/ocr/documentScanner';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -85,6 +89,7 @@ export const AddTransactionScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<AddTransactionScreenRouteProp>();
   const editingId = route.params?.transactionId;
+  const receiptQueueId = route.params?.receiptQueueId;
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const dateFormat = useSettingsStore((s) => s.dateFormat);
@@ -104,7 +109,7 @@ export const AddTransactionScreen = () => {
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [amountError, setAmountError] = useState<string | null>(null);
-  const [totalNeedsReview, setTotalNeedsReview] = useState(false);
+  const [scanConfidence, setScanConfidence] = useState<ReceiptConfidenceAssessment | null>(null);
   const [category, setCategory] = useState('');
   const [pendingScannedCategory, setPendingScannedCategory] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -151,7 +156,7 @@ export const AddTransactionScreen = () => {
     setTitle(nextForm.merchantName);
     setAmount('');
     setAmountError(null);
-    setTotalNeedsReview(false);
+    setScanConfidence(null);
     setCategory(nextForm.category);
     setPendingScannedCategory(null);
     setNote(nextForm.note ?? '');
@@ -176,7 +181,7 @@ export const AddTransactionScreen = () => {
         setTitle(editableTransaction.merchantName);
         setAmount(formatAmountInput(Math.round(Math.abs(editableTransaction.totalAmount)).toString()));
         setAmountError(null);
-        setTotalNeedsReview(false);
+        setScanConfidence(null);
         setType(editableType);
         setCategory(normalizeCategoryForType(editableTransaction.category, editableType));
         setPendingScannedCategory(null);
@@ -190,8 +195,15 @@ export const AddTransactionScreen = () => {
       }
     } else {
       resetForm();
+      const queued = receiptQueueId
+        ? useReceiptQueueStore.getState().items.find((item) => item.id === receiptQueueId)
+        : undefined;
+      if (queued?.result) {
+        setImageUri(queued.imageUri);
+        applyScanResult(queued.result);
+      }
     }
-  }, [editingId]);
+  }, [editingId, receiptQueueId]);
 
   const prevTypeRef = React.useRef(type);
   useEffect(() => {
@@ -235,7 +247,7 @@ export const AddTransactionScreen = () => {
   };
 
   const handleAmountChange = (text: string) => {
-    setTotalNeedsReview(false);
+    setScanConfidence(null);
     const formatted = formatAmountInput(text);
     setAmount(formatted);
     if (text.trim().length > 0) {
@@ -288,8 +300,28 @@ export const AddTransactionScreen = () => {
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 0.8,
+          // Scanning accepts several receipts at once; they go to the Receipt Inbox and are read in the background.
+          allowsMultipleSelection: target === 'scan',
+          selectionLimit: target === 'scan' ? 0 : 1,
         });
       } else {
+        if (target === 'scan') {
+          let scanned: string[] | null = null;
+          try {
+            scanned = await scanReceiptDocuments();
+          } catch (scannerError) {
+            console.warn('Document scanner unavailable, falling back to camera:', scannerError);
+          }
+          if (scanned) {
+            if (scanned.length > 1) {
+              await useReceiptQueueStore.getState().enqueue(scanned);
+              navigation.navigate('ReceiptInbox');
+            } else if (scanned.length === 1) {
+              processScanReceipt(scanned[0]);
+            }
+            return;
+          }
+        }
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) {
           Alert.alert('Camera Permission Required', 'Camera access is required to take photos of receipts.');
@@ -304,10 +336,54 @@ export const AddTransactionScreen = () => {
 
     if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
 
+    if (target === 'scan' && result.assets.length > 1) {
+      await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
+      navigation.navigate('ReceiptInbox');
+      return;
+    }
+
     if (target === 'scan') {
       processScanReceipt(result.assets[0].uri);
     } else {
       setImageUri(result.assets[0].uri);
+    }
+  };
+
+  const applyScanResult = (parsedData: ParsedReceiptResult) => {
+    setScanConfidence(
+      parsedData.confidence ? { level: parsedData.confidence, reasons: parsedData.confidenceReasons ?? [] } : null
+    );
+    const rawText = (parsedData as { rawText?: string }).rawText;
+    if (rawText) {
+      setRawOcrText(rawText);
+      setIsRawTextExpanded(false);
+    }
+    if (parsedData.merchantName) setTitle(parsedData.merchantName);
+    if (parsedData.totalAmount) {
+      setAmount(formatAmountInput(Math.round(Math.abs(parsedData.totalAmount)).toString()));
+      setAmountError(null);
+    }
+    if (parsedData.category) {
+      const detectedCategory = parsedData.category.trim();
+      const existingCategory = availableCategories.find(
+        (item) => item.name.toLowerCase() === detectedCategory.toLowerCase()
+      );
+      if (existingCategory) {
+        setCategory(existingCategory.name);
+        setPendingScannedCategory(null);
+      } else {
+        // Keep in form state, do NOT call addCategory during scan
+        setCategory(detectedCategory);
+        setPendingScannedCategory(detectedCategory);
+      }
+    }
+    if (parsedData.lineItemsText) {
+      setParsedLineItems(parsedData.lineItemsText);
+      setDetailsMode(note ? 'both' : 'receipt');
+    }
+    if (parsedData.date) {
+      const parsedDate = new Date(parsedData.date);
+      if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
     }
   };
 
@@ -336,39 +412,7 @@ export const AddTransactionScreen = () => {
       });
 
       if (parsedData) {
-        setTotalNeedsReview(Boolean(parsedData.totalNeedsReview));
-        const rawText = (parsedData as { rawText?: string }).rawText;
-        if (rawText) {
-          setRawOcrText(rawText);
-          setIsRawTextExpanded(false);
-        }
-        if (parsedData.merchantName) setTitle(parsedData.merchantName);
-        if (parsedData.totalAmount) {
-          setAmount(formatAmountInput(Math.round(Math.abs(parsedData.totalAmount)).toString()));
-          setAmountError(null);
-        }
-        if (parsedData.category) {
-          const detectedCategory = parsedData.category.trim();
-          const existingCategory = availableCategories.find(
-            (item) => item.name.toLowerCase() === detectedCategory.toLowerCase()
-          );
-          if (existingCategory) {
-            setCategory(existingCategory.name);
-            setPendingScannedCategory(null);
-          } else {
-            // Keep in form state, do NOT call addCategory during scan
-            setCategory(detectedCategory);
-            setPendingScannedCategory(detectedCategory);
-          }
-        }
-        if (parsedData.lineItemsText) {
-          setParsedLineItems(parsedData.lineItemsText);
-          setDetailsMode(note ? 'both' : 'receipt');
-        }
-        if (parsedData.date) {
-          const parsedDate = new Date(parsedData.date);
-          if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
-        }
+        applyScanResult(parsedData);
         setScanStatusLabel(null);
       } else {
         Alert.alert('Scan Result', 'Extracted image details. Review and adjust fields if needed.');
@@ -451,6 +495,10 @@ export const AddTransactionScreen = () => {
         await updateTransaction(editingId, data);
       } else {
         await addTransaction(data);
+        if (receiptQueueId) {
+          // The transaction now owns the receipt photo, so keep the file.
+          await useReceiptQueueStore.getState().remove(receiptQueueId, false);
+        }
       }
 
       navigation.navigate('MainTabs', { screen: 'Cashflow' });
@@ -632,14 +680,8 @@ export const AddTransactionScreen = () => {
               </View>
               {amountError ? (
                 <Text style={[styles.inlineErrorText, { color: theme.expense }]}>{amountError}</Text>
-              ) : totalNeedsReview ? (
-                <Text
-                  accessibilityRole="alert"
-                  accessibilityLiveRegion="polite"
-                  style={[styles.inlineWarningText, { color: theme.warning }]}
-                >
-                  Double-check the total — it wasn't found in the scanned text.
-                </Text>
+              ) : scanConfidence ? (
+                <ConfidenceNotice level={scanConfidence.level} reasons={scanConfidence.reasons} />
               ) : null}
             </View>
           </View>
@@ -847,6 +889,7 @@ export const AddTransactionScreen = () => {
         visible={sourceModalVisible}
         onClose={() => setSourceModalVisible(false)}
         onPickImage={pickImage}
+        scanMode={sourceModalTarget === 'scan'}
       />
 
       <CategorySelectorModal

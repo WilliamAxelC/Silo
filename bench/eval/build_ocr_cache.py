@@ -9,6 +9,7 @@ files are skipped unless --force is passed.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 import time
@@ -19,8 +20,8 @@ from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LABELS_PATH = REPO_ROOT / "bench" / "labels.jsonl"
-OCR_CACHE_DIR = REPO_ROOT / "bench" / "cache" / "ocr"
+LABELS_PATH = Path(os.environ.get("SILO_LABELS") or REPO_ROOT / "bench" / "labels.jsonl")
+OCR_CACHE_DIR = Path(os.environ.get("SILO_OCR_CACHE") or REPO_ROOT / "bench" / "cache" / "ocr")
 
 
 def build_mlkit_like(boxes: list[dict[str, Any]]) -> str:

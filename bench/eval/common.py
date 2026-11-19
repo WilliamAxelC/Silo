@@ -15,11 +15,11 @@ from typing import Any
 import requests
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LABELS_PATH = REPO_ROOT / "bench" / "labels.jsonl"
-OCR_CACHE_DIR = REPO_ROOT / "bench" / "cache" / "ocr"
+LABELS_PATH = Path(os.environ.get("SILO_LABELS") or REPO_ROOT / "bench" / "labels.jsonl")
+OCR_CACHE_DIR = Path(os.environ.get("SILO_OCR_CACHE") or REPO_ROOT / "bench" / "cache" / "ocr")
 SUBSETS_PATH = Path(__file__).resolve().parent / "subsets.json"
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
-RUNS_DIR = RESULTS_DIR / "runs"
+RUNS_DIR = Path(os.environ.get("SILO_RUNS_DIR") or REPO_ROOT / "bench" / "results" / "runs")
 
 LLAMA_BIN_DIR = Path(os.environ.get("LLAMA_BIN_DIR", "/home/agent/.cache/silo-bench/llama"))
 MODEL_TEXT_2B = os.environ.get("MODEL_TEXT_2B", "/home/agent/.cache/silo-bench/models/Qwen3.5-2B-Q4_K_M.gguf")

@@ -51,13 +51,13 @@ HYBRID_SYSTEM_PROMPT = (
 )
 
 
-def encode_image_768_b64(img_path: Path) -> tuple[str, tuple[int, int]]:
+def encode_image_768_b64(img_path: Path, max_side: int = 768) -> tuple[str, tuple[int, int]]:
     with Image.open(img_path) as im:
         im = ImageOps.exif_transpose(im).convert("RGB")
         w, h = im.size
         longest = max(w, h)
-        if longest > 768:
-            scale = 768.0 / longest
+        if longest > max_side:
+            scale = max_side / longest
             new_w = max(1, int(round(w * scale)))
             new_h = max(1, int(round(h * scale)))
             im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -82,13 +82,16 @@ def main() -> int:
     parser.add_argument("--approach", required=True, choices=["D", "D2", "E"])
     parser.add_argument("--port", type=int, default=8089)
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--subset", choices=["V", "S"], default="V")
+    parser.add_argument("--subset", choices=["V", "S", "ALL"], default="V")
+    parser.add_argument("--max-side", type=int, default=768, help="Longest image side sent to the model (app uses 768).")
+    parser.add_argument("--tag", default="", help="Suffix for the output file name.")
     args = parser.parse_args()
 
     labels = load_labels()
     subsets = load_subsets()
     heur_map = load_heuristic_map() if args.approach == "E" else {}
-    target_ids = subsets[args.subset][: args.limit] if args.limit > 0 else subsets[args.subset]
+    ids = list(labels) if args.subset == "ALL" else subsets[args.subset]
+    target_ids = ids[: args.limit] if args.limit > 0 else ids
 
     if args.approach == "D":
         model_path, mmproj_path, out_name = MODEL_TEXT_2B, MMPROJ_2B, "D_vlm_2b.jsonl"
@@ -97,6 +100,8 @@ def main() -> int:
     else:
         model_path, mmproj_path, out_name = MODEL_TEXT_2B, MMPROJ_2B, "E_hybrid_2b.jsonl"
 
+    if args.tag:
+        out_name = out_name.replace(".jsonl", f"_{args.tag}.jsonl")
     out_path = RUNS_DIR / out_name
     meta_path = RUNS_DIR / f"{args.approach}_meta.json"
     existing = load_existing_jsonl(out_path)
@@ -117,7 +122,7 @@ def main() -> int:
         for idx, rec_id in enumerate(todo, 1):
             rec = labels[rec_id]
             img_path = REPO_ROOT / rec["image"]
-            data_url, scaled_size = encode_image_768_b64(img_path)
+            data_url, scaled_size = encode_image_768_b64(img_path, args.max_side)
 
             if args.approach == "E":
                 ocr = load_ocr_cache(rec_id)

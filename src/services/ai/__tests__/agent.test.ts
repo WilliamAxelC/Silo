@@ -372,7 +372,7 @@ describe('AI Agent & Context Engine', () => {
     });
 
     describe('Vision Mode Receipt Flow', () => {
-      it('vision mode uses image + keeps total + sets totalNeedsReview when ungrounded', async () => {
+      it('vision mode uses image + keeps total + rates confidence low when ungrounded', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
           receiptReadingMode: 'vision',
@@ -400,7 +400,8 @@ describe('AI Agent & Context Engine', () => {
         expect(result).toBeDefined();
         expect(result?.merchantName).toBe('Vision Mart');
         expect(result?.totalAmount).toBe(999999);
-        expect(result?.totalNeedsReview).toBe(true);
+        expect(result?.confidence).toBe('low');
+        expect(result?.confidenceReasons?.[0]).toMatch(/doesn't appear/);
         expect(result?.date).toBe('2026-03-12');
         expect(result?.lineItemsText).toBe('Special Product | 999999');
 
@@ -416,7 +417,7 @@ describe('AI Agent & Context Engine', () => {
         expect(mockGenService.scheduleModelUnload).toHaveBeenCalledWith(300000);
       });
 
-      it('vision mode sets totalNeedsReview to false when total is grounded in OCR rows', async () => {
+      it('vision mode does not flag a total that is grounded in OCR rows', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
           receiptReadingMode: 'vision',
@@ -434,7 +435,7 @@ describe('AI Agent & Context Engine', () => {
 
         const result = await analyzeReceiptImage('file:///path/to/receipt.jpg');
         expect(result?.totalAmount).toBe(75000);
-        expect(result?.totalNeedsReview).toBe(false);
+        expect(result?.confidenceReasons?.join(' ')).not.toMatch(/doesn't appear/);
       });
 
       it('vision error falls back to text path', async () => {
@@ -482,7 +483,7 @@ describe('AI Agent & Context Engine', () => {
         const callArg = (mockGenService.startGeneration as jest.Mock).mock.calls[0][0];
         expect(callArg.imageUri).toBeUndefined();
         expect(callArg.systemPrompt).toContain('Indonesian receipt OCR text');
-        expect(result?.totalNeedsReview).toBeUndefined();
+        expect(result?.confidence).toBeDefined();
       });
     });
   });
