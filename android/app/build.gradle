@@ -180,3 +180,11 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// silo: ml-kit latin only
+configurations.all {
+    exclude group: 'com.google.mlkit', module: 'text-recognition-chinese'
+    exclude group: 'com.google.mlkit', module: 'text-recognition-devanagari'
+    exclude group: 'com.google.mlkit', module: 'text-recognition-japanese'
+    exclude group: 'com.google.mlkit', module: 'text-recognition-korean'
+}

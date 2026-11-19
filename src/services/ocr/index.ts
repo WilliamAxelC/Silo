@@ -1,17 +1,8 @@
 import { IOcrEngine } from './types';
-import { PaddleOcrEngine } from './PaddleOcrEngine';
 import { MlKitEngine, IS_NATIVE_OCR_SUPPORTED, FORCE_DISABLE_OCR, scanReceiptNative } from './MlKitEngine';
-import { OcrEngineId } from '../../features/transactions/types';
 
 export { IS_NATIVE_OCR_SUPPORTED, FORCE_DISABLE_OCR, scanReceiptNative };
 
-
-export const getOcrEngine = (engineId: OcrEngineId): IOcrEngine => {
-  switch (engineId) {
-    case 'paddleocr':
-      return new PaddleOcrEngine();
-    case 'mlkit':
-    default:
-      return new MlKitEngine();
-  }
-};
+// ML Kit only: PaddleOCR (ppu-paddle-ocr + onnxruntime + Skia) added 50 MB to the arm64 APK and scored
+// no better on the receipt benchmark (bench/results/REPORT.md, "OCR engines").
+export const getOcrEngine = (): IOcrEngine => new MlKitEngine();

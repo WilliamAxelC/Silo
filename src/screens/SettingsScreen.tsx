@@ -68,7 +68,6 @@ export const SettingsScreen = () => {
   const externalApiModel = useSettingsStore((s) => s.externalApiModel);
   const externalApiKey = useSettingsStore((s) => s.externalApiKey);
   const aiWifiOnlyDownload = useSettingsStore((s) => s.aiWifiOnlyDownload);
-  const ocrEngineId = useSettingsStore((s) => s.ocrEngineId);
   const receiptReadingMode = useSettingsStore((s) => s.receiptReadingMode);
 
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
@@ -82,7 +81,6 @@ export const SettingsScreen = () => {
   const setExternalApiUrl = useSettingsStore((s) => s.setExternalApiUrl);
   const setExternalApiModel = useSettingsStore((s) => s.setExternalApiModel);
   const setExternalApiKey = useSettingsStore((s) => s.setExternalApiKey);
-  const setOcrEngineId = useSettingsStore((s) => s.setOcrEngineId);
   const setReceiptReadingMode = useSettingsStore((s) => s.setReceiptReadingMode);
   const setAiWifiOnlyDownload = useSettingsStore((s) => s.setAiWifiOnlyDownload);
 
@@ -294,9 +292,35 @@ export const SettingsScreen = () => {
     setIsAiActionLoading(true);
     try {
       const manager = getModelLifecycleManager();
-      await manager.retryProvisioning();
+      if (provisioning.status === 'paused' || provisioning.canResume) {
+        await manager.resumeDownload();
+      } else {
+        await manager.retryProvisioning();
+      }
     } catch (error) {
       Alert.alert('AI Setup', getErrorMessage(error, 'Unable to continue model setup.'));
+    } finally {
+      setIsAiActionLoading(false);
+    }
+  };
+
+  const handleAiPause = async () => {
+    setIsAiActionLoading(true);
+    try {
+      await getModelLifecycleManager().pauseDownload();
+    } catch (error) {
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to pause download.'));
+    } finally {
+      setIsAiActionLoading(false);
+    }
+  };
+
+  const handleAiResume = async () => {
+    setIsAiActionLoading(true);
+    try {
+      await getModelLifecycleManager().resumeDownload();
+    } catch (error) {
+      Alert.alert('AI Setup', getErrorMessage(error, 'Unable to resume download.'));
     } finally {
       setIsAiActionLoading(false);
     }
@@ -724,8 +748,8 @@ export const SettingsScreen = () => {
                   High-performance quantized edge language model. Runs 100% locally on Android without internet connection.
                 </Text>
 
-                {/* Progress bar if downloading */}
-                {isDownloading && (
+                {/* Progress bar if downloading or paused */}
+                {(isDownloading || provisioning.status === 'paused') && (
                   <View style={styles.downloadProgressWrap}>
                     <View style={[styles.downloadTrack, { backgroundColor: theme.border }]}>
                       <View
@@ -737,9 +761,9 @@ export const SettingsScreen = () => {
                     </View>
                     <View style={styles.downloadMetaRow}>
                       <Text style={[styles.downloadMetaText, { color: theme.textMuted }]}>
-                        {progressPercent}% completed
+                        {progressPercent}% completed{provisioning.status === 'paused' ? ' (Paused)' : ''}
                       </Text>
-                      {throughputLabel && (
+                      {isDownloading && throughputLabel && (
                         <Text style={[styles.downloadMetaText, { color: theme.primary }]}>
                           Speed: {throughputLabel}
                         </Text>
@@ -757,7 +781,19 @@ export const SettingsScreen = () => {
 
                 {/* Model Action Buttons */}
                 <View style={styles.modelActionsRow}>
-                  {isInProgress && (
+                  {isDownloading && (
+                    <TouchableOpacity
+                      style={[styles.modelActionButton, { backgroundColor: theme.primaryMuted, borderColor: theme.primary, borderWidth: 1 }]}
+                      onPress={handleAiPause}
+                      disabled={isAiActionLoading}
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="pause-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                      <Text style={[styles.modelActionText, { color: theme.primary }]}>Pause</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {(isInProgress || provisioning.status === 'paused') && (
                     <TouchableOpacity
                       style={[styles.modelActionButton, { backgroundColor: theme.expense }]}
                       onPress={handleAiCancel}
@@ -790,7 +826,7 @@ export const SettingsScreen = () => {
                   {!isInProgress && provisioning.status !== 'failed' && !isQwenDownloaded && (
                     <TouchableOpacity
                       style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
-                      onPress={handleAiInstallOrRetry}
+                      onPress={provisioning.status === 'paused' ? handleAiResume : handleAiInstallOrRetry}
                       disabled={isAiActionLoading}
                       accessibilityRole="button"
                     >
@@ -798,8 +834,15 @@ export const SettingsScreen = () => {
                         <ActivityIndicator color={theme.onPrimary} size="small" />
                       ) : (
                         <>
-                          <Ionicons name="download-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
-                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Download Model</Text>
+                          <Ionicons
+                            name={provisioning.status === 'paused' ? 'play-outline' : 'download-outline'}
+                            size={16}
+                            color={theme.onPrimary}
+                            style={{ marginRight: 6 }}
+                          />
+                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>
+                            {provisioning.status === 'paused' ? 'Resume' : 'Download Model'}
+                          </Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -1055,35 +1098,6 @@ export const SettingsScreen = () => {
             )}
           </View>
 
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          {/* OCR Engine Selector */}
-          <View style={styles.rowBlock}>
-            <Text style={[styles.cardSectionHeading, { color: theme.text }, textScale]}>Receipt OCR Engine</Text>
-            <View style={[styles.optionRowCompact, { marginTop: 6 }]}>
-              {(['mlkit', 'paddleocr'] as const).map((engine) => {
-                const isSelected = ocrEngineId === engine;
-                const label = engine === 'mlkit' ? 'ML Kit (Google On-Device)' : 'PaddleOCR';
-                return (
-                  <TouchableOpacity
-                    key={engine}
-                    style={[
-                      styles.optionChip,
-                      {
-                        backgroundColor: isSelected ? theme.primary : theme.background,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                    onPress={() => setOcrEngineId(engine)}
-                    accessibilityRole="button"
-                    accessibilityLabel={label}
-                  >
-                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>{label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
         </View>
 
         {/* Categories Section */}

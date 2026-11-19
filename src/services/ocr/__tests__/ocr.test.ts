@@ -1,6 +1,5 @@
 import { Alert } from 'react-native';
 import { parseReceiptTextHeuristic, MlKitEngine } from '../MlKitEngine';
-import { PaddleOcrEngine } from '../PaddleOcrEngine';
 import { getOcrEngine, scanReceiptNative } from '../index';
 
 describe('OCR Service & Receipt Heuristics', () => {
@@ -282,38 +281,9 @@ CASH 170000
     });
   });
 
-  describe('PaddleOcrEngine', () => {
-    it('runs row and heuristic parsing when PaddleOCR succeeds', async () => {
-      const engine = new PaddleOcrEngine();
-      const result = await engine.processImage('file:///mock/paddle.jpg');
-
-      expect(result.success).toBe(true);
-      expect(result.rawText).toContain('TOTAL 50000');
-      expect(result.extractedTotal).toBe(50000);
-      expect(result.rows).toEqual(['TOTAL 50000']);
-    });
-
-    it('falls back to ML Kit when PaddleOCR throws', async () => {
-      const { PaddleOCR } = require('ppu-paddle-ocr/mobile');
-      (PaddleOCR as jest.Mock).mockImplementationOnce(() => ({
-        init: jest.fn(async () => {
-          throw new Error('ONNX unavailable');
-        }),
-        recognize: jest.fn(),
-      }));
-
-      const engine = new PaddleOcrEngine();
-      const result = await engine.processImage('file:///mock/paddle-fallback.jpg');
-      expect(result.success).toBe(true);
-      expect(result.extractedTotal).toBe(50000);
-    });
-  });
-
   describe('getOcrEngine factory', () => {
-    it('returns appropriate engine according to OcrEngineId', () => {
-      expect(getOcrEngine('mlkit')).toBeInstanceOf(MlKitEngine);
-      expect(getOcrEngine('paddleocr')).toBeInstanceOf(PaddleOcrEngine);
-      expect(getOcrEngine('unknown' as any)).toBeInstanceOf(MlKitEngine);
+    it('returns the ML Kit engine', () => {
+      expect(getOcrEngine()).toBeInstanceOf(MlKitEngine);
     });
   });
 

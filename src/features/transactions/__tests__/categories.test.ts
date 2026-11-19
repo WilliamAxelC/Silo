@@ -161,7 +161,6 @@ describe('categories utilities', () => {
         { key: APP_SETTING_KEYS.fontScale, value: '1.2' },
         { key: APP_SETTING_KEYS.aiInferenceMode, value: 'external' },
         { key: APP_SETTING_KEYS.activeModelId, value: 'qwen3.5-0.5b' },
-        { key: APP_SETTING_KEYS.ocrEngineId, value: 'paddleocr' },
         { key: APP_SETTING_KEYS.aiWifiOnlyDownload, value: 'true' },
         { key: APP_SETTING_KEYS.externalApiProvider, value: 'deepseek' },
         { key: APP_SETTING_KEYS.externalApiUrl, value: 'https://api.deepseek.com/v1' },
@@ -181,7 +180,6 @@ describe('categories utilities', () => {
       expect(parsed.fontScale).toBe(1.2);
       expect(parsed.aiInferenceMode).toBe('external');
       expect(parsed.activeModelId).toBe('qwen3.5-0.5b');
-      expect(parsed.ocrEngineId).toBe('paddleocr');
       expect(parsed.aiWifiOnlyDownload).toBe(true);
       expect(parsed.externalApiProvider).toBe('deepseek');
       expect(parsed.externalApiUrl).toBe('https://api.deepseek.com/v1');
@@ -207,14 +205,12 @@ describe('categories utilities', () => {
       const parsed = parseSettingsRows([
         { key: APP_SETTING_KEYS.themeMode, value: 'invalid-theme' },
         { key: APP_SETTING_KEYS.aiInferenceMode, value: 'cloud-gpu' },
-        { key: APP_SETTING_KEYS.ocrEngineId, value: 'tesseract' },
         { key: APP_SETTING_KEYS.externalApiProvider, value: 'unsupported-ai' },
         { key: 'unknown_future_key', value: 'future_value' },
       ]);
 
       expect(parsed.themeMode).toBe(DEFAULT_APP_SETTINGS.themeMode);
       expect(parsed.aiInferenceMode).toBe(DEFAULT_APP_SETTINGS.aiInferenceMode);
-      expect(parsed.ocrEngineId).toBe(DEFAULT_APP_SETTINGS.ocrEngineId);
       expect(parsed.externalApiProvider).toBe(DEFAULT_APP_SETTINGS.externalApiProvider);
     });
 

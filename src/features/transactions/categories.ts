@@ -102,7 +102,6 @@ export function getInitialAppSettings(): AppSettings {
     fontScale: DEFAULT_APP_SETTINGS.fontScale,
     aiInferenceMode: DEFAULT_APP_SETTINGS.aiInferenceMode,
     activeModelId: DEFAULT_APP_SETTINGS.activeModelId,
-    ocrEngineId: DEFAULT_APP_SETTINGS.ocrEngineId,
     aiWifiOnlyDownload: DEFAULT_APP_SETTINGS.aiWifiOnlyDownload,
     externalApiProvider: DEFAULT_APP_SETTINGS.externalApiProvider,
     externalApiUrl: DEFAULT_APP_SETTINGS.externalApiUrl,
@@ -150,11 +149,6 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
       case APP_SETTING_KEYS.activeModelId:
         if (typeof row.value === 'string' && row.value.length > 0) {
           base.activeModelId = row.value;
-        }
-        break;
-      case APP_SETTING_KEYS.ocrEngineId:
-        if (row.value === 'mlkit' || row.value === 'paddleocr' || row.value === 'external') {
-          base.ocrEngineId = row.value;
         }
         break;
       case APP_SETTING_KEYS.aiWifiOnlyDownload:

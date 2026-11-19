@@ -59,7 +59,6 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
         receiptReadingMode: 'ocr',
         aiInferenceMode: 'local',
         fontScale: 1.0,
-        ocrEngineId: 'mlkit',
       });
 
       const readyProvisioning = createInitialProvisioningSnapshot();

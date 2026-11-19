@@ -104,7 +104,6 @@ describe('AI Agent & Context Engine', () => {
       localSystemPrompt: 'Custom local system prompt',
       externalSystemPrompt: 'Custom external system prompt',
       aiInferenceMode: 'external',
-      ocrEngineId: 'mlkit',
       receiptReadingMode: 'ocr',
     });
     mockIsVisionAvailable.mockResolvedValue(false);
@@ -335,7 +334,6 @@ describe('AI Agent & Context Engine', () => {
     it('skips LLM generation when local model is not installed/ready and external mode is not configured', async () => {
       (useSettingsStore.getState as jest.Mock).mockReturnValue({
         aiInferenceMode: 'local',
-        ocrEngineId: 'mlkit',
         externalApiUrl: '',
         externalApiModel: '',
       });
@@ -377,7 +375,6 @@ describe('AI Agent & Context Engine', () => {
       it('vision mode uses image + keeps total + sets totalNeedsReview when ungrounded', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
-          ocrEngineId: 'mlkit',
           receiptReadingMode: 'vision',
         });
         mockIsVisionAvailable.mockResolvedValueOnce(true);
@@ -422,7 +419,6 @@ describe('AI Agent & Context Engine', () => {
       it('vision mode sets totalNeedsReview to false when total is grounded in OCR rows', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
-          ocrEngineId: 'mlkit',
           receiptReadingMode: 'vision',
         });
         mockIsVisionAvailable.mockResolvedValueOnce(true);
@@ -444,7 +440,6 @@ describe('AI Agent & Context Engine', () => {
       it('vision error falls back to text path', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
-          ocrEngineId: 'mlkit',
           receiptReadingMode: 'vision',
         });
         mockIsVisionAvailable.mockResolvedValueOnce(true);
@@ -477,7 +472,6 @@ describe('AI Agent & Context Engine', () => {
       it('ocr mode never calls vision', async () => {
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
-          ocrEngineId: 'mlkit',
           receiptReadingMode: 'ocr',
         });
         mockIsVisionAvailable.mockResolvedValueOnce(true);

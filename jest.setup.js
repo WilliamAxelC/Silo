@@ -44,14 +44,6 @@ jest.mock('llama.rn', () => ({
   })),
 }));
 
-// Mock ppu-paddle-ocr/mobile
-jest.mock('ppu-paddle-ocr/mobile', () => ({
-  PaddleOCR: jest.fn().mockImplementation(() => ({
-    init: jest.fn(async () => {}),
-    recognize: jest.fn(async () => ({ text: 'TOTAL 50000' })),
-  })),
-}));
-
 // Mock @expo/vector-icons
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: 'Ionicons',

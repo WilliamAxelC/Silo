@@ -689,8 +689,7 @@ export const analyzeReceiptImage = async (
 
   onStatusChange?.('Reading text…');
 
-  const engineId = useSettingsStore.getState().ocrEngineId;
-  const ocrEngine = getOcrEngine(engineId);
+  const ocrEngine = getOcrEngine();
   const ocrResult = await ocrEngine.processImage(imageUri);
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');

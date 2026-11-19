@@ -335,16 +335,144 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
       expect(fsMock.moveAsync).not.toHaveBeenCalled();
     });
 
-    it('pauseDownload delegates to cancelDownload and clears partial files', async () => {
-      const cancelAsync = jest.fn(async () => {});
+    it('pause persists resumeData and keeps temp file', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+      const pauseAsync = jest.fn(async () => ({ resumeData: mockResumeData }));
       let resolveDownload!: (res: { uri: string } | undefined) => void;
+
       fsMock.createDownloadResumable!.mockImplementation(() => ({
         downloadAsync: () =>
           new Promise<{ uri: string } | undefined>((resolve) => {
             resolveDownload = resolve;
           }),
         resumeAsync: jest.fn(),
+        pauseAsync,
+        cancelAsync: jest.fn(async () => {}),
+      }));
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.startProvisioningIfNeeded();
+      const inFlight = (manager as any).inFlightDownloadPromise;
+
+      await manager.pauseDownload('User paused');
+      expect(pauseAsync).toHaveBeenCalledTimes(1);
+
+      // Temp file must NOT be deleted
+      expect(fsMock.deleteAsync).not.toHaveBeenCalledWith(tempUri, expect.anything());
+
+      // Provisioning status in store
+      const provisioning = useAIStore.getState().provisioning;
+      expect(provisioning.status).toBe('paused');
+      expect(provisioning.canResume).toBe(true);
+      expect(provisioning.pausedReason).toBe('User paused');
+      expect(provisioning.transfer.resumeData).toBe(mockResumeData);
+
+      // Persisted transfer manifest
+      const transferManifestWrites = fsMock.writeAsStringAsync.mock.calls.filter(([p]) =>
+        String(p).endsWith('download-manifest.json'),
+      );
+      expect(transferManifestWrites.length).toBeGreaterThan(0);
+      const lastManifest = JSON.parse(transferManifestWrites[transferManifestWrites.length - 1][1]);
+      expect(lastManifest.status).toBe('paused');
+      expect(lastManifest.resumeData).toBe(mockResumeData);
+      expect(lastManifest.pausedReason).toBe('User paused');
+
+      resolveDownload(undefined);
+      await inFlight;
+    });
+
+    it('resume passes resumeData to createDownloadResumable and ends ready after verification', async () => {
+      const activeUri = getActiveModelFileUri();
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+      let movedToActive = false;
+
+      fsMock.moveAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
+        if (to === activeUri) {
+          movedToActive = true;
+        }
+      });
+
+      fsMock.getInfoAsync.mockImplementation(async (path: string, opts?: { md5?: boolean }) => {
+        if (path === tempUri) {
+          return {
+            exists: !movedToActive,
+            size: EXPECTED_SIZE,
+            uri: tempUri,
+            ...(opts?.md5 ? { md5: EXPECTED_MD5 } : {}),
+          };
+        }
+        if (path === activeUri && movedToActive) {
+          return { exists: true, size: EXPECTED_SIZE, uri: activeUri };
+        }
+        return { exists: false, uri: path };
+      });
+
+      const persistedManifest = {
+        version: 'qwen3.5-2b',
+        status: 'paused',
+        downloadUrl: 'https://example.com/model.gguf',
+        targetPath: tempUri,
+        tempPath: tempUri,
+        totalBytes: EXPECTED_SIZE,
+        downloadedBytes: 500000,
+        progress: 500000 / EXPECTED_SIZE,
+        resumeData: mockResumeData,
+        startedAt: '2026-11-19T00:00:00.000Z',
+        updatedAt: '2026-11-19T00:00:01.000Z',
+        lastProgressAt: '2026-11-19T00:00:01.000Z',
+        bytesPerSecond: 100000,
+        sessionId: 'session-123',
+      };
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('download-manifest.json')) {
+          return JSON.stringify(persistedManifest);
+        }
+        throw new Error('not found');
+      });
+
+      fsMock.createDownloadResumable!.mockImplementation(() => ({
+        downloadAsync: jest.fn(async () => ({ uri: tempUri })),
+        resumeAsync: jest.fn(async () => ({ uri: tempUri })),
         pauseAsync: jest.fn(),
+        cancelAsync: jest.fn(async () => {}),
+      }));
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.resumeDownload();
+
+      // createDownloadResumable must receive mockResumeData
+      expect(fsMock.createDownloadResumable).toHaveBeenCalledWith(
+        expect.any(String),
+        tempUri,
+        expect.any(Object),
+        expect.any(Function),
+        mockResumeData,
+      );
+
+      // Must complete verification and end in 'ready'
+      expect(fsMock.getInfoAsync).toHaveBeenCalledWith(tempUri, { md5: true });
+      expect(movedToActive).toBe(true);
+      expect(useAIStore.getState().provisioning.status).toBe('ready');
+      expect(useAIStore.getState().provisioning.checksumVerified).toBe(true);
+    });
+
+    it('pause with failing pauseAsync falls back to cancel', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const cancelAsync = jest.fn(async () => {});
+      const pauseAsync = jest.fn(async () => {
+        throw new Error('Native pause error');
+      });
+      let resolveDownload!: (res: { uri: string } | undefined) => void;
+
+      fsMock.createDownloadResumable!.mockImplementation(() => ({
+        downloadAsync: () =>
+          new Promise<{ uri: string } | undefined>((resolve) => {
+            resolveDownload = resolve;
+          }),
+        resumeAsync: jest.fn(),
+        pauseAsync,
         cancelAsync,
       }));
 
@@ -353,15 +481,109 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
       const inFlight = (manager as any).inFlightDownloadPromise;
 
       await manager.pauseDownload();
+      expect(pauseAsync).toHaveBeenCalledTimes(1);
       expect(cancelAsync).toHaveBeenCalledTimes(1);
-      expect(fsMock.deleteAsync).toHaveBeenCalledWith(
-        'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part',
-        { idempotent: true },
-      );
+      expect(fsMock.deleteAsync).toHaveBeenCalledWith(tempUri, { idempotent: true });
       expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+      expect(useAIStore.getState().provisioning.canResume).toBe(false);
 
       resolveDownload(undefined);
       await inFlight;
+    });
+
+    it('cancel clears resumeData', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+
+      useAIStore.getState().replaceProvisioning({
+        status: 'paused',
+        canResume: true,
+        pausedReason: 'Paused',
+        transfer: {
+          downloadUrl: 'https://example.com/model.gguf',
+          resumableUri: tempUri,
+          resumeData: mockResumeData,
+          startedAt: null,
+          updatedAt: null,
+          bytesPerSecond: null,
+          lastProgressAt: null,
+          sessionId: null,
+        },
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.cancelDownload();
+
+      expect(fsMock.deleteAsync).toHaveBeenCalledWith(tempUri, { idempotent: true });
+      expect(fsMock.deleteAsync).toHaveBeenCalledWith(
+        expect.stringMatching(/download-manifest\.json$/),
+        { idempotent: true },
+      );
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+      expect(useAIStore.getState().provisioning.canResume).toBe(false);
+      expect(useAIStore.getState().provisioning.transfer.resumeData).toBeNull();
+    });
+
+    it('restores paused state with canResume=true on initialize after app restart', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+
+      fsMock.getInfoAsync.mockImplementation(async (path: string) => {
+        if (path === tempUri) {
+          return { exists: true, size: 500000, uri: tempUri };
+        }
+        return { exists: false, uri: path };
+      });
+
+      const persistedManifest = {
+        version: 'qwen3.5-2b',
+        status: 'paused',
+        downloadUrl: 'https://example.com/model.gguf',
+        targetPath: tempUri,
+        tempPath: tempUri,
+        totalBytes: EXPECTED_SIZE,
+        downloadedBytes: 500000,
+        progress: 500000 / EXPECTED_SIZE,
+        resumeData: mockResumeData,
+        startedAt: '2026-11-19T00:00:00.000Z',
+        updatedAt: '2026-11-19T00:00:01.000Z',
+        lastProgressAt: '2026-11-19T00:00:01.000Z',
+        bytesPerSecond: 100000,
+        sessionId: 'session-123',
+        pausedReason: 'Paused by user',
+      };
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('download-manifest.json')) {
+          return JSON.stringify(persistedManifest);
+        }
+        throw new Error('not found');
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.initialize();
+
+      const provisioning = useAIStore.getState().provisioning;
+      expect(provisioning.status).toBe('paused');
+      expect(provisioning.canResume).toBe(true);
+      expect(provisioning.pausedReason).toBe('Paused by user');
+      expect(provisioning.transfer.resumeData).toBe(mockResumeData);
+      expect(fsMock.createDownloadResumable).not.toHaveBeenCalled();
+    });
+
+    it('blocks resumeDownload when aiWifiOnlyDownload is true and not on Wi-Fi', async () => {
+      useSettingsStore.setState({ aiWifiOnlyDownload: true });
+      (Network.getNetworkStateAsync as jest.Mock).mockResolvedValueOnce({
+        type: Network.NetworkStateType.CELLULAR,
+        isConnected: true,
+        isInternetReachable: true,
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.resumeDownload();
+
+      expect(fsMock.createDownloadResumable).not.toHaveBeenCalled();
+      expect(useAIStore.getState().provisioning.status).toBe('failed');
+      expect(useAIStore.getState().provisioning.lastError).toBe('Wi-Fi required (change in Settings)');
     });
   });
 

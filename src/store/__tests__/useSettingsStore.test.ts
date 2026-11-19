@@ -167,14 +167,6 @@ describe('useSettingsStore', () => {
   });
 
   describe('AI and OCR settings', () => {
-    it('updates OCR engine ID', async () => {
-      await useSettingsStore.getState().setOcrEngineId('paddleocr');
-      expect(useSettingsStore.getState().ocrEngineId).toBe('paddleocr');
-
-      await useSettingsStore.getState().setOcrEngineId('external');
-      expect(useSettingsStore.getState().ocrEngineId).toBe('external');
-    });
-
     it('updates AI inference mode between local and external', async () => {
       await useSettingsStore.getState().setAiInferenceMode('external');
       expect(useSettingsStore.getState().aiInferenceMode).toBe('external');

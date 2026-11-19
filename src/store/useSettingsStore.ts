@@ -7,7 +7,7 @@ import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
 import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
-import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, OcrEngineId } from '../features/transactions/types';
+import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider } from '../features/transactions/types';
 import { useAIStore } from './useAIStore';
 
 interface SettingsState extends AppSettings {
@@ -22,7 +22,6 @@ interface SettingsState extends AppSettings {
   setFontScale: (fontScale: number) => Promise<void>;
   setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
   setActiveModelId: (modelId: string) => Promise<void>;
-  setOcrEngineId: (ocrEngineId: OcrEngineId) => Promise<void>;
   setAiWifiOnlyDownload: (enabled: boolean) => Promise<void>;
   setExternalApiProvider: (provider: ExternalAPIProvider) => Promise<void>;
   setExternalApiUrl: (url: string) => Promise<void>;
@@ -134,11 +133,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setFontScale: async (fontScale) => {
     await saveSetting('fontScale', fontScale);
     set({ fontScale });
-  },
-
-  setOcrEngineId: async (ocrEngineId) => {
-    await saveSetting('ocrEngineId', ocrEngineId);
-    set({ ocrEngineId });
   },
 
   setAiInferenceMode: async (aiInferenceMode) => {

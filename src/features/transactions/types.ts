@@ -49,7 +49,6 @@ export interface ModelCatalogEntry {
   description: string;
 }
 
-export type OcrEngineId = 'mlkit' | 'paddleocr' | 'external';
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -60,7 +59,6 @@ export interface AppSettings {
   fontScale: number;
   aiInferenceMode: AIInferenceMode;
   activeModelId: string;
-  ocrEngineId: OcrEngineId;
   aiWifiOnlyDownload: boolean;
   externalApiProvider: ExternalAPIProvider;
   externalApiUrl: string;

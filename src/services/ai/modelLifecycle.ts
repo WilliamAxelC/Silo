@@ -97,6 +97,7 @@ type TransferManifest = {
   lastProgressAt: string | null;
   bytesPerSecond: number | null;
   sessionId: string;
+  pausedReason?: string | null;
 };
 
 export interface LocalInferenceAdapter {
@@ -765,7 +766,7 @@ export class QModelLifecycleManager {
       return this.inFlightDownloadPromise;
     }
 
-    if (['queued', 'downloading', 'unpacking', 'registering', 'warming', 'indexing'].includes(snapshot.status)) {
+    if (['paused', 'queued', 'downloading', 'unpacking', 'registering', 'warming', 'indexing'].includes(snapshot.status)) {
       return;
     }
 
@@ -790,11 +791,100 @@ export class QModelLifecycleManager {
     await this.provision();
   }
 
-  async pauseDownload(reason = 'Cancelled model download and cleared temporary files.') {
-    await this.cancelDownload(reason);
+  async pauseDownload(reason = 'Model download paused.') {
+    const pauseToken = ++this.downloadToken;
+    const resumable = this.downloadResumable;
+    this.downloadResumable = null;
+    this.inFlightDownloadPromise = null;
+
+    let pauseSnapshot: DownloadPauseSnapshot | undefined;
+    try {
+      if (resumable) {
+        pauseSnapshot = await resumable.pauseAsync();
+      }
+    } catch (error) {
+      this.log('warn', 'pause-failed-fallback-cancel', 'Resumable pauseAsync threw, falling back to cancel.', {
+        error: getErrorMessage(error),
+      });
+      pauseSnapshot = undefined;
+    }
+
+    if (this.downloadToken !== pauseToken) {
+      return;
+    }
+
+    const resumeData = pauseSnapshot?.resumeData;
+    if (!resumeData) {
+      this.downloadResumable = resumable;
+      await this.cancelDownload(reason);
+      return;
+    }
+
+    useAIStore.getState().updateTransfer({
+      resumeData,
+    });
+    this.updateProvisioning({
+      status: 'paused',
+      canResume: true,
+      pausedReason: reason,
+      lastError: null,
+    });
+
+    await this.persistTransferManifest({
+      status: 'paused',
+      resumeData,
+      pausedReason: reason,
+      updatedAt: nowIso(),
+    });
+
+    if (this.downloadToken !== pauseToken) {
+      return;
+    }
+
+    this.log('info', 'download-paused', reason, {
+      tempPath: getTempDownloadPath(),
+      hasResumeData: true,
+    });
   }
 
   async resumeDownload() {
+    const wifiAllowed = await this.checkWifiRequirement();
+    if (!wifiAllowed) {
+      return;
+    }
+
+    const manifest = await readTransferManifest();
+    if (manifest?.resumeData) {
+      const resumeToken = ++this.downloadToken;
+      this.lastPersistedProgressAt = 0;
+
+      useAIStore.getState().updateTransfer({
+        downloadUrl: manifest.downloadUrl || getActiveModelConfig().downloadUrl,
+        resumableUri: manifest.targetPath || getTempDownloadPath(),
+        resumeData: manifest.resumeData,
+        startedAt: manifest.startedAt,
+        sessionId: manifest.sessionId,
+      });
+
+      this.updateProvisioning({
+        status: 'queued',
+        tempPath: manifest.tempPath || getTempDownloadPath(),
+        pausedReason: null,
+        lastError: null,
+        totalBytes: manifest.totalBytes,
+        downloadedBytes: manifest.downloadedBytes,
+        progress: manifest.progress,
+        canResume: false,
+      });
+
+      this.inFlightDownloadPromise = this.runResumableDownload(manifest.resumeData, manifest, resumeToken).finally(() => {
+        if (this.downloadToken === resumeToken) {
+          this.inFlightDownloadPromise = null;
+        }
+      });
+      return this.inFlightDownloadPromise;
+    }
+
     await this.retryProvisioning();
   }
 
@@ -1082,14 +1172,28 @@ export class QModelLifecycleManager {
       {
         version: getActiveModelConfig().version,
         url: getActiveModelConfig().downloadUrl,
-        resumed: false,
+        resumed: Boolean(_resumeData),
       },
     );
 
-    this.updateProvisioning({ status: 'downloading', pausedReason: null, lastError: null, canResume: false, tempPath: getTempDownloadPath() });
+    this.updateProvisioning({
+      status: 'downloading',
+      pausedReason: null,
+      lastError: null,
+      canResume: false,
+      tempPath: getTempDownloadPath(),
+      ...(_manifest ? {
+        downloadedBytes: _manifest.downloadedBytes,
+        totalBytes: _manifest.totalBytes,
+        progress: _manifest.progress,
+      } : {}),
+    });
 
     try {
-      const result = await this.downloadResumable.downloadAsync();
+      // resumeAsync() resolves undefined when paused again; never restart from zero in that case.
+      const result = _resumeData
+        ? await this.downloadResumable.resumeAsync()
+        : await this.downloadResumable.downloadAsync();
       if (this.downloadToken !== token) {
         return;
       }
@@ -1634,7 +1738,23 @@ export class QModelLifecycleManager {
       return;
     }
 
-    if ((transferManifest.status === 'downloading' || transferManifest.status === 'paused' || transferManifest.status === 'queued') && transferManifest.resumeData) {
+    if (transferManifest.status === 'paused') {
+      state.replaceProvisioning({
+        status: 'paused',
+        progress: transferManifest.progress,
+        downloadedBytes: transferManifest.downloadedBytes,
+        totalBytes: transferManifest.totalBytes,
+        version: transferManifest.version,
+        tempPath: transferManifest.tempPath,
+        canResume: Boolean(transferManifest.resumeData),
+        pausedReason: transferManifest.pausedReason ?? null,
+        lastError: null,
+        transfer: createTransferSnapshot(transferManifest),
+      });
+      return;
+    }
+
+    if ((transferManifest.status === 'downloading' || transferManifest.status === 'queued') && transferManifest.resumeData) {
       this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
         tempPath: transferManifest.tempPath,
         downloadedBytes: transferManifest.downloadedBytes,
@@ -1704,15 +1824,16 @@ export class QModelLifecycleManager {
       downloadUrl: overrides.downloadUrl ?? transfer.downloadUrl ?? getActiveModelConfig().downloadUrl,
       targetPath: overrides.targetPath ?? transfer.resumableUri ?? getTempDownloadPath(),
       tempPath: overrides.tempPath ?? provisioning.tempPath ?? getTempDownloadPath(),
-      totalBytes: overrides.totalBytes ?? provisioning.totalBytes,
-      downloadedBytes: overrides.downloadedBytes ?? provisioning.downloadedBytes,
-      progress: overrides.progress ?? provisioning.progress,
-      resumeData: overrides.resumeData ?? transfer.resumeData,
+      totalBytes: overrides.totalBytes !== undefined ? overrides.totalBytes : provisioning.totalBytes,
+      downloadedBytes: overrides.downloadedBytes !== undefined ? overrides.downloadedBytes : provisioning.downloadedBytes,
+      progress: overrides.progress !== undefined ? overrides.progress : provisioning.progress,
+      resumeData: overrides.resumeData !== undefined ? overrides.resumeData : transfer.resumeData,
       startedAt: overrides.startedAt ?? transfer.startedAt,
       updatedAt: overrides.updatedAt ?? nowIso(),
-      lastProgressAt: overrides.lastProgressAt ?? transfer.lastProgressAt,
-      bytesPerSecond: overrides.bytesPerSecond ?? transfer.bytesPerSecond,
+      lastProgressAt: overrides.lastProgressAt !== undefined ? overrides.lastProgressAt : transfer.lastProgressAt,
+      bytesPerSecond: overrides.bytesPerSecond !== undefined ? overrides.bytesPerSecond : transfer.bytesPerSecond,
       sessionId: overrides.sessionId ?? transfer.sessionId ?? createSessionId(),
+      pausedReason: overrides.pausedReason !== undefined ? overrides.pausedReason : provisioning.pausedReason,
     };
 
     await writeTransferManifest(manifest);
