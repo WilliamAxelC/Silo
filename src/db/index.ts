@@ -19,7 +19,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 9;
+const DB_SCHEMA_VERSION = 10;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -37,7 +37,8 @@ export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
-      is_active INTEGER DEFAULT 1
+      is_active INTEGER DEFAULT 1,
+      initial_balance REAL NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS budgets (
@@ -57,7 +58,8 @@ export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
       date INTEGER NOT NULL,
       image_uri TEXT,
       note TEXT,
-      line_items_text TEXT
+      line_items_text TEXT,
+      to_wallet_id INTEGER REFERENCES wallets(id)
     );
 
     CREATE TABLE IF NOT EXISTS transaction_items (
@@ -339,6 +341,16 @@ function migrateToVersion8(sqliteDb: typeof expoDb = expoDb) {
   `);
 }
 
+function migrateToVersion10(sqliteDb: typeof expoDb = expoDb) {
+  if (!hasColumn('wallets', 'initial_balance', sqliteDb)) {
+    sqliteDb.execSync('ALTER TABLE wallets ADD COLUMN initial_balance REAL NOT NULL DEFAULT 0;');
+  }
+  if (!hasColumn('transactions', 'to_wallet_id', sqliteDb)) {
+    sqliteDb.execSync('ALTER TABLE transactions ADD COLUMN to_wallet_id INTEGER REFERENCES wallets(id);');
+  }
+  sqliteDb.execSync('CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id);');
+}
+
 export function rebuildFtsIndex(sqliteDb: typeof expoDb = expoDb) {
   try {
     sqliteDb.execSync(`INSERT INTO transactions_fts(transactions_fts) VALUES('rebuild');`);
@@ -471,6 +483,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 8) {
     migrateToVersion8(sqliteDb);
+  }
+
+  if (currentVersion < 10) {
+    migrateToVersion10(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

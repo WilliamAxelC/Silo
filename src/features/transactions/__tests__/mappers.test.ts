@@ -28,6 +28,8 @@ describe('transaction mappers', () => {
         note: 'Grocery restock',
         lineItemsText: 'Milk | 35000\nEggs | 32000',
         category: 'Groceries',
+        walletId: undefined,
+        toWalletId: null,
       });
     });
 
@@ -102,6 +104,8 @@ describe('transaction mappers', () => {
         imageUri: 'file:///path.jpg',
         note: 'Iced coffee',
         lineItemsText: 'Coffee | 45000',
+        walletId: undefined,
+        toWalletId: null,
       });
       expect((input as any).id).toBeUndefined();
     });

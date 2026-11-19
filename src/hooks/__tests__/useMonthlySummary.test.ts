@@ -369,4 +369,22 @@ describe('useMonthlySummary', () => {
       harness.unmount();
     });
   });
+
+  it('leaves transfers out of income, spending and balance but keeps them in the month list', () => {
+    const date = new Date(2026, 10, 15).getTime();
+    useTransactionStore.setState({
+      transactionsList: [
+        { id: 1, merchantName: 'Salary', totalAmount: 10_000_000, type: 'income', category: 'Salary', date },
+        { id: 2, merchantName: 'Kopi', totalAmount: -38_500, type: 'expense', category: 'Food & Dining', date },
+        { id: 3, merchantName: 'Top up GoPay', totalAmount: -200_000, type: 'transfer', category: 'Transfer', date, walletId: 2, toWalletId: 3 },
+      ] as Transaction[],
+    });
+    const hook = renderHookHarness((d: Date) => useMonthlySummary(d), new Date(date));
+    expect(hook.current.totalIncome).toBe(10_000_000);
+    expect(hook.current.totalExpense).toBe(38_500);
+    expect(hook.current.balance).toBe(10_000_000 - 38_500);
+    expect(hook.current.currentMonthExpenses.map((t) => t.id)).toEqual([2]);
+    expect(hook.current.currentMonthData).toHaveLength(3);
+    hook.unmount();
+  });
 });

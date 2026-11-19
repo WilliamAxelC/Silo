@@ -84,8 +84,8 @@ export const ReportsScreen = () => {
   const { currentMonthData, totalIncome, totalExpense, balance } = useMonthlySummary(currentDate);
 
   const filteredTransactions = useMemo(() => {
-    return currentMonthData.filter((tx) =>
-      reportType === 'expense' ? (tx.totalAmount || 0) < 0 : (tx.totalAmount || 0) > 0
+    return currentMonthData.filter(
+      (tx) => tx.type !== 'transfer' && (reportType === 'expense' ? (tx.totalAmount || 0) < 0 : (tx.totalAmount || 0) > 0)
     );
   }, [currentMonthData, reportType]);
 

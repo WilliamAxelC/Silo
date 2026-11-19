@@ -15,6 +15,8 @@ export const UNCATEGORIZED_EXPENSE_LABEL = 'Uncategorized Expense';
 export const UNCATEGORIZED_INCOME_LABEL = 'Uncategorized Income';
 export const UNCATEGORIZED_LABEL = UNCATEGORIZED_EXPENSE_LABEL;
 export const DEFAULT_WALLET_ID = 1;
+/** Category stored on transfers; transfers are excluded from income, spending, budgets and reports. */
+export const TRANSFER_CATEGORY_LABEL = 'Transfer';
 
 export const EXTERNAL_API_PRESETS: Record<
   string,

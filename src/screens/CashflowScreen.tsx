@@ -32,6 +32,7 @@ export const CashflowScreen = () => {
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
   const queueItems = useReceiptQueueStore((s) => s.items);
+  const wallets = useTransactionStore((s) => s.wallets);
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [refreshing, setRefreshing] = useState(false);
@@ -131,32 +132,41 @@ export const CashflowScreen = () => {
     </View>
   );
 
+  const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
+  const showAccountNames = wallets.filter((w) => w.isActive).length > 1;
+
   const renderTransactionItem = (item: Transaction) => {
-    const isIncome = item.type === 'income' || (item.totalAmount || 0) > 0;
+    const isTransfer = item.type === 'transfer';
+    const isIncome = !isTransfer && (item.type === 'income' || (item.totalAmount || 0) > 0);
+    const tint = isTransfer ? theme.primary : isIncome ? theme.income : theme.expense;
+    const accountLabel = isTransfer
+      ? `${walletNames.get(item.walletId ?? -1) ?? 'Account'} → ${walletNames.get(item.toWalletId ?? -1) ?? 'Account'}`
+      : showAccountNames && item.walletId
+        ? walletNames.get(item.walletId)
+        : undefined;
+    const subtitle = isTransfer
+      ? [accountLabel, item.note].filter(Boolean).join(' · ')
+      : [item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
+    const amountText = formatDisplayCurrency(isTransfer ? Math.abs(item.totalAmount || 0) : item.totalAmount || 0, currencyCode, useThousandsSeparator);
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         key={item.id}
-        style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]} 
+        style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}
         onPress={() => navigation.navigate('AddTransactionStack', { transactionId: item.id })}
         accessibilityRole="button"
-        accessibilityLabel={`${item.merchantName || 'Unknown'}, ${item.totalAmount}`}
+        accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${amountText}, ${subtitle}`}
       >
-        <View style={[styles.iconContainer, { backgroundColor: isIncome ? theme.income + '18' : theme.expense + '18' }]}>
-          <Ionicons 
-            name={isIncome ? "arrow-down" : "arrow-up"} 
-            size={16} 
-            color={isIncome ? theme.income : theme.expense} 
-          />
+        <View style={[styles.iconContainer, { backgroundColor: tint + '18' }]}>
+          <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
         </View>
         <View style={styles.transactionDetails}>
           <Text style={[styles.transactionTitle, { color: theme.text }]} numberOfLines={1}>{item.merchantName || 'Unknown'}</Text>
           <Text style={[styles.transactionSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
-            {item.category || UNCATEGORIZED_EXPENSE_LABEL}
-            {item.note ? ` · ${item.note}` : ''}
+            {subtitle}
           </Text>
         </View>
-        <Text style={[styles.transactionAmount, { color: isIncome ? theme.income : theme.expense }]}>
-          {isIncome ? '+' : ''}{formatDisplayCurrency(item.totalAmount || 0, currencyCode, useThousandsSeparator)}
+        <Text style={[styles.transactionAmount, { color: tint }]}>
+          {isIncome ? '+' : ''}{amountText}
         </Text>
       </TouchableOpacity>
     );

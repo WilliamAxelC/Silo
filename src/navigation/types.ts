@@ -18,6 +18,7 @@ export type RootStackParamList = {
   Chatbot: { initialMessage?: string };
   AddTransactionStack: { transactionId?: number; receiptQueueId?: number };
   ReceiptInbox: undefined;
+  Accounts: undefined;
   Settings: undefined;
   SystemLogs: undefined;
 };

@@ -13,6 +13,8 @@ export type TransactionListRow = {
   note: string | null;
   lineItemsText: string | null;
   category: string | null;
+  walletId?: number | null;
+  toWalletId?: number | null;
 };
 
 export function mapTransactionRowToModel(row: Partial<TransactionListRow> & { id: number }): Transaction {
@@ -41,6 +43,8 @@ export function mapTransactionRowToModel(row: Partial<TransactionListRow> & { id
     note: row.note?.trim() ?? '',
     lineItemsText: row.lineItemsText?.trim() ?? '',
     category,
+    walletId: row.walletId ?? undefined,
+    toWalletId: type === 'transfer' ? row.toWalletId ?? null : null,
   };
 }
 
@@ -54,6 +58,8 @@ export function buildEditableTransactionInput(transaction: Partial<Transaction>)
     note: transaction.note ?? '',
     lineItemsText: transaction.lineItemsText ?? '',
     imageUri: transaction.imageUri ?? null,
+    walletId: transaction.walletId,
+    toWalletId: transaction.toWalletId ?? null,
   });
 }
 

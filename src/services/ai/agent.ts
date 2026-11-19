@@ -82,7 +82,7 @@ function getCategorySpending(category: string, days: number) {
   const now = Date.now();
   const from = now - days * 24 * 60 * 60 * 1000;
   const rows = expoDb.getAllSync<{ total: number | null }>(
-    'SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND category LIKE ? AND date >= ?',
+    "SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND type != 'transfer' AND category LIKE ? AND date >= ?",
     [`%${category}%`, from],
   );
 
@@ -90,7 +90,10 @@ function getCategorySpending(category: string, days: number) {
 }
 
 function getTotalBalance() {
-  const rows = expoDb.getAllSync<{ total: number | null }>('SELECT SUM(total_amount) as total FROM ai_transactions_view');
+  // Net worth: opening balances plus all income and spending; transfers only move money between accounts.
+  const rows = expoDb.getAllSync<{ total: number | null }>(
+    "SELECT (SELECT COALESCE(SUM(initial_balance), 0) FROM wallets) + (SELECT COALESCE(SUM(total_amount), 0) FROM transactions WHERE type != 'transfer') AS total",
+  );
   return rows[0]?.total ?? 0;
 }
 

@@ -28,6 +28,7 @@ import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfide
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
 import { scanReceiptDocuments } from '../services/ocr/documentScanner';
+import { AccountPickerModal } from '../components/AccountPickerModal';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -110,6 +111,13 @@ export const AddTransactionScreen = () => {
   const [amount, setAmount] = useState('');
   const [amountError, setAmountError] = useState<string | null>(null);
   const [scanConfidence, setScanConfidence] = useState<ReceiptConfidenceAssessment | null>(null);
+  const wallets = useTransactionStore((s) => s.wallets);
+  const defaultWalletId = wallets.find((w) => w.isActive)?.id ?? null;
+  const [walletId, setWalletId] = useState<number | null>(null);
+  const [toWalletId, setToWalletId] = useState<number | null>(null);
+  const [accountPicker, setAccountPicker] = useState<'from' | 'to' | null>(null);
+  const effectiveWalletId = walletId ?? defaultWalletId;
+  const walletName = (id: number | null) => wallets.find((w) => w.id === id)?.name ?? 'Choose account';
   const [category, setCategory] = useState('');
   const [pendingScannedCategory, setPendingScannedCategory] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -168,6 +176,8 @@ export const AddTransactionScreen = () => {
     setScanStatusLabel(null);
     setRawOcrText(null);
     setIsRawTextExpanded(false);
+    setWalletId(null);
+    setToWalletId(null);
   };
 
   useEffect(() => {
@@ -190,6 +200,8 @@ export const AddTransactionScreen = () => {
         setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
         setSelectedDate(new Date(editableTransaction.date));
         setImageUri(editableTransaction.imageUri || null);
+        setWalletId(editableTransaction.walletId ?? null);
+        setToWalletId(editableTransaction.toWalletId ?? null);
         setRawOcrText(null);
         setIsRawTextExpanded(false);
       }
@@ -449,7 +461,7 @@ export const AddTransactionScreen = () => {
 
     return normalizeTransactionInput(
       createTransactionInput({
-        merchantName: title,
+        merchantName: title.trim() || (type === 'transfer' ? 'Transfer' : title),
         totalAmount: parseSignedAmount(amount, signedType),
         type,
         category: (categoryOverride ?? category).trim() || normalizeCategoryForType('', type),
@@ -457,12 +469,20 @@ export const AddTransactionScreen = () => {
         note,
         lineItemsText,
         imageUri: imageUri || null,
+        walletId: effectiveWalletId ?? undefined,
+        toWalletId: type === 'transfer' ? toWalletId : null,
       })
     );
   };
 
   const handleSave = async () => {
-    if (!title.trim()) {
+    if (type === 'transfer') {
+      if (!toWalletId || toWalletId === effectiveWalletId) {
+        Alert.alert('Choose accounts', 'Pick the account the money goes to (different from the one it leaves).');
+        return;
+      }
+      if (!title.trim()) setTitle('Transfer');
+    } else if (!title.trim()) {
       Alert.alert('Missing Required Fields', 'Please enter a title');
       return;
     }
@@ -619,6 +639,18 @@ export const AddTransactionScreen = () => {
               >
                 <Text style={[styles.toggleText, { color: type === 'income' ? '#fff' : theme.textMuted }]}>Income</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.toggleBtn,
+                  styles.compactToggleBtn,
+                  { backgroundColor: type === 'transfer' ? theme.primary : 'transparent' },
+                ]}
+                onPress={() => setType('transfer')}
+                accessibilityRole="button"
+                accessibilityLabel="Set Transfer type"
+              >
+                <Text style={[styles.toggleText, { color: type === 'transfer' ? '#fff' : theme.textMuted }]}>Transfer</Text>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
@@ -686,8 +718,48 @@ export const AddTransactionScreen = () => {
             </View>
           </View>
 
+          {/* Account(s) */}
+          <View style={styles.compactRow}>
+            <View style={[styles.fieldCard, styles.flexField]}>
+              <Text style={[styles.label, { color: theme.text }]}>
+                {type === 'transfer' ? 'From' : type === 'income' ? 'To account' : 'From account'}
+              </Text>
+              <TouchableOpacity
+                style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={() => setAccountPicker('from')}
+                accessibilityRole="button"
+                accessibilityLabel={`Account: ${walletName(effectiveWalletId)}`}
+              >
+                <Text style={[styles.iconInputText, { color: theme.text }]} numberOfLines={1}>
+                  {walletName(effectiveWalletId)}
+                </Text>
+                <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {type === 'transfer' ? (
+              <>
+                <Ionicons name="arrow-forward" size={18} color={theme.textMuted} style={styles.transferArrow} />
+                <View style={[styles.fieldCard, styles.flexField]}>
+                  <Text style={[styles.label, { color: theme.text }]}>To</Text>
+                  <TouchableOpacity
+                    style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                    onPress={() => setAccountPicker('to')}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Transfer to: ${walletName(toWalletId)}`}
+                  >
+                    <Text style={[styles.iconInputText, { color: toWalletId ? theme.text : theme.textMuted }]} numberOfLines={1}>
+                      {walletName(toWalletId)}
+                    </Text>
+                    <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
+          </View>
+
           {/* Category & Date Pickers */}
           <View style={styles.compactRow}>
+            {type !== 'transfer' ? (
             <View style={[styles.fieldCard, styles.flexField]}>
               <Text style={[styles.label, { color: theme.text }]}>Category</Text>
               <TouchableOpacity
@@ -702,8 +774,9 @@ export const AddTransactionScreen = () => {
                 <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
               </TouchableOpacity>
             </View>
+            ) : null}
 
-            <View style={[styles.fieldCard, styles.dateGroup]}>
+            <View style={[styles.fieldCard, type === 'transfer' ? styles.flexField : styles.dateGroup]}>
               <Text style={[styles.label, { color: theme.text }]}>Date & Time</Text>
               <View style={styles.inlineDateActions}>
                 <TouchableOpacity
@@ -885,6 +958,24 @@ export const AddTransactionScreen = () => {
         <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />
       )}
 
+      <AccountPickerModal
+        visible={accountPicker !== null}
+        title={accountPicker === 'to' ? 'Transfer to' : 'Account'}
+        wallets={wallets}
+        selectedId={accountPicker === 'to' ? toWalletId : effectiveWalletId}
+        excludeId={accountPicker === 'to' ? effectiveWalletId : null}
+        onSelect={(id) => {
+          if (accountPicker === 'to') {
+            setToWalletId(id);
+          } else {
+            setWalletId(id);
+            if (id === toWalletId) setToWalletId(null);
+          }
+        }}
+        onClose={() => setAccountPicker(null)}
+        onManage={() => navigation.navigate('Accounts')}
+      />
+
       <SourceSelectorModal
         visible={sourceModalVisible}
         onClose={() => setSourceModalVisible(false)}
@@ -962,6 +1053,7 @@ const styles = StyleSheet.create({
   flexField: { flex: 1 },
   amountField: { width: 160, marginLeft: 10 },
   dateGroup: { width: 180, marginLeft: 10 },
+  transferArrow: { alignSelf: 'flex-end', marginHorizontal: 6, marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   compactInput: { minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontSize: 14 },
   amountInputContainer: { flexDirection: 'row', alignItems: 'center' },

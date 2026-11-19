@@ -6,6 +6,7 @@ export const wallets = sqliteTable('wallets', {
   name: text('name').notNull(),
   type: text('type').notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  initialBalance: real('initial_balance').notNull().default(0),
 });
 
 export const budgets = sqliteTable('budgets', {
@@ -26,6 +27,8 @@ export const transactions = sqliteTable('transactions', {
   imageUri: text('image_uri'),
   note: text('note'),
   lineItemsText: text('line_items_text'),
+  // Transfers only: the account receiving the money. The amount is stored negative on wallet_id (the source).
+  toWalletId: integer('to_wallet_id').references(() => wallets.id),
 });
 
 export const transactionItems = sqliteTable('transaction_items', {

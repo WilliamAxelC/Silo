@@ -26,6 +26,22 @@ export interface Transaction {
   imageUri?: string | null;
   note?: string;
   lineItemsText?: string;
+  /** Account the money left (expense, transfer) or arrived in (income). Defaults to the first account. */
+  walletId?: number;
+  /** Transfers only: the receiving account. */
+  toWalletId?: number | null;
+}
+
+export type WalletType = 'cash' | 'bank' | 'ewallet' | 'card' | 'savings';
+
+export interface Wallet {
+  id: number;
+  name: string;
+  type: WalletType;
+  isActive: boolean;
+  initialBalance: number;
+  /** initialBalance plus every income/expense in the account and transfers in and out. */
+  balance: number;
 }
 
 export type AIInferenceMode = 'local' | 'external';

@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
-import { db, searchTransactions as searchTransactionsDb } from '../db/index';
+import { db, expoDb, searchTransactions as searchTransactionsDb } from '../db/index';
 import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
-import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
+import { DEFAULT_WALLET_ID, TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
 import {
   getCategoriesForType,
@@ -15,12 +15,20 @@ import {
 } from '../features/transactions/categories';
 import { normalizeTransactionInput } from '../features/transactions/factories';
 import { mapTransactionRowToModel } from '../features/transactions/mappers';
-import type { CategoryRecord, CategoryType, Transaction, TransactionInput, TransactionUpdate, TransactionType } from '../features/transactions/types';
+import type { CategoryRecord, CategoryType, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
 export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
 
+export interface WalletInput {
+  name: string;
+  type: WalletType;
+  initialBalance: number;
+}
+
 interface TransactionState {
   transactionsList: Transaction[];
+  /** Accounts (cash, bank, e-wallet, card) with live balances, active first. */
+  wallets: Wallet[];
   categories: CategoryRecord[];
   budgets: Record<string, number>;
   isSaving: boolean;
@@ -30,6 +38,11 @@ interface TransactionState {
   fetchTransactions: () => Promise<void>;
   fetchCategories: () => Promise<void>;
   fetchBudgets: () => Promise<void>;
+  fetchWallets: () => void;
+  addWallet: (input: WalletInput) => number;
+  updateWallet: (id: number, input: Partial<WalletInput> & { isActive?: boolean }) => void;
+  /** Deletes an unused account; one with transactions is archived instead. Returns what happened. */
+  removeWallet: (id: number) => { ok: boolean; archived?: boolean; message?: string };
   searchTransactions: (query: string, options?: { limit?: number; offset?: number; type?: TransactionType }) => Promise<Transaction[]>;
   addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
   updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
@@ -55,14 +68,54 @@ function normalizeBudgetMap(rows: Array<{ category: string; limitAmount: number 
   return budgetMap;
 }
 
+const WALLET_TYPES = new Set<WalletType>(['cash', 'bank', 'ewallet', 'card', 'savings']);
+
+function readWallets(): Wallet[] {
+  const rows = expoDb.getAllSync<{
+    id: number;
+    name: string;
+    type: string;
+    isActive: number | null;
+    initialBalance: number | null;
+    balance: number | null;
+  }>(`
+    SELECT w.id, w.name, w.type, w.is_active AS isActive, w.initial_balance AS initialBalance,
+      COALESCE(w.initial_balance, 0)
+        + COALESCE((SELECT SUM(t.total_amount) FROM transactions t WHERE t.wallet_id = w.id), 0)
+        - COALESCE((SELECT SUM(t.total_amount) FROM transactions t WHERE t.to_wallet_id = w.id AND t.type = 'transfer'), 0)
+        AS balance
+    FROM wallets w
+    ORDER BY w.is_active DESC, w.id ASC;
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: WALLET_TYPES.has(row.type as WalletType) ? (row.type as WalletType) : 'cash',
+    isActive: row.isActive !== 0,
+    initialBalance: row.initialBalance ?? 0,
+    balance: Math.round((row.balance ?? 0) * 100) / 100,
+  }));
+}
+
+function resolveAccounts(tx: Pick<TransactionInput, 'type' | 'walletId' | 'toWalletId'>) {
+  const walletId = tx.walletId ?? DEFAULT_WALLET_ID;
+  if (tx.type !== 'transfer') return { walletId, toWalletId: null };
+  if (!tx.toWalletId || tx.toWalletId === walletId) {
+    throw new Error('Choose two different accounts for a transfer.');
+  }
+  return { walletId, toWalletId: tx.toWalletId };
+}
+
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactionsList: [],
+  wallets: [],
   categories: [],
   budgets: {},
   isSaving: false,
   error: null,
 
   initDB: async () => {
+    get().fetchWallets();
     await get().fetchCategories();
     await get().fetchTransactions();
     await get().fetchBudgets();
@@ -81,16 +134,76 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           note: aiTransactionsView.note,
           lineItemsText: aiTransactionsView.lineItemsText,
           category: aiTransactionsView.category,
+          walletId: transactions.walletId,
+          toWalletId: transactions.toWalletId,
         })
         .from(aiTransactionsView)
         .leftJoin(transactions, eq(aiTransactionsView.transactionId, transactions.id))
         .orderBy(desc(aiTransactionsView.date));
 
       set({ transactionsList: rows.map(mapTransactionRowToModel) });
+      get().fetchWallets();
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
     }
+  },
+
+  fetchWallets: () => {
+    try {
+      set({ wallets: readWallets() });
+    } catch (error) {
+      console.warn('Failed to read accounts:', error);
+    }
+  },
+
+  addWallet: ({ name, type, initialBalance }) => {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Give the account a name.');
+    const result = expoDb.runSync('INSERT INTO wallets (name, type, is_active, initial_balance) VALUES (?, ?, 1, ?);', [
+      trimmed,
+      type,
+      Number.isFinite(initialBalance) ? initialBalance : 0,
+    ]);
+    get().fetchWallets();
+    return Number(result.lastInsertRowId);
+  },
+
+  updateWallet: (id, input) => {
+    const current = get().wallets.find((wallet) => wallet.id === id);
+    if (!current) return;
+    if (input.isActive === false && get().wallets.filter((w) => w.isActive).length <= 1 && current.isActive) {
+      throw new Error('Keep at least one active account.');
+    }
+    expoDb.runSync('UPDATE wallets SET name = ?, type = ?, initial_balance = ?, is_active = ? WHERE id = ?;', [
+      (input.name ?? current.name).trim() || current.name,
+      input.type ?? current.type,
+      input.initialBalance ?? current.initialBalance,
+      (input.isActive ?? current.isActive) ? 1 : 0,
+      id,
+    ]);
+    get().fetchWallets();
+  },
+
+  removeWallet: (id) => {
+    const wallet = get().wallets.find((item) => item.id === id);
+    if (!wallet) return { ok: false, message: 'Account not found.' };
+    if (wallet.isActive && get().wallets.filter((w) => w.isActive).length <= 1) {
+      return { ok: false, message: 'Keep at least one active account.' };
+    }
+    const used = expoDb.getFirstSync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM transactions WHERE wallet_id = ? OR to_wallet_id = ?;',
+      [id, id],
+    );
+    // The default account is the fallback for saves without an account (and budgets point at it): archive only.
+    if ((used?.n ?? 0) > 0 || id === DEFAULT_WALLET_ID) {
+      expoDb.runSync('UPDATE wallets SET is_active = 0 WHERE id = ?;', [id]);
+      get().fetchWallets();
+      return { ok: true, archived: true };
+    }
+    expoDb.runSync('DELETE FROM wallets WHERE id = ?;', [id]);
+    get().fetchWallets();
+    return { ok: true };
   },
 
   fetchCategories: async () => {
@@ -252,12 +365,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     try {
       const normalizedTx = normalizeTransactionInput(tx);
       const categoryType = getCategoryTypeForTransaction(normalizedTx.type);
-      const normalizedCategory = get().normalizeCategoryForType(normalizedTx.category, normalizedTx.type);
+      const normalizedCategory =
+        normalizedTx.type === 'transfer'
+          ? TRANSFER_CATEGORY_LABEL
+          : get().normalizeCategoryForType(normalizedTx.category, normalizedTx.type);
+      const accounts = resolveAccounts(normalizedTx);
       await db.transaction(async (txDb) => {
         const [newTx] = await txDb
           .insert(transactions)
           .values({
-            walletId: DEFAULT_WALLET_ID,
+            walletId: accounts.walletId,
+            toWalletId: accounts.toWalletId,
             merchantName: normalizedTx.merchantName,
             totalAmount: normalizedTx.totalAmount,
             type: normalizedTx.type,
@@ -295,9 +413,20 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const normalizedTx = normalizeTransactionInput(tx as TransactionInput);
       const existingTransaction = get().transactionsList.find((item) => item.id === id);
       const nextType = (tx.type ?? existingTransaction?.type ?? 'expense') as TransactionType;
-      const nextCategory = tx.category !== undefined
-        ? get().normalizeCategoryForType(normalizedTx.category, nextType)
-        : existingTransaction?.category;
+      const nextCategory =
+        nextType === 'transfer'
+          ? TRANSFER_CATEGORY_LABEL
+          : tx.category !== undefined
+            ? get().normalizeCategoryForType(normalizedTx.category, nextType)
+            : existingTransaction?.category;
+      const accountsChanged = tx.walletId !== undefined || tx.toWalletId !== undefined || tx.type !== undefined;
+      const accounts = accountsChanged
+        ? resolveAccounts({
+            type: nextType,
+            walletId: tx.walletId ?? existingTransaction?.walletId,
+            toWalletId: tx.toWalletId !== undefined ? tx.toWalletId : existingTransaction?.toWalletId,
+          })
+        : null;
 
       await db.transaction(async (txDb) => {
         if (
@@ -307,7 +436,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           tx.type !== undefined ||
           tx.imageUri !== undefined ||
           tx.note !== undefined ||
-          tx.lineItemsText !== undefined
+          tx.lineItemsText !== undefined ||
+          accounts
         ) {
           await txDb
             .update(transactions)
@@ -319,6 +449,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
               imageUri: tx.imageUri,
               note: tx.note !== undefined ? normalizedTx.note : undefined,
               lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : undefined,
+              walletId: accounts?.walletId,
+              toWalletId: accounts ? accounts.toWalletId : undefined,
             })
             .where(eq(transactions.id, id));
         }

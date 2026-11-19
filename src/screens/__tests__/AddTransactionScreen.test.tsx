@@ -337,4 +337,30 @@ describe('AddTransactionScreen', () => {
     expect(analyzeReceiptImage).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
   });
+
+  it('requires a different destination account before saving a transfer', async () => {
+    useTransactionStore.setState({
+      wallets: [
+        { id: 1, name: 'Cash', type: 'cash', isActive: true, initialBalance: 0, balance: 0 },
+        { id: 2, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0 },
+      ],
+    } as any);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Set Transfer type' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('200000');
+    });
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Select category' })).toHaveLength(0);
+
+    const saveBtn = renderer.root.findAll((n: any) => n.props.accessibilityLabel === 'Save transaction')[0];
+    await ReactTestRenderer.act(async () => {
+      await saveBtn.props.onPress();
+    });
+    expect(Alert.alert).toHaveBeenCalledWith('Choose accounts', expect.any(String));
+  });
 });

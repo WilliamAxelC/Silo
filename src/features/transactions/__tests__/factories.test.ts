@@ -80,12 +80,15 @@ describe('transaction factories', () => {
   describe('deriveEditableTransactionType', () => {
     it('derives "income" when totalAmount is positive', () => {
       expect(deriveEditableTransactionType(50000, 'expense')).toBe('income');
-      expect(deriveEditableTransactionType(0.01, 'transfer')).toBe('income');
     });
 
     it('derives "expense" when totalAmount is negative', () => {
       expect(deriveEditableTransactionType(-50000, 'income')).toBe('expense');
-      expect(deriveEditableTransactionType(-0.5, 'transfer')).toBe('expense');
+    });
+
+    it('keeps transfers as transfers whatever the stored sign', () => {
+      expect(deriveEditableTransactionType(-0.5, 'transfer')).toBe('transfer');
+      expect(deriveEditableTransactionType(0.01, 'transfer')).toBe('transfer');
     });
 
     it('uses fallbackType when totalAmount is zero or non-finite', () => {

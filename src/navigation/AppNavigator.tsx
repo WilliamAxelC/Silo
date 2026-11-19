@@ -23,6 +23,7 @@ import { ChatbotScreen } from '../screens/ChatbotScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { SystemLogsScreen } from '../screens/SystemLogsScreen';
 import { ReceiptInboxScreen } from '../screens/ReceiptInboxScreen';
+import { AccountsScreen } from '../screens/AccountsScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -132,6 +133,7 @@ export const AppNavigator = () => {
         Settings: 'settings',
         SystemLogs: 'logs',
         ReceiptInbox: 'receipts',
+        Accounts: 'accounts',
       },
     },
   };
@@ -153,6 +155,7 @@ export const AppNavigator = () => {
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
           <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
+          <Stack.Screen name="Accounts" component={AccountsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

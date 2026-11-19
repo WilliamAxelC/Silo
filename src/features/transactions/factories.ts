@@ -24,10 +24,15 @@ export function createTransactionInput(input?: Partial<TransactionInput>): Trans
     note: input?.note ?? '',
     lineItemsText: input?.lineItemsText ?? '',
     imageUri: input?.imageUri ?? null,
+    walletId: input?.walletId,
+    toWalletId: type === 'transfer' ? input?.toWalletId ?? null : null,
   };
 }
 
 export function deriveEditableTransactionType(totalAmount: number, fallbackType: TransactionType): TransactionType {
+  if (fallbackType === 'transfer') {
+    return 'transfer';
+  }
   if (typeof totalAmount === 'number' && Number.isFinite(totalAmount)) {
     if (totalAmount > 0) {
       return 'income';

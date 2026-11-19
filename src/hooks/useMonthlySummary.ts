@@ -10,7 +10,8 @@ export const useMonthlySummary = (currentDate: Date) => {
       (acc, tx) => {
         if (tx.date && isSameMonth(new Date(tx.date), currentDate)) {
           acc.currentMonthData.push(tx);
-          const amount = tx.totalAmount || 0;
+          // Transfers move money between the user's own accounts: neither income nor spending.
+          const amount = tx.type === 'transfer' ? 0 : tx.totalAmount || 0;
           if (amount > 0) {
             acc.totalIncome += amount;
           } else if (amount < 0) {
