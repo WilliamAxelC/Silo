@@ -93,3 +93,13 @@ jest.mock('react-native-document-scanner-plugin', () => ({
   ResponseType: { Base64: 'base64', ImageFilePath: 'imageFilePath' },
   ScanDocumentResponseStatus: { Success: 'success', Cancel: 'cancel' },
 }));
+
+jest.mock('expo-local-authentication', () => ({
+  authenticateAsync: jest.fn(() => Promise.resolve({ success: true })),
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(2)),
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+}));
+
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(() => Promise.resolve({ canceled: true, assets: null })),
+}));

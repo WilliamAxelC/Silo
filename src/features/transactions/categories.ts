@@ -111,6 +111,7 @@ export function getInitialAppSettings(): AppSettings {
     localSystemPrompt: DEFAULT_APP_SETTINGS.localSystemPrompt,
     externalSystemPrompt: DEFAULT_APP_SETTINGS.externalSystemPrompt,
     receiptReadingMode: DEFAULT_RECEIPT_READING_MODE,
+    appLockEnabled: DEFAULT_APP_SETTINGS.appLockEnabled,
   };
 }
 
@@ -176,6 +177,9 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.externalSystemPrompt:
         base.externalSystemPrompt = row.value ?? DEFAULT_APP_SETTINGS.externalSystemPrompt;
+        break;
+      case APP_SETTING_KEYS.appLockEnabled:
+        base.appLockEnabled = row.value === 'true';
         break;
       case RECEIPT_READING_MODE_KEY:
         if (row.value === 'ocr' || row.value === 'vision') {

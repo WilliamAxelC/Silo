@@ -20,6 +20,9 @@ import { useNavigation } from '@react-navigation/native';
 
 import { documentDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
+import { createBackupFile, restoreBackupFile } from '../services/backup';
+import { authenticateUser, canUseAppLock } from '../components/AppLockGate';
 
 import { NavigationProps } from '../navigation/types';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -89,6 +92,7 @@ export const SettingsScreen = () => {
     useTransactionStore();
 
   const [isExporting, setIsExporting] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [categoryDraft, setCategoryDraft] = useState('');
   const [categoryType, setCategoryType] = useState<CategoryType>('expense');
@@ -233,6 +237,63 @@ export const SettingsScreen = () => {
         },
       },
     ]);
+  };
+
+  const appLockEnabled = useSettingsStore((s) => s.appLockEnabled);
+  const handleAppLockToggle = async (next: boolean) => {
+    if (next && !(await canUseAppLock())) {
+      Alert.alert('Set up a screen lock first', 'App Lock uses your fingerprint, face or phone PIN. Add one in your phone settings.');
+      return;
+    }
+    // Confirm it is the owner both when turning the lock on and off.
+    if (await authenticateUser(next ? 'Turn on App Lock' : 'Turn off App Lock')) {
+      await useSettingsStore.getState().setAppLockEnabled(next);
+    }
+  };
+
+  const handleBackup = async () => {
+    setIsBackingUp(true);
+    try {
+      const fileUri = await createBackupFile();
+      if (!(await isAvailableAsync())) {
+        Alert.alert('Backup created', 'Sharing is not available on this device.');
+        return;
+      }
+      await shareAsync(fileUri, { mimeType: 'application/octet-stream', dialogTitle: 'Save your Silo backup' });
+    } catch (error) {
+      Alert.alert('Backup failed', getErrorMessage(error, 'Could not create the backup.'));
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const runRestore = async (uri: string) => {
+    setIsBackingUp(true);
+    try {
+      const { transactions } = await restoreBackupFile(uri);
+      await useSettingsStore.getState().loadSettings();
+      const store = useTransactionStore.getState();
+      await Promise.all([store.fetchTransactions(), store.fetchCategories(), store.fetchBudgets()]);
+      Alert.alert('Backup restored', `${transactions} transaction${transactions === 1 ? '' : 's'} restored.`);
+    } catch (error) {
+      Alert.alert('Restore failed', `${getErrorMessage(error, 'Could not read the backup.')} Your current data was not changed.`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    if (picked.canceled || !picked.assets?.[0]?.uri) return;
+    const uri = picked.assets[0].uri;
+    Alert.alert(
+      'Replace all data?',
+      'Everything in Silo on this phone will be replaced by the backup. Back up first if you might need the current data.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore', style: 'destructive', onPress: () => void runRestore(uri) },
+      ],
+    );
   };
 
   const handleExportCSV = async () => {
@@ -1205,6 +1266,24 @@ export const SettingsScreen = () => {
         {/* Data & Logs Section */}
         <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>DATA & SYSTEM</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="finger-print-outline" size={18} color={theme.primary} />
+              <View>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>App Lock</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Fingerprint, face or phone PIN to open Silo</Text>
+              </View>
+            </View>
+            <Switch
+              value={appLockEnabled}
+              onValueChange={(next) => void handleAppLockToggle(next)}
+              trackColor={{ false: '#767577', true: theme.primary }}
+              accessibilityLabel="App Lock"
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
           <TouchableOpacity
             style={styles.row}
             onPress={handleExportCSV}
@@ -1216,6 +1295,29 @@ export const SettingsScreen = () => {
               <Text style={[styles.rowText, { color: theme.text }, textScale]}>Export Transactions CSV</Text>
             </View>
             {isExporting ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.row} onPress={handleBackup} disabled={isBackingUp} accessibilityRole="button">
+            <View style={styles.rowLeft}>
+              <Ionicons name="cloud-upload-outline" size={18} color={theme.primary} />
+              <View>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Back Up All Data</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Save a file to Drive, email or another app</Text>
+              </View>
+            </View>
+            {isBackingUp ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity style={styles.row} onPress={handleRestore} disabled={isBackingUp} accessibilityRole="button">
+            <View style={styles.rowLeft}>
+              <Ionicons name="cloud-download-outline" size={18} color={theme.primary} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
@@ -1343,6 +1445,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  rowSubText: { marginTop: 2, marginLeft: 10 },
   rowText: { marginLeft: 10, fontWeight: '600' },
   divider: { height: 1, marginLeft: 44 },
   rowBlock: { paddingHorizontal: 14, paddingVertical: 12 },

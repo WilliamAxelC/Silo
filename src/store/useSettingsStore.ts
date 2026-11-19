@@ -31,6 +31,7 @@ interface SettingsState extends AppSettings {
   setLocalSystemPrompt: (prompt: string) => Promise<void>;
   setExternalSystemPrompt: (prompt: string) => Promise<void>;
   setReceiptReadingMode: (mode: 'ocr' | 'vision') => Promise<void>;
+  setAppLockEnabled: (enabled: boolean) => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
@@ -197,6 +198,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setReceiptReadingMode: async (receiptReadingMode) => {
     await saveSetting('receiptReadingMode', receiptReadingMode);
     set({ receiptReadingMode });
+  },
+
+  setAppLockEnabled: async (appLockEnabled) => {
+    await saveSetting('appLockEnabled', appLockEnabled);
+    set({ appLockEnabled });
   },
 }));
 

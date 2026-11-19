@@ -67,6 +67,8 @@ export interface AppSettings {
   externalApiCustomHeaders: string;
   localSystemPrompt: string;
   externalSystemPrompt: string;
+  /** Require fingerprint/face/device PIN to open Silo. */
+  appLockEnabled: boolean;
 }
 
 export type TransactionInput = Omit<Transaction, 'id'>;

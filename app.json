@@ -37,7 +37,19 @@
       "expo-sqlite",
       "@react-native-community/datetimepicker",
       "expo-secure-store",
-      "./plugins/withMlKitLatinOnly"
+      "./plugins/withMlKitLatinOnly",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Silo to use Face ID to unlock the app."
+        }
+      ],
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "Silo uses the camera to scan receipts."
+        }
+      ]
     ],
     "extra": {
       "eas": {

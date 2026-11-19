@@ -118,6 +118,7 @@ export const DEFAULT_APP_SETTINGS = {
   externalApiCustomHeaders: '{}',
   localSystemPrompt: '',
   externalSystemPrompt: '',
+  appLockEnabled: false,
 } as const;
 
 export const APP_SETTING_KEYS = {
@@ -137,4 +138,5 @@ export const APP_SETTING_KEYS = {
   externalApiCustomHeaders: 'externalApiCustomHeaders',
   localSystemPrompt: 'localSystemPrompt',
   externalSystemPrompt: 'externalSystemPrompt',
+  appLockEnabled: 'appLockEnabled',
 } as const;
