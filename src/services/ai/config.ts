@@ -1,10 +1,10 @@
 import type { LocalRuntimeInfo } from './localInferenceTypes';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { MODEL_CATALOG } from '../../features/transactions/constants';
+import { DEFAULT_APP_SETTINGS, MODEL_CATALOG } from '../../features/transactions/constants';
 
 export function getActiveModelConfig(modelId?: string) {
-  const selectedModelId = modelId ?? useSettingsStore.getState().activeModelId ?? 'qwen3.5-2b';
-  const preset = MODEL_CATALOG[selectedModelId] || MODEL_CATALOG['qwen3.5-2b'];
+  const selectedModelId = modelId ?? useSettingsStore.getState().activeModelId ?? DEFAULT_APP_SETTINGS.activeModelId;
+  const preset = MODEL_CATALOG[selectedModelId] || MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
   return {
     modelId: preset.id,
     version: preset.id,

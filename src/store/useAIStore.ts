@@ -278,7 +278,7 @@ export const createInitialProvisioningSnapshot = (): AIProvisioningSnapshot => (
   progress: 0,
   downloadedBytes: 0,
   totalBytes: null,
-  version: 'qwen3.5-2b',
+  version: 'qwen3.5-0.8b',
   modelPath: null,
   tempPath: null,
   checksumVerified: false,
@@ -323,8 +323,8 @@ export const createInitialContextWindowSnapshot = (): AIContextWindowSnapshot =>
 });
 
 export const useAIStore = create<AIStoreState>((set) => ({
-  localModelId: 'qwen3.5-2b',
-  localModelDisplayName: 'Qwen 3.5 2B',
+  localModelId: 'qwen3.5-0.8b',
+  localModelDisplayName: 'Qwen 3.5 0.8B',
   selectedMode: 'rag',
   chatHistory: [],
   provisioning: createInitialProvisioningSnapshot(),

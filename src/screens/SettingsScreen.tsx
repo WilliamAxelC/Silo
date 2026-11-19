@@ -30,7 +30,7 @@ import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
-import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
+import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
 import {
   cancelVisionProjectorDownload,
   deleteVisionProjector,
@@ -92,6 +92,10 @@ export const SettingsScreen = () => {
     useTransactionStore();
 
   const [isExporting, setIsExporting] = useState(false);
+  const activeModelId = useSettingsStore((s) => s.activeModelId);
+  const activeModel = MODEL_CATALOG[activeModelId] ?? MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
+  const formatGb = (bytes: number) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
+  const modelDownloadLabel = `~${formatGb(activeModel.sizeBytes + (activeModel.visionProjector?.sizeBytes ?? 0))} download`;
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [categoryDraft, setCategoryDraft] = useState('');
@@ -758,9 +762,9 @@ export const SettingsScreen = () => {
                       <Ionicons name="hardware-chip" size={18} color={theme.primary} />
                     </View>
                     <View>
-                      <Text style={[styles.modelName, { color: theme.text }]}>Qwen 3.5 2B (GGUF)</Text>
+                      <Text style={[styles.modelName, { color: theme.text }]}>{activeModel.displayName.replace(' (Offline)', '')} (GGUF)</Text>
                       <Text style={[styles.modelSpec, { color: theme.textMuted }]}>
-                        ~1.5 GB · 2GB RAM required · 3GB recommended
+                        {modelDownloadLabel} · {formatGb(activeModel.requiredRamBytes)} RAM required · {formatGb(activeModel.recommendedRamBytes)} recommended
                       </Text>
                     </View>
                   </View>

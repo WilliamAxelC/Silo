@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
-import { EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
+import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
 import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider } from '../features/transactions/types';
 import { useAIStore } from './useAIStore';
 
@@ -102,7 +102,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       isDarkMode: deriveIsDarkMode(parsed.themeMode),
       isLoaded: true,
     });
-    const preset = MODEL_CATALOG[parsed.activeModelId] || MODEL_CATALOG['qwen3.5-2b'];
+    const preset = MODEL_CATALOG[parsed.activeModelId] || MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
     useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
   },
 
@@ -144,7 +144,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setActiveModelId: async (activeModelId) => {
     await saveSetting('activeModelId', activeModelId);
     set({ activeModelId });
-    const preset = MODEL_CATALOG[activeModelId] || MODEL_CATALOG['qwen3.5-2b'];
+    const preset = MODEL_CATALOG[activeModelId] || MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
     useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
   },
 

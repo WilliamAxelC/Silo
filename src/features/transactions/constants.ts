@@ -77,6 +77,32 @@ export const MODEL_CATALOG: Record<
     visionProjector?: VisionProjectorConfig;
   }
 > = {
+  // Default. On the receipt benchmark it matched or beat the 2B (93% vs 79% of totals on the owner's receipts)
+  // at about half the time and a third of the download (bench/results/REPORT.md, Addendum 3).
+  'qwen3.5-0.8b': {
+    id: 'qwen3.5-0.8b',
+    displayName: 'Qwen 3.5 0.8B (Offline)',
+    family: 'qwen',
+    parameterSize: '0.8B',
+    quantization: 'Q4_K_M',
+    capabilities: ['text'],
+    fileName: 'Qwen3.5-0.8B-Q4_K_M.gguf',
+    downloadUrl: 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf',
+    sha256: 'bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517',
+    md5: '54e125d56fa41fe6eed66034f9fd4fa5',
+    sizeBytes: 532517120,
+    fileSizeBytes: 532517120,
+    minFreeSpaceBytes: 1 * 1024 * 1024 * 1024,
+    recommendedRamBytes: 2 * 1024 * 1024 * 1024,
+    requiredRamBytes: 1.5 * 1024 * 1024 * 1024,
+    description: 'Fastest and smallest. Reads receipts as accurately as 2B in our tests. Recommended.',
+    visionProjector: {
+      url: 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/mmproj-F16.gguf',
+      fileName: 'mmproj-F16.gguf',
+      sizeBytes: 204987232,
+      md5: '436b0222809f7a35fe0b9b8be038ebf1',
+    },
+  },
   'qwen3.5-2b': {
     id: 'qwen3.5-2b',
     displayName: 'Qwen 3.5 2B (Offline)',
@@ -93,7 +119,7 @@ export const MODEL_CATALOG: Record<
     minFreeSpaceBytes: 2 * 1024 * 1024 * 1024,
     recommendedRamBytes: 3 * 1024 * 1024 * 1024,
     requiredRamBytes: 2 * 1024 * 1024 * 1024,
-    description: 'High performance edge LLM. Fast, accurate, and completely offline.',
+    description: 'Larger model: better for chat and questions about your spending, slower for receipts.',
     visionProjector: {
       url: 'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf',
       fileName: 'mmproj-F16.gguf',
@@ -111,7 +137,7 @@ export const DEFAULT_APP_SETTINGS = {
   showIncomeInReportsFirst: false,
   fontScale: 1,
   aiInferenceMode: 'local',
-  activeModelId: 'qwen3.5-2b',
+  activeModelId: 'qwen3.5-0.8b',
   aiWifiOnlyDownload: false,
   externalApiProvider: 'openai',
   externalApiUrl: 'https://api.openai.com/v1',

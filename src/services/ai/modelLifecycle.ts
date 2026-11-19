@@ -25,7 +25,7 @@ import {
   useAIStore,
 } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { MODEL_CATALOG, type VisionProjectorConfig } from '../../features/transactions/constants';
+import { DEFAULT_APP_SETTINGS, MODEL_CATALOG, type VisionProjectorConfig } from '../../features/transactions/constants';
 
 type DownloadProgress = {
   totalBytesExpectedToWrite: number;
@@ -328,8 +328,8 @@ async function safeDelete(path: string) {
 }
 
 function getActiveProjectorConfig(): VisionProjectorConfig | undefined {
-  const selectedModelId = useSettingsStore.getState().activeModelId ?? 'qwen3.5-2b';
-  const entry = MODEL_CATALOG[selectedModelId] ?? MODEL_CATALOG['qwen3.5-2b'];
+  const selectedModelId = useSettingsStore.getState().activeModelId ?? DEFAULT_APP_SETTINGS.activeModelId;
+  const entry = MODEL_CATALOG[selectedModelId] ?? MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
   return entry?.visionProjector;
 }
 
