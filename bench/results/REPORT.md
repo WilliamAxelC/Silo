@@ -78,3 +78,44 @@ Other findings:
 - Replacing a VLM total with the OCR heuristic when it isn't found in the OCR text (`E`) hurt: OCR misses are more common than VLM misreads. The app keeps the VLM total and asks the user to double-check instead.
 
 **What Silo ships (Nov 2026):** default = ML Kit OCR → visual rows → keyword total → local Qwen3.5-2B with JSON schema + grounding (only if the model is already installed) → heuristic fallback. Opt-in "Accurate (AI vision)" = the same Qwen3.5-2B reading the photo (≤768 px) via its vision projector (+668 MB). Phone latency for vision has not been measured yet — do that on a real device before making it the default.
+
+## Addendum 2: OCR engines, APK size, and CORD-fine-tuned models (Nov 2026)
+
+### OCR engines (receipt total via the app's own `receiptText.ts` pipeline, n=189 with totals)
+
+| Engine | Totals correct (all) | S (n=39) | Ceiling* | Median OCR time |
+|---|---:|---:|---:|---:|
+| RapidOCR (PP-OCRv4 ONNX, desktop stand-in used above) | 68% | 56% | 89% | – |
+| ppu-paddle-ocr v6-tiny (the library and default model Silo's PaddleOcrEngine wrapped) | 59% | 44% | 87% | 331 ms |
+| ppu-paddle-ocr v6-small | 67% | 51% | 89% | 980 ms |
+| ppu-paddle-ocr v5-latin-mobile | 69% | 54% | 92% | 685 ms |
+| ML Kit text-recognition 16.0.1 (Android emulator, `bench/mlkit-harness`) | pending | | | |
+
+\*Ceiling = the true total appears among the amounts parsed from the OCR rows. Keyword-pick only (no LLM, no legacy fallback), so these numbers are lower than the 74% "new app heuristic" figure above. Reproduce: `node bench/eval/ppu_ocr.mjs …` then `node bench/eval/score_ocr_engines.js bench/cache/ocr bench/cache/ocr_ppu_*`.
+
+Silo's PaddleOcrEngine never ran on a phone: it imported `PaddleOCR` (ppu-paddle-ocr/mobile exports `PaddleOcrService`) and passed `file://` URIs (the library wants an ArrayBuffer), so every scan fell back to ML Kit. Since even a working PaddleOCR is not better than the alternatives, it was removed.
+
+### APK size (release, arm64-v8a only, `bench`-external build on ai-renderer)
+
+| Build | APK | Δ |
+|---|---:|---:|
+| Before (ML Kit + PaddleOCR: onnxruntime 36 MB, react-native-skia 13 MB) | 168.2 MB | – |
+| PaddleOCR removed | 117.8 MB | −50.4 MB |
+| + ML Kit Latin-only (`plugins/withMlKitLatinOnly.js`) | 115.4 MB | −2.4 MB |
+| Shipped commit b6d39ef | **115.0 MB** | **−53.2 MB (−32%)** |
+
+Largest remaining item: llama.rn ships 7 CPU-feature variants of llama.cpp (~62 MB together), chosen at runtime.
+
+### CORD-fine-tuned models vs general VLMs (subset S, n=39; totals exact)
+
+| Model | Size on device | Totals | CORD / deg / non-CORD | Item price recall | Median (desktop CPU) |
+|---|---:|---:|---|---:|---:|
+| Qwen3.5-0.8B + mmproj (D2, general) | 0.74 GB | **90%** | 20/20 · 9/12 · 6/7 | 80% | 15.4 s |
+| Qwen3.5-2B + mmproj (D, Silo's "Accurate" mode) | 1.95 GB | **90%** | 19/20 · 9/12 · 7/7 | 79% | 33.6 s |
+| `N-Mehdi/qwen3-vl-2b-receipts` Q4_K_M (CORD + French invoices QLoRA) | 1.93 GB | 82% | 19/20 · 9/12 · 4/7 | **93%** | 64 s† |
+| `naver-clova-ix/donut-base-finetuned-cord-v2` (PyTorch fp32) | ~0.2 GB (int8 ONNX) | 77% | 20/20 · 10/12 · **0/7** | 91% | 11 s† |
+| Xiaomi-OCR-0 Q4_K_M + `Lucasgitguy-co/…-CORD-LoRA` | 0.75 GB | 7% | malformed JSON, Chinese keys | 14% | 40 s† |
+
+†Run on ai-renderer while Android builds shared the CPU; latencies are pessimistic.
+
+Donut on all 197 images: CORD 142/143, CORD-degraded 31/39, non-CORD 0/7. It reads CORD-layout receipts almost perfectly and fails every other receipt; the CORD test split is held out from its training, so this is overfitting to the layout, not leakage. The CORD-tuned Qwen3-VL extracts line items better (93% vs 80%) but loses totals on non-CORD receipts and is 4x slower than the 0.8B. **Decision: keep the general Qwen3.5 VLM for "Accurate" mode.** The 7 non-CORD receipts are too few to rank models on generalization alone; adding the user's own receipt photos to `labels.jsonl` is the most valuable next dataset step.
