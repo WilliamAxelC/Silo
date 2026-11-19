@@ -29,6 +29,7 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
 import { scanReceiptDocuments } from '../services/ocr/documentScanner';
 import { AccountPickerModal } from '../components/AccountPickerModal';
+import { RECURRING_FREQUENCIES, createRecurringRule, type RecurringFrequency } from '../services/recurring';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -116,6 +117,7 @@ export const AddTransactionScreen = () => {
   const [walletId, setWalletId] = useState<number | null>(null);
   const [toWalletId, setToWalletId] = useState<number | null>(null);
   const [accountPicker, setAccountPicker] = useState<'from' | 'to' | null>(null);
+  const [repeat, setRepeat] = useState<RecurringFrequency | null>(null);
   const effectiveWalletId = walletId ?? defaultWalletId;
   const walletName = (id: number | null) => wallets.find((w) => w.id === id)?.name ?? 'Choose account';
   const [category, setCategory] = useState('');
@@ -178,6 +180,7 @@ export const AddTransactionScreen = () => {
     setIsRawTextExpanded(false);
     setWalletId(null);
     setToWalletId(null);
+    setRepeat(null);
   };
 
   useEffect(() => {
@@ -515,6 +518,9 @@ export const AddTransactionScreen = () => {
         await updateTransaction(editingId, data);
       } else {
         await addTransaction(data);
+        if (repeat) {
+          createRecurringRule(data, repeat, data.date);
+        }
         if (receiptQueueId) {
           // The transaction now owns the receipt photo, so keep the file.
           await useReceiptQueueStore.getState().remove(receiptQueueId, false);
@@ -801,6 +807,32 @@ export const AddTransactionScreen = () => {
             </View>
           </View>
 
+          {!editingId ? (
+            <View style={styles.inputGroupCompact}>
+              <Text style={[styles.label, { color: theme.text }]}>Repeat</Text>
+              <View style={styles.repeatRow}>
+                {[{ key: null, label: 'Never' }, ...RECURRING_FREQUENCIES].map((option) => {
+                  const selected = repeat === option.key;
+                  return (
+                    <TouchableOpacity
+                      key={option.label}
+                      style={[
+                        styles.repeatChip,
+                        { borderColor: selected ? theme.primary : theme.border, backgroundColor: selected ? theme.primaryMuted : theme.surface },
+                      ]}
+                      onPress={() => setRepeat(option.key as RecurringFrequency | null)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`Repeat ${option.label}`}
+                    >
+                      <Text style={[styles.repeatChipText, { color: selected ? theme.primary : theme.text }]}>{option.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+
           {/* Details Section (Note vs Items vs Both) */}
           <View style={styles.inputGroupCompact}>
             <View style={styles.inlineSectionHeader}>
@@ -1053,6 +1085,9 @@ const styles = StyleSheet.create({
   flexField: { flex: 1 },
   amountField: { width: 160, marginLeft: 10 },
   dateGroup: { width: 180, marginLeft: 10 },
+  repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 34, justifyContent: 'center' },
+  repeatChipText: { fontSize: 13, fontWeight: '600' },
   transferArrow: { alignSelf: 'flex-end', marginHorizontal: 6, marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   compactInput: { minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontSize: 14 },

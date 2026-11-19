@@ -12,6 +12,7 @@ const RESTORE_TABLES = [
   'transactions',
   'transaction_items',
   'shared_splits',
+  'recurring_rules',
 ] as const;
 // receipt_queue is left alone: queued photos live on the old device.
 

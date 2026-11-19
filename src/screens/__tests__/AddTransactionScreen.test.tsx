@@ -363,4 +363,25 @@ describe('AddTransactionScreen', () => {
     });
     expect(Alert.alert).toHaveBeenCalledWith('Choose accounts', expect.any(String));
   });
+
+  it('saves a repeat rule along with a new transaction when Repeat is set', async () => {
+    const recurring = require('../../services/recurring');
+    const createRule = jest.spyOn(recurring, 'createRecurringRule').mockReturnValue(1);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Netflix');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('186000');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Repeat Monthly' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findAll((n: any) => n.props.accessibilityLabel === 'Save transaction')[0].props.onPress();
+    });
+    expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ merchantName: 'Netflix', totalAmount: -186000 }), 'monthly', expect.any(Number));
+    createRule.mockRestore();
+  });
 });

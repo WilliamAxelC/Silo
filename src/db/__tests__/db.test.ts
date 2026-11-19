@@ -139,7 +139,7 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(10);
+      expect(versionRow?.user_version).toBe(11);
     });
 
     it('skips migrations, seeding, and view recreation on steady-state launch when user_version is current', () => {

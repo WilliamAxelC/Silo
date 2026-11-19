@@ -25,6 +25,9 @@ import { SystemLogsScreen } from '../screens/SystemLogsScreen';
 import { ReceiptInboxScreen } from '../screens/ReceiptInboxScreen';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
+import { materializeDueRecurring } from '../services/recurring';
+import { AppState } from 'react-native';
+import { RecurringScreen } from '../screens/RecurringScreen';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -99,11 +102,23 @@ export const AppNavigator = () => {
 
   useEffect(() => {
     loadSettings();
-    useTransactionStore.getState().initDB();
+    const runRecurring = async () => {
+      const store = useTransactionStore.getState();
+      try {
+        if ((await materializeDueRecurring(store.addTransaction)) > 0) await store.fetchTransactions();
+      } catch (error) {
+        console.warn('Recurring transactions failed:', error);
+      }
+    };
+    void useTransactionStore.getState().initDB().then(runRecurring);
     useReceiptQueueStore.getState().load();
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void runRecurring();
+    });
     void getModelLifecycleManager().initialize();
 
     return () => {
+      appStateSub.remove();
       void getGenerationService().dispose();
       getModelLifecycleManager().dispose();
     };
@@ -134,6 +149,7 @@ export const AppNavigator = () => {
         SystemLogs: 'logs',
         ReceiptInbox: 'receipts',
         Accounts: 'accounts',
+        Recurring: 'recurring',
       },
     },
   };
@@ -156,6 +172,7 @@ export const AppNavigator = () => {
           <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
           <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
           <Stack.Screen name="Accounts" component={AccountsScreen} />
+          <Stack.Screen name="Recurring" component={RecurringScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

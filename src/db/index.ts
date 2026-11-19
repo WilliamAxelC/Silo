@@ -19,7 +19,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 10;
+const DB_SCHEMA_VERSION = 11;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -118,6 +118,25 @@ export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
     INSERT OR IGNORE INTO wallets (id, name, type) VALUES (1, 'Main Wallet', 'cash');
   `);
   createReceiptQueueTable(sqliteDb);
+  createRecurringTable(sqliteDb);
+}
+
+/**
+ * Repeating transactions. Occurrence n falls on start_date + n periods (anchored, so a rule started on the
+ * 31st lands on the last day of shorter months); `occurrences` counts how many have been created.
+ */
+export function createRecurringTable(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS recurring_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_json TEXT NOT NULL,
+      frequency TEXT NOT NULL,
+      start_date INTEGER NOT NULL,
+      occurrences INTEGER NOT NULL DEFAULT 1,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+  `);
 }
 
 /** Receipts imported in bulk and read in the background; rows are removed once saved as transactions. */

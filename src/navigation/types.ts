@@ -19,6 +19,7 @@ export type RootStackParamList = {
   AddTransactionStack: { transactionId?: number; receiptQueueId?: number };
   ReceiptInbox: undefined;
   Accounts: undefined;
+  Recurring: undefined;
   Settings: undefined;
   SystemLogs: undefined;
 };
