@@ -6,6 +6,7 @@ import {
   currencyHasDecimals,
   formatAmountInput,
   formatAmountForInput,
+  formatStoredAmountForInput,
   roundCurrency,
   parseSignedAmount,
   addAmounts,
@@ -422,6 +423,39 @@ describe('amount utilities', () => {
       expect(formatAmountForInput(1234.56, 'USD')).toBe('1,234.56');
       expect(formatAmountForInput(0.05, 'EUR')).toBe('0.05');
       expect(formatAmountForInput(NaN, 'USD')).toBe('');
+    });
+
+    it('parses stored/scanned price strings numerically before formatting so decimals are never multiplied on zero-decimal currencies (MIN-R5-02)', () => {
+      // Existing IDR data preserved exactly as displayed today
+      expect(formatStoredAmountForInput('30.000', 'IDR')).toBe('30.000');
+      expect(formatStoredAmountForInput('28182', 'IDR')).toBe('28.182');
+      expect(formatStoredAmountForInput('1.500.000', 'IDR')).toBe('1.500.000');
+      expect(formatStoredAmountForInput('Rp 45.000,-', 'IDR')).toBe('45.000');
+      expect(formatStoredAmountForInput('12.500', 'IDR')).toBe('12.500');
+
+      // Decimal strings in zero-decimal currencies parse numerically instead of stripping '.' into extra digits
+      expect(formatStoredAmountForInput('12.50', 'IDR')).toBe('13');
+      expect(formatStoredAmountForInput('12.5', 'IDR')).toBe('13');
+      expect(formatStoredAmountForInput('45000.00', 'IDR')).toBe('45.000');
+      expect(formatStoredAmountForInput('1,234.56', 'IDR')).toBe('1.235');
+      expect(formatStoredAmountForInput('45.000,50', 'IDR')).toBe('45.001');
+      expect(formatStoredAmountForInput('12.50', 'JPY')).toBe('13');
+      expect(formatStoredAmountForInput('0.25', 'IDR')).toBe('0');
+      expect(formatStoredAmountForInput('0', 'IDR')).toBe('0');
+
+      // Decimal currencies preserve fractional values and normalize separators
+      expect(formatStoredAmountForInput('12.50', 'USD')).toBe('12.5');
+      expect(formatStoredAmountForInput('1,234.56', 'USD')).toBe('1,234.56');
+      expect(formatStoredAmountForInput('1.234,56', 'EUR')).toBe('1,234.56');
+      expect(formatStoredAmountForInput('$9.99', 'USD')).toBe('9.99');
+      expect(formatStoredAmountForInput('12.567', 'USD')).toBe('12.57');
+
+      // Empty or non-numeric inputs safely return empty string
+      expect(formatStoredAmountForInput('', 'IDR')).toBe('');
+      expect(formatStoredAmountForInput('   ', 'IDR')).toBe('');
+      expect(formatStoredAmountForInput('free', 'IDR')).toBe('');
+      expect(formatStoredAmountForInput(null, 'IDR')).toBe('');
+      expect(formatStoredAmountForInput(undefined, 'USD')).toBe('');
     });
 
     it('parses decimal-currency inputs end-to-end and rounds zero-decimal currencies', () => {

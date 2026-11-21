@@ -1207,5 +1207,44 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
       expect(useAIStore.getState().provisioning.status).toBe('not-installed');
       expect(useAIStore.getState().provisioning.lastError).toBeNull();
     });
+
+    it('deleteInstalledModel removes the dependent vision projector and resets local vision receiptReadingMode to ocr while preserving external mode (NIT-R5-02)', async () => {
+      const modelUri = getActiveModelFileUri();
+      const projectorUri = getVisionProjectorUri();
+      const setReceiptReadingModeMock = jest.fn(async (mode: 'ocr' | 'vision') => {
+        useSettingsStore.setState({ receiptReadingMode: mode });
+      });
+      const prevSetter = useSettingsStore.getState().setReceiptReadingMode;
+
+      try {
+        useSettingsStore.setState({
+          aiInferenceMode: 'local',
+          receiptReadingMode: 'vision',
+          setReceiptReadingMode: setReceiptReadingModeMock,
+        });
+
+        const mgr = new QModelLifecycleManager(createMockAdapter());
+        await mgr.deleteInstalledModel();
+
+        expect(fsMock.deleteAsync).toHaveBeenCalledWith(modelUri, { idempotent: true });
+        expect(fsMock.deleteAsync).toHaveBeenCalledWith(projectorUri, { idempotent: true });
+        expect(setReceiptReadingModeMock).toHaveBeenCalledWith('ocr');
+        expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+        expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+        // External AI mode vision setting must remain intact if local model is deleted
+        setReceiptReadingModeMock.mockClear();
+        useSettingsStore.setState({
+          aiInferenceMode: 'external',
+          receiptReadingMode: 'vision',
+        });
+
+        await mgr.deleteInstalledModel();
+        expect(setReceiptReadingModeMock).not.toHaveBeenCalled();
+        expect(useSettingsStore.getState().receiptReadingMode).toBe('vision');
+      } finally {
+        useSettingsStore.setState({ setReceiptReadingMode: prevSetter });
+      }
+    });
   });
 });

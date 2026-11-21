@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -190,15 +190,14 @@ export const CashflowScreen = () => {
   const queueItems = useReceiptQueueStore((s) => s.items);
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
-  const storedCashflowDateMs = useTransactionStore((s) => s.selectedCashflowDateMs);
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
-  const [currentDate, setCurrentDate] = useState(() =>
-    typeof storedCashflowDateMs === 'number' && Number.isFinite(storedCashflowDateMs)
-      ? new Date(storedCashflowDateMs)
-      : new Date()
-  );
+  const [currentDate, setCurrentDate] = useState(() => {
+    const storedMs = useTransactionStore.getState().selectedCashflowDateMs;
+    return typeof storedMs === 'number' && Number.isFinite(storedMs) ? new Date(storedMs) : new Date();
+  });
+  const currentDateRef = useRef<Date>(currentDate);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -319,11 +318,10 @@ export const CashflowScreen = () => {
 
   const updateCurrentDate = useCallback(
     (next: Date | ((prev: Date) => Date), persist = true) => {
-      setCurrentDate((prev) => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
-        setStoredCashflowDateMs?.(persist ? resolved.getTime() : null);
-        return resolved;
-      });
+      const resolved = typeof next === 'function' ? next(currentDateRef.current) : next;
+      currentDateRef.current = resolved;
+      setCurrentDate(resolved);
+      setStoredCashflowDateMs?.(persist ? resolved.getTime() : null);
     },
     [setStoredCashflowDateMs]
   );

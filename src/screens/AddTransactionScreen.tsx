@@ -22,6 +22,7 @@ import {
   formatAmountForInput,
   formatAmountInput,
   formatDisplayCurrency,
+  formatStoredAmountForInput,
   getCurrencySymbol,
   isAmountWithinRange,
   parseSignedAmount,
@@ -271,7 +272,7 @@ export const AddTransactionScreen = () => {
     setLineItems(
       parseReceiptLineItemsText(editableTransaction.lineItemsText || '').map((item) => ({
         ...item,
-        price: item.price ? formatAmountInput(item.price, currencyCode) : '',
+        price: formatStoredAmountForInput(item.price, currencyCode),
       }))
     );
     setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
@@ -476,7 +477,7 @@ export const AddTransactionScreen = () => {
   const setParsedLineItems = (value: string) => {
     const parsedItems = parseReceiptLineItemsText(value).map((item) => ({
       ...item,
-      price: item.price ? formatAmountInput(item.price, currencyCode) : '',
+      price: formatStoredAmountForInput(item.price, currencyCode),
     }));
     setLineItems(parsedItems.length > 0 ? parsedItems : [createReceiptItemDraft()]);
   };

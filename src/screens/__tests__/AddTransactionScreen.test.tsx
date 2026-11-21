@@ -1233,4 +1233,93 @@ describe('AddTransactionScreen', () => {
     enqueueSpy.mockRestore();
     ReactTestRenderer.act(() => renderer.unmount());
   });
+
+  it('parses stored and scanned line item prices numerically for the active currency without multiplying decimals in IDR (MIN-R5-02)', async () => {
+    // 1. Edit hydration with IDR: decimal price "12.50" -> "13" (never "1.250"), existing IDR "30.000" & "45000.00" preserved accurately
+    const txDate = new Date(2026, 10, 12, 10, 0).getTime();
+    useSettingsStore.setState({ currencyCode: 'IDR' });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 405,
+          walletId: 1,
+          merchantName: 'Import Cafe',
+          totalAmount: -75013,
+          type: 'expense' as const,
+          category: 'Food & Dining',
+          date: txDate,
+          note: '',
+          lineItemsText: 'Latte | 30.000\nPastry | 12.50\nMeal | 45000.00',
+          imageUri: null,
+        },
+      ],
+    } as any);
+
+    mockRouteParams.transactionId = 405;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    const editItemPrices = [
+      renderer.root.findByProps({ accessibilityLabel: 'Item 1 price' }).props.value,
+      renderer.root.findByProps({ accessibilityLabel: 'Item 2 price' }).props.value,
+      renderer.root.findByProps({ accessibilityLabel: 'Item 3 price' }).props.value,
+    ];
+    expect(editItemPrices).toEqual(['30.000', '13', '45.000']);
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // 2. Scan hydration with IDR: "12.50" -> "13", raw integer "28182" -> "28.182"
+    mockRouteParams.transactionId = undefined;
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///decimal-scan.jpg' }],
+    });
+    (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({
+      merchantName: 'Corner Mart',
+      totalAmount: 28195,
+      lineItemsText: 'Mint | 12.50\nToast | 28182',
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Item 1 price' }).props.value).toBe('13');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Item 2 price' }).props.value).toBe('28.182');
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // 3. Edit hydration with USD preserves fractional cents
+    useSettingsStore.setState({ currencyCode: 'USD' });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 406,
+          walletId: 1,
+          merchantName: 'NYC Coffee',
+          totalAmount: -1247.06,
+          type: 'expense' as const,
+          category: 'Food & Dining',
+          date: txDate,
+          note: '',
+          lineItemsText: 'Espresso | 12.50\nCatering | 1,234.56',
+          imageUri: null,
+        },
+      ],
+    } as any);
+    mockRouteParams.transactionId = 406;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Item 1 price' }).props.value).toBe('12.5');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Item 2 price' }).props.value).toBe('1,234.56');
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });

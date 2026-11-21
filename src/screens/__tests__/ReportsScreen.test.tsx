@@ -356,7 +356,12 @@ describe('ReportsScreen', () => {
     });
 
     // Donut legend and exact formatted currency amount in Insight callout
-    expect(renderer.root.findByProps({ testID: 'reports-donut-legend' })).toBeDefined();
+    const donutLegend = renderer.root.findByProps({ testID: 'reports-donut-legend' });
+    expect(donutLegend).toBeDefined();
+    const legendPill = renderer.root.findByProps({ accessibilityLabel: 'Groceries 100%' });
+    const legendPillStyle = StyleSheet.flatten(legendPill.props.style);
+    expect(legendPillStyle.minHeight).toBeGreaterThanOrEqual(44);
+    expect(legendPillStyle.justifyContent).toBe('center');
     const allTexts = renderer.root
       .findAllByType(Text)
       .map((t: any) =>

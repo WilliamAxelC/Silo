@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -167,6 +167,7 @@ export const SettingsScreen = () => {
   const [projectorProgress, setProjectorProgress] = useState(0);
   const [projectorError, setProjectorError] = useState<string | null>(null);
   const [visionSetupOpen, setVisionSetupOpen] = useState(false);
+  const projectorDownloadGenRef = useRef(0);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -785,6 +786,7 @@ export const SettingsScreen = () => {
           text: 'Delete Model',
           style: 'destructive',
           onPress: async () => {
+            projectorDownloadGenRef.current += 1;
             setIsAiActionLoading(true);
             try {
               const manager = getModelLifecycleManager() as any;
@@ -792,6 +794,15 @@ export const SettingsScreen = () => {
                 await manager.deleteInstalledModel();
               }
               setIsModelInstalled(false);
+              setIsProjectorInstalled(false);
+              setIsProjectorDownloading(false);
+              setProjectorProgress(0);
+              setProjectorError(null);
+              setVisionSetupOpen(false);
+              const currentSettings = useSettingsStore.getState();
+              if (currentSettings.aiInferenceMode === 'local' && currentSettings.receiptReadingMode === 'vision') {
+                await setReceiptReadingMode('ocr');
+              }
             } catch (err) {
               Alert.alert('Delete Error', getErrorMessage(err, 'Failed to delete model.'));
             } finally {
@@ -809,12 +820,12 @@ export const SettingsScreen = () => {
       void setReceiptReadingMode('ocr');
       return;
     }
-    if (aiInferenceMode === 'external' || isProjectorInstalled) {
+    if (aiInferenceMode === 'external' || (isQwenDownloaded && isProjectorInstalled)) {
       setVisionSetupOpen(false);
       void setReceiptReadingMode('vision');
       return;
     }
-    // In local mode, require the vision add-on to be downloaded before activating Accurate (AI vision).
+    // In local mode, require both the main AI model and vision add-on to be downloaded before activating Accurate (AI vision).
     setVisionSetupOpen(true);
   };
 
@@ -874,25 +885,42 @@ export const SettingsScreen = () => {
   };
 
   const handleDownloadProjector = async () => {
+    if (aiInferenceMode === 'local' && !isQwenDownloaded) {
+      setProjectorError('Download the offline AI model first.');
+      return;
+    }
+    const downloadGen = ++projectorDownloadGenRef.current;
     setProjectorError(null);
     setIsProjectorDownloading(true);
     setProjectorProgress(0);
     try {
       await downloadVisionProjector((fraction) => {
-        setProjectorProgress(fraction);
+        if (projectorDownloadGenRef.current === downloadGen) {
+          setProjectorProgress(fraction);
+        }
       });
+      if (projectorDownloadGenRef.current !== downloadGen) {
+        return;
+      }
       setIsProjectorInstalled(true);
       setProjectorProgress(1);
       setVisionSetupOpen(false);
-      void setReceiptReadingMode('vision');
+      if (aiInferenceMode === 'external' || isQwenDownloaded) {
+        void setReceiptReadingMode('vision');
+      }
     } catch (err) {
-      setProjectorError(getErrorMessage(err, 'Failed to download vision add-on.'));
+      if (projectorDownloadGenRef.current === downloadGen) {
+        setProjectorError(getErrorMessage(err, 'Failed to download vision add-on.'));
+      }
     } finally {
-      setIsProjectorDownloading(false);
+      if (projectorDownloadGenRef.current === downloadGen) {
+        setIsProjectorDownloading(false);
+      }
     }
   };
 
   const handleCancelProjectorDownload = async () => {
+    projectorDownloadGenRef.current += 1;
     try {
       await cancelVisionProjectorDownload();
     } catch {
@@ -2060,7 +2088,7 @@ export const SettingsScreen = () => {
           <View style={styles.row}>
             <View style={styles.rowLeft}>
               <Ionicons name="finger-print-outline" size={18} color={theme.primary} />
-              <View>
+              <View style={styles.rowTextBlock}>
                 <Text style={[styles.rowText, { color: theme.text }, textScale]}>App Lock</Text>
                 <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Fingerprint, face or phone PIN to open Silo</Text>
               </View>

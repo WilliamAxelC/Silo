@@ -1066,8 +1066,27 @@ export class QModelLifecycleManager {
         await safeDelete(p);
       }
 
+      // Remove the dependent vision add-on (and cancel any in-flight projector download) so no orphaned projector remains on disk
+      await deleteVisionProjector();
+
       await clearManifest();
       await clearTransferManifest();
+
+      // If local AI vision receipt reading was active, fall back to OCR so app settings stay consistent
+      const settingsState = useSettingsStore.getState();
+      if (settingsState.aiInferenceMode === 'local' && settingsState.receiptReadingMode === 'vision') {
+        try {
+          await settingsState.setReceiptReadingMode('ocr');
+        } catch (settingsErr) {
+          useSettingsStore.setState({ receiptReadingMode: 'ocr' });
+          this.log(
+            'warn',
+            'vision-mode-reset-persist-failed',
+            'Failed to persist OCR fallback after deleting offline AI model.',
+            { error: getErrorMessage(settingsErr) },
+          );
+        }
+      }
 
       // Reset AI store state
       const state = useAIStore.getState();

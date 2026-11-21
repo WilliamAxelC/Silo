@@ -80,6 +80,25 @@ export function formatAmountForInput(amount: number, currencyCode: string = 'IDR
 }
 
 /**
+ * Parses a stored or scanned price string numerically for the given currency and formats it
+ * for display in an input field, avoiding raw digit stripping that turns decimal points into
+ * extra digits on zero-decimal currencies (e.g. "12.50" in IDR -> "13", not "1.250").
+ */
+export function formatStoredAmountForInput(
+  value: string | number | null | undefined,
+  currencyCode: string = 'IDR'
+): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') {
+    return formatAmountForInput(value, currencyCode);
+  }
+  const trimmed = value.trim();
+  if (!trimmed || !/\d/.test(trimmed)) return '';
+  const parsed = Math.abs(parseSignedAmount(trimmed, undefined, currencyCode));
+  return formatAmountForInput(parsed, currencyCode);
+}
+
+/**
  * Maximum transaction/calculator amount kept well below Number.MAX_SAFE_INTEGER / 100 (~9e13)
  * so both integer currencies (IDR/JPY) and 2-decimal currencies (USD/EUR/GBP/SGD) remain
  * cent-exact through IEEE-754 arithmetic, rounding, and serialization.

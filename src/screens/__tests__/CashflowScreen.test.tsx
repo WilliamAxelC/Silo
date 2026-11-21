@@ -615,4 +615,42 @@ describe('CashflowScreen', () => {
       jest.useRealTimers();
     }
   });
+
+  it('updates selectedCashflowDateMs outside state updaters without emitting React render-phase console errors (MIN-R5-01)', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 10, 15, 12, 0, 0)); // November 2026
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      useSettingsStore.setState({ dateFormat: 'en-GB', monthStartDay: 1 });
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<CashflowScreen />);
+      });
+
+      // Trigger back-to-back period shifts within a single act batch
+      ReactTestRenderer.act(() => {
+        const prevBtn = renderer.root.findByProps({ accessibilityLabel: 'Previous month' });
+        prevBtn.props.onPress();
+        prevBtn.props.onPress();
+      });
+
+      const readTexts = () =>
+        renderer.root
+          .findAllByType(Text)
+          .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+
+      expect(readTexts()).toContain('September 2026');
+      const storedMs = useTransactionStore.getState().selectedCashflowDateMs;
+      expect(typeof storedMs).toBe('number');
+      expect(new Date(storedMs!).getMonth()).toBe(8); // September
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+      jest.useRealTimers();
+    }
+  });
 });

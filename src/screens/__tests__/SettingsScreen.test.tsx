@@ -1141,6 +1141,13 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     // Renamed reports toggle
     expect(renderer.root.findByProps({ accessibilityLabel: 'Default Reports view: Income' })).toBeTruthy();
 
+    // App Lock text container flex-shrinks inside rowLeft (NIT-R5-01)
+    const appLockHeading = renderer.root
+      .findAllByType(Text)
+      .find((t: any) => t.props.children === 'App Lock');
+    expect(appLockHeading).toBeTruthy();
+    expect(StyleSheet.flatten(appLockHeading.parent.props.style).flex).toBe(1);
+
     // App Lock without screen lock offers Open Security Settings action
     await ReactTestRenderer.act(async () => {
       await renderer.root.findByProps({ accessibilityLabel: 'App Lock' }).props.onValueChange(true);
@@ -1152,6 +1159,92 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     );
 
     alertSpy.mockRestore();
+  });
+
+  it('requires main local model before enabling AI vision and resets state consistently when deleting the main model (NIT-R5-02)', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    try {
+      // Case 1: Local mode with projector present on disk, but main model NOT installed
+      (modelLifecycle.isActiveModelInstalled as jest.Mock).mockResolvedValue(false);
+      (modelLifecycle.isVisionProjectorInstalled as jest.Mock).mockResolvedValue(true);
+      ReactTestRenderer.act(() => {
+        useSettingsStore.setState({ aiInferenceMode: 'local', receiptReadingMode: 'ocr' });
+        useAIStore.setState({
+          provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
+          provisioningHydrated: true,
+        });
+      });
+
+      await ReactTestRenderer.act(async () => {
+        renderer = ReactTestRenderer.create(<SettingsScreen />);
+      });
+
+      // Tapping Accurate (AI vision) must NOT enable vision mode when base model is missing
+      await ReactTestRenderer.act(async () => {
+        renderer.root.findByProps({ accessibilityLabel: 'Accurate (AI vision)' }).props.onPress();
+      });
+
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+      const textsWithoutModel = renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')))
+        .join(' ');
+      expect(textsWithoutModel).toContain('AI model must be downloaded first');
+
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+        renderer = null;
+      });
+
+      // Case 2: Both main model and vision add-on installed with vision active -> deleting main model resets to OCR
+      (modelLifecycle.isActiveModelInstalled as jest.Mock).mockResolvedValue(true);
+      (modelLifecycle.isVisionProjectorInstalled as jest.Mock).mockResolvedValue(true);
+      mockSettingsLifecycleManager.deleteInstalledModel.mockImplementationOnce(async () => {
+        (modelLifecycle.isActiveModelInstalled as jest.Mock).mockResolvedValue(false);
+        (modelLifecycle.isVisionProjectorInstalled as jest.Mock).mockResolvedValue(false);
+        useAIStore.setState({
+          provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
+        });
+      });
+
+      ReactTestRenderer.act(() => {
+        useSettingsStore.setState({ aiInferenceMode: 'local', receiptReadingMode: 'vision' });
+        useAIStore.setState({
+          provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready' },
+          provisioningHydrated: true,
+        });
+      });
+
+      await ReactTestRenderer.act(async () => {
+        renderer = ReactTestRenderer.create(<SettingsScreen />);
+      });
+
+      await ReactTestRenderer.act(async () => {
+        renderer.root.findByProps({ accessibilityLabel: 'Delete offline model' }).props.onPress();
+      });
+      const deleteCall = alertSpy.mock.calls.find((c) => c[0] === 'Delete Offline Model');
+      const deleteConfirmBtn = (deleteCall![2] as any[]).find((b) => b.style === 'destructive');
+      await ReactTestRenderer.act(async () => {
+        await deleteConfirmBtn.onPress();
+      });
+
+      expect(mockSettingsLifecycleManager.deleteInstalledModel).toHaveBeenCalledTimes(1);
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+
+      // Tapping Accurate (AI vision) after deleting the model must keep OCR and prompt for base model download
+      await ReactTestRenderer.act(async () => {
+        renderer.root.findByProps({ accessibilityLabel: 'Accurate (AI vision)' }).props.onPress();
+      });
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+      const textsAfterDelete = renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')))
+        .join(' ');
+      expect(textsAfterDelete).toContain('AI model must be downloaded first');
+    } finally {
+      alertSpy.mockRestore();
+    }
   });
 
   it('imports SettingsScreen without loading expo-notifications at startup when native module is missing (R2B-1)', () => {
