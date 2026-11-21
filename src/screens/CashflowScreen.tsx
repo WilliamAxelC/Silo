@@ -114,6 +114,7 @@ const transactionKeyExtractor = (item: Transaction) => String(item.id);
 interface TransactionRowProps {
   item: Transaction;
   accountLabel?: string;
+  dateLabel?: string;
   currencyCode: string;
   useThousandsSeparator: boolean;
   theme: ReturnType<typeof useAppTheme>;
@@ -123,6 +124,7 @@ interface TransactionRowProps {
 const TransactionRow = React.memo(function TransactionRow({
   item,
   accountLabel,
+  dateLabel,
   currencyCode,
   useThousandsSeparator,
   theme,
@@ -132,8 +134,8 @@ const TransactionRow = React.memo(function TransactionRow({
   const isIncome = !isTransfer && (item.type === 'income' || (item.totalAmount || 0) > 0);
   const tint = isTransfer ? theme.primary : isIncome ? theme.income : theme.expense;
   const subtitle = isTransfer
-    ? [accountLabel, item.note].filter(Boolean).join(' · ')
-    : [item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
+    ? [dateLabel, accountLabel, item.note].filter(Boolean).join(' · ')
+    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
   const amountText = formatDisplayCurrency(
     isTransfer ? Math.abs(item.totalAmount || 0) : item.totalAmount || 0,
     currencyCode,
@@ -188,9 +190,15 @@ export const CashflowScreen = () => {
   const queueItems = useReceiptQueueStore((s) => s.items);
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
+  const storedCashflowDateMs = useTransactionStore((s) => s.selectedCashflowDateMs);
+  const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
-  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [currentDate, setCurrentDate] = useState(() =>
+    typeof storedCashflowDateMs === 'number' && Number.isFinite(storedCashflowDateMs)
+      ? new Date(storedCashflowDateMs)
+      : new Date()
+  );
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -309,8 +317,19 @@ export const CashflowScreen = () => {
 
   const { currentMonthData, totalIncome, totalExpense, balance, periodBounds } = useMonthlySummary(currentDate);
 
+  const updateCurrentDate = useCallback(
+    (next: Date | ((prev: Date) => Date), persist = true) => {
+      setCurrentDate((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        setStoredCashflowDateMs?.(persist ? resolved.getTime() : null);
+        return resolved;
+      });
+    },
+    [setStoredCashflowDateMs]
+  );
+
   const changeMonth = (offset: number) => {
-    setCurrentDate((prev) => shiftPeriod(prev, offset, monthStartDay));
+    updateCurrentDate((prev) => shiftPeriod(prev, offset, monthStartDay), true);
   };
 
   const handleSwitchViewMode = (nextMode: CashflowViewMode) => {
@@ -338,7 +357,7 @@ export const CashflowScreen = () => {
     const now = new Date();
     setCalendarMonth(next);
     if (monthStartDay === 1) {
-      setCurrentDate(next);
+      updateCurrentDate(next, true);
     }
     setSelectedCalendarDayKey(
       next.getFullYear() === now.getFullYear() && next.getMonth() === now.getMonth()
@@ -352,7 +371,7 @@ export const CashflowScreen = () => {
     setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1));
     setSelectedCalendarDayKey(toLocalDayKey(now));
     if (monthStartDay === 1) {
-      setCurrentDate(now);
+      updateCurrentDate(now, false);
     }
   };
 
@@ -459,7 +478,7 @@ export const CashflowScreen = () => {
   };
 
   const resetToCurrentMonth = () => {
-    setCurrentDate(new Date());
+    updateCurrentDate(new Date(), false);
   };
 
   const renderSummaryCard = (incomeVal: number, expenseVal: number, balanceVal: number) => (
@@ -668,11 +687,11 @@ export const CashflowScreen = () => {
   );
 
   const getAccountLabel = useCallback(
-    (item: Transaction): string | undefined => {
+    (item: Transaction, alwaysShowAccount = false): string | undefined => {
       if (item.type === 'transfer') {
         return `${walletNames.get(item.walletId ?? -1) ?? 'Account'} → ${walletNames.get(item.toWalletId ?? -1) ?? 'Account'}`;
       }
-      return showAccountNames && item.walletId ? walletNames.get(item.walletId) : undefined;
+      return (alwaysShowAccount || showAccountNames) && item.walletId ? walletNames.get(item.walletId) : undefined;
     },
     [walletNames, showAccountNames]
   );
@@ -689,6 +708,30 @@ export const CashflowScreen = () => {
       />
     ),
     [getAccountLabel, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+  );
+
+  const currentYear = new Date().getFullYear();
+
+  const renderSearchTransactionRow = useCallback(
+    ({ item }: { item: Transaction }) => {
+      const txYear = typeof item.date === 'number' && Number.isFinite(item.date) ? new Date(item.date).getFullYear() : currentYear;
+      const dateLabel =
+        typeof item.date === 'number' && Number.isFinite(item.date)
+          ? formatCachedLocaleDate(item.date, locale, txYear === currentYear ? SHORT_DAY_OPTIONS : FULL_SHORT_DATE_OPTIONS)
+          : undefined;
+      return (
+        <TransactionRow
+          item={item}
+          dateLabel={dateLabel}
+          accountLabel={getAccountLabel(item, true)}
+          currencyCode={currencyCode}
+          useThousandsSeparator={useThousandsSeparator}
+          theme={theme}
+          onPress={handleOpenTransaction}
+        />
+      );
+    },
+    [currentYear, locale, getAccountLabel, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
   );
 
   const renderSectionHeader = useCallback(
@@ -923,7 +966,7 @@ export const CashflowScreen = () => {
         </>
       ) : null}
 
-      {queueReady + queueWaiting > 0 ? (
+      {queueReady + queueWaiting > 0 && searchResults === null ? (
         <TouchableOpacity
           style={[styles.errorBanner, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
           onPress={() => navigation.navigate('ReceiptInbox')}
@@ -1092,7 +1135,7 @@ export const CashflowScreen = () => {
               </View>
             ) : null
           }
-          renderItem={renderTransactionRow}
+          renderItem={renderSearchTransactionRow}
           initialNumToRender={12}
           maxToRenderPerBatch={10}
           updateCellsBatchingPeriod={50}
@@ -1492,6 +1535,7 @@ export const CashflowScreen = () => {
           }
           mode="date"
           display="default"
+          accentColor={theme.primary}
           onChange={handleCustomDateChange}
         />
       ) : null}
@@ -1521,10 +1565,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   viewModeText: { fontSize: 13, fontWeight: '700' },
-  searchBarWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 2, marginBottom: 6, paddingHorizontal: 10, height: 42, borderRadius: 12, borderWidth: 1 },
+  searchBarWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 2, marginBottom: 6, paddingHorizontal: 10, minHeight: 44, borderRadius: 12, borderWidth: 1 },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14, paddingVertical: 0 },
-  clearSearchBtn: { padding: 4 },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 0, minHeight: 42 },
+  clearSearchBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
   filterBarScroll: { flexGrow: 0, marginBottom: 8 },
   filterBarContent: { paddingHorizontal: 14, gap: 8, alignItems: 'center' },
   filterChip: {
@@ -1599,9 +1643,9 @@ const styles = StyleSheet.create({
   errorBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
   errorBannerIcon: { marginRight: 8 },
   errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
-  errorDismissBtn: { minWidth: 32, minHeight: 32, alignItems: 'center', justifyContent: 'center' },
-  monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
-  monthTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
+  errorDismissBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
+  monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1 },
+  monthTextWrap: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
   monthText: { fontSize: 16, fontWeight: '600', flexShrink: 1 },
   selectedDaySection: { marginTop: 12 },
   selectedDayHeader: {
@@ -1646,7 +1690,7 @@ const styles = StyleSheet.create({
   summaryDivider: { width: 1, height: 26 },
   summaryLabel: { fontSize: 11, marginBottom: 3, fontWeight: '600' },
   summaryValue: { fontSize: 13, fontWeight: '700' },
-  listContent: { paddingBottom: 120 },
+  listContent: { paddingBottom: 28 },
   sectionHeader: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
   transactionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 62, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
   iconContainer: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', marginRight: 10 },

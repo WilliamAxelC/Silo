@@ -50,8 +50,11 @@ interface TransactionState {
   transactionsDirty: boolean;
   categoriesDirty: boolean;
   budgetsDirty: boolean;
+  /** Last user-selected Cashflow period anchor (epoch ms), preserved across edit/delete/remounts. */
+  selectedCashflowDateMs: number | null;
 
   initDB: () => Promise<void>;
+  setSelectedCashflowDateMs: (timestamp: number | null) => void;
   invalidateData: (slices?: { transactions?: boolean; categories?: boolean; budgets?: boolean }) => void;
   fetchTransactions: () => Promise<void>;
   fetchTransactionsIfNeeded: () => Promise<void>;
@@ -190,6 +193,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactionsDirty: false,
   categoriesDirty: false,
   budgetsDirty: false,
+  selectedCashflowDateMs: null,
+
+  setSelectedCashflowDateMs: (timestamp) => {
+    set({ selectedCashflowDateMs: typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : null });
+  },
 
   initDB: async () => {
     await get().fetchCategories();

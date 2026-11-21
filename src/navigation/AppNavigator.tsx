@@ -125,14 +125,14 @@ const TabNavigator = () => {
         options={{
           tabBarLabel: '',
           tabBarButton: () => (
-            <View style={[styles.addButtonWrap, { bottom: Math.max(insets.bottom - 6, 0) }]} pointerEvents="box-none">
+            <View style={styles.addButtonWrap} pointerEvents="box-none">
               <TouchableOpacity
                 style={[styles.customButton, { backgroundColor: theme.primary }]}
                 onPress={() => globalNav.navigate('AddTransactionStack', {})}
                 accessibilityRole="button"
                 accessibilityLabel="Add transaction"
               >
-                <Ionicons name="add" size={32} color={theme.onPrimary} />
+                <Ionicons name="add" size={28} color={theme.onPrimary} />
               </TouchableOpacity>
             </View>
           ),
@@ -225,26 +225,26 @@ export const AppNavigator = () => {
 const styles = StyleSheet.create({
   appShell: { flex: 1 },
   tabBar: {
-    position: 'absolute',
-    bottom: 0,
     elevation: 0,
     borderTopWidth: 1,
     paddingTop: 6,
   },
   addButtonWrap: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingTop: 2,
   },
   customButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2.5,
   },
 });

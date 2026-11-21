@@ -151,6 +151,13 @@ jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn(() => Promise.resolve({ canceled: true, assets: null })),
 }));
 
+jest.mock('expo-navigation-bar', () => ({
+  setBackgroundColorAsync: jest.fn(async () => {}),
+  setButtonStyleAsync: jest.fn(async () => {}),
+  setStyle: jest.fn(),
+  setVisibilityAsync: jest.fn(async () => {}),
+}));
+
 jest.mock('expo-notifications', () => ({
   SchedulableTriggerInputTypes: {
     CALENDAR: 'calendar',

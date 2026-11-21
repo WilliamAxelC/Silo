@@ -26,6 +26,7 @@ import {
   parseSignedAmount,
 } from '../features/transactions/amount';
 import type { Wallet, WalletType } from '../features/transactions/types';
+import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
 import { WALLET_TYPE_META } from '../components/AccountPickerModal';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -47,6 +48,7 @@ export const AccountsScreen = () => {
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
   const wallets = useTransactionStore((s) => s.wallets);
+  const transactionsList = useTransactionStore((s) => s.transactionsList);
   const { addWallet, updateWallet, removeWallet } = useTransactionStore.getState();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -62,7 +64,23 @@ export const AccountsScreen = () => {
     }
     return totals;
   }, [active]);
+  const archivedNet = useMemo(() => archived.reduce((sum, w) => sum + w.balance, 0), [archived]);
   const money = (n: number) => formatDisplayCurrency(n, currencyCode, useThousands);
+
+  const editingWallet = draft?.id != null ? wallets.find((w) => w.id === draft.id) ?? null : null;
+  const editingWalletHasHistory = Boolean(
+    editingWallet &&
+      transactionsList.some((tx) => tx.walletId === editingWallet.id || tx.toWalletId === editingWallet.id)
+  );
+  const willArchiveEditingWallet = Boolean(
+    editingWallet && editingWallet.isActive && (editingWallet.id === DEFAULT_WALLET_ID || editingWalletHasHistory)
+  );
+  const canRemoveEditingWallet = Boolean(
+    editingWallet &&
+      (willArchiveEditingWallet ||
+        editingWallet.isActive ||
+        (editingWallet.id !== DEFAULT_WALLET_ID && !editingWalletHasHistory))
+  );
 
   const openEditor = (wallet?: Wallet) =>
     setDraft(
@@ -97,14 +115,19 @@ export const AccountsScreen = () => {
   const remove = () => {
     if (draft?.id == null) return;
     const id = draft.id;
-    Alert.alert('Remove account?', 'Accounts with transactions are archived so your history stays intact.', [
+    const actionTitle = willArchiveEditingWallet ? 'Archive account?' : 'Remove account?';
+    const actionBody = willArchiveEditingWallet
+      ? 'Its past transactions stay in Cashflow. Its balance is excluded from active Net worth while archived, and you can restore it anytime.'
+      : 'This unused account will be deleted permanently.';
+    const actionButton = willArchiveEditingWallet ? 'Archive' : 'Remove';
+    Alert.alert(actionTitle, actionBody, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Remove',
+        text: actionButton,
         style: 'destructive',
         onPress: () => {
           const result = removeWallet(id);
-          if (!result.ok) Alert.alert('Not removed', result.message ?? '');
+          if (!result.ok) Alert.alert(willArchiveEditingWallet ? 'Not archived' : 'Not removed', result.message ?? '');
           else setDraft(null);
         },
       },
@@ -143,16 +166,16 @@ export const AccountsScreen = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          hitSlop={8}
+          style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="chevron-back" size={22} color={theme.text} />
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(20) }]}>Accounts</Text>
+        <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(18) }]}>Accounts</Text>
         <TouchableOpacity
           style={[styles.addBtn, { backgroundColor: theme.primary }]}
           onPress={() => openEditor()}
@@ -187,6 +210,14 @@ export const AccountsScreen = () => {
               Debts {money(debts)}
             </Text>
           </View>
+          {archived.length > 0 ? (
+            <Text
+              testID="archived-networth-note"
+              style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}
+            >
+              Active accounts only{archivedNet !== 0 ? ` · Archived: ${money(archivedNet)}` : ''}
+            </Text>
+          ) : null}
         </View>
 
         {active.map(renderWallet)}
@@ -300,10 +331,15 @@ export const AccountsScreen = () => {
               </View>
 
               <View style={styles.actions}>
-                {draft?.id != null ? (
-                  <TouchableOpacity onPress={remove} style={styles.secondaryBtn} accessibilityRole="button">
+                {canRemoveEditingWallet ? (
+                  <TouchableOpacity
+                    onPress={remove}
+                    style={styles.secondaryBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={willArchiveEditingWallet ? 'Archive account' : 'Remove account'}
+                  >
                     <Text style={[styles.secondaryText, { color: theme.expense, fontSize: theme.scaleFont(14) }]}>
-                      Remove
+                      {willArchiveEditingWallet ? 'Archive' : 'Remove'}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -345,23 +381,33 @@ export const AccountsScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
-  title: { flex: 1, fontSize: 20, fontWeight: '700' },
-  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 56,
+    gap: 6,
+  },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, fontSize: 18, fontWeight: '700' },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
   addText: { fontSize: 13, fontWeight: '700' },
-  content: { paddingHorizontal: 16, paddingBottom: 120, gap: 10 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120, gap: 10 },
   summary: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 4 },
   summaryLabel: { fontSize: 12, fontWeight: '600' },
   netWorth: { fontSize: 26, fontWeight: '800', marginTop: 4 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   summarySub: { fontSize: 12, fontWeight: '600' },
+  summaryFootnote: { fontSize: 11, fontWeight: '500', marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 14, padding: 12, gap: 12 },
   iconWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1 },
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowSub: { fontSize: 12, marginTop: 2 },
   rowAmount: { fontSize: 15, fontWeight: '700' },
-  archivedToggle: { alignItems: 'center', paddingVertical: 8 },
+  archivedToggle: { alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 8 },
   archivedText: { fontSize: 13, fontWeight: '600' },
   hint: { fontSize: 12, lineHeight: 18, marginTop: 8 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
@@ -370,7 +416,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   input: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 44 },
   chipText: { fontSize: 13, fontWeight: '600' },
   balanceRow: { flexDirection: 'row', gap: 8 },
   signBtn: { minWidth: 64, minHeight: 46, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

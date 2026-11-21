@@ -149,7 +149,12 @@ export const SettingsScreen = () => {
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const activeModel = MODEL_CATALOG[activeModelId] ?? MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
   const formatGb = (bytes: number) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
-  const modelDownloadLabel = `~${formatGb(activeModel.sizeBytes + (activeModel.visionProjector?.sizeBytes ?? 0))} download`;
+  const formatMb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
+  const modelSizeLabel = `about ${formatGb(activeModel.sizeBytes + (activeModel.visionProjector?.sizeBytes ?? 0))}`;
+  const modelDownloadLabel = `${modelSizeLabel} download`;
+  const visionAddOnSizeLabel = activeModel.visionProjector?.sizeBytes
+    ? `about ${formatMb(activeModel.visionProjector.sizeBytes)}`
+    : 'about 200 MB';
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [categoryDraft, setCategoryDraft] = useState('');
@@ -161,6 +166,10 @@ export const SettingsScreen = () => {
   const [isProjectorDownloading, setIsProjectorDownloading] = useState(false);
   const [projectorProgress, setProjectorProgress] = useState(0);
   const [projectorError, setProjectorError] = useState<string | null>(null);
+  const [visionSetupOpen, setVisionSetupOpen] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
   const [isUpdatingReminder, setIsUpdatingReminder] = useState(false);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
@@ -316,7 +325,23 @@ export const SettingsScreen = () => {
   const appLockEnabled = useSettingsStore((s) => s.appLockEnabled);
   const handleAppLockToggle = async (next: boolean) => {
     if (next && !(await canUseAppLock())) {
-      Alert.alert('Set up a screen lock first', 'App Lock uses your fingerprint, face or phone PIN. Add one in your phone settings.');
+      Alert.alert(
+        'Set up a screen lock first',
+        'App Lock uses your fingerprint, face, or phone PIN. Add one in your phone security settings.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          {
+            text: 'Open Security Settings',
+            onPress: () => {
+              if (Platform.OS === 'android' && typeof Linking.sendIntent === 'function') {
+                void Linking.sendIntent('android.settings.SECURITY_SETTINGS').catch(() => Linking.openSettings());
+              } else {
+                void Linking.openSettings();
+              }
+            },
+          },
+        ]
+      );
       return;
     }
     // Confirm it is the owner both when turning the lock on and off.
@@ -753,11 +778,11 @@ export const SettingsScreen = () => {
   const handleAiDelete = () => {
     Alert.alert(
       'Delete Offline Model',
-      'Are you sure you want to delete the offline Qwen model weights (~1.5GB)? You will need to download them again to use on-device AI.',
+      `Remove the offline AI model (${modelSizeLabel}) from this phone? You can download it again anytime to use offline AI.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete Weights',
+          text: 'Delete Model',
           style: 'destructive',
           onPress: async () => {
             setIsAiActionLoading(true);
@@ -778,6 +803,76 @@ export const SettingsScreen = () => {
     );
   };
 
+  const handleSelectReceiptReadingMode = (mode: 'ocr' | 'vision') => {
+    if (mode === 'ocr') {
+      setVisionSetupOpen(false);
+      void setReceiptReadingMode('ocr');
+      return;
+    }
+    if (aiInferenceMode === 'external' || isProjectorInstalled) {
+      setVisionSetupOpen(false);
+      void setReceiptReadingMode('vision');
+      return;
+    }
+    // In local mode, require the vision add-on to be downloaded before activating Accurate (AI vision).
+    setVisionSetupOpen(true);
+  };
+
+  const handleTestExternalConnection = async () => {
+    const trimmedUrl = externalApiUrl.trim().replace(/\/+$/, '');
+    const trimmedModel = externalApiModel.trim();
+    const requiresKey = Boolean(EXTERNAL_API_PRESETS[externalApiProvider]?.requiresKey);
+    const trimmedKey = externalApiKey.trim();
+
+    if (!trimmedUrl || !/^https?:\/\//i.test(trimmedUrl)) {
+      setConnectionTestResult({ ok: false, message: 'Enter a valid endpoint URL starting with http:// or https://.' });
+      return;
+    }
+    if (!trimmedModel) {
+      setConnectionTestResult({ ok: false, message: 'Enter a model name before testing.' });
+      return;
+    }
+    if (requiresKey && !trimmedKey) {
+      setConnectionTestResult({ ok: false, message: 'Enter an API key for this provider.' });
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 10_000) : null;
+    try {
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (trimmedKey) {
+        headers.Authorization = `Bearer ${trimmedKey}`;
+      }
+      const response = await fetch(`${trimmedUrl}/models`, {
+        method: 'GET',
+        headers,
+        signal: controller?.signal,
+      });
+      if (response.ok) {
+        setConnectionTestResult({ ok: true, message: 'Connection successful. Settings are saved.' });
+      } else {
+        setConnectionTestResult({
+          ok: false,
+          message: `Connection failed (HTTP ${response.status}). Check your URL and API key.`,
+        });
+      }
+    } catch (error) {
+      const isAbort = error instanceof Error && error.name === 'AbortError';
+      setConnectionTestResult({
+        ok: false,
+        message: isAbort
+          ? 'Connection timed out. Check your internet or server address.'
+          : getErrorMessage(error, 'Could not reach the API endpoint.'),
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      setIsTestingConnection(false);
+    }
+  };
+
   const handleDownloadProjector = async () => {
     setProjectorError(null);
     setIsProjectorDownloading(true);
@@ -788,6 +883,8 @@ export const SettingsScreen = () => {
       });
       setIsProjectorInstalled(true);
       setProjectorProgress(1);
+      setVisionSetupOpen(false);
+      void setReceiptReadingMode('vision');
     } catch (err) {
       setProjectorError(getErrorMessage(err, 'Failed to download vision add-on.'));
     } finally {
@@ -809,7 +906,7 @@ export const SettingsScreen = () => {
   const handleDeleteProjector = () => {
     Alert.alert(
       'Remove Vision Add-on',
-      'Are you sure you want to remove the vision projector (~670 MB)? You will need to download it again to use AI vision.',
+      `Remove the AI vision add-on (${visionAddOnSizeLabel})? You will need to download it again to read receipts with AI vision.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -819,14 +916,24 @@ export const SettingsScreen = () => {
             try {
               await deleteVisionProjector();
               setIsProjectorInstalled(false);
+              if (aiInferenceMode === 'local' && receiptReadingMode === 'vision') {
+                void setReceiptReadingMode('ocr');
+              }
             } catch (err) {
-              Alert.alert('Delete Error', getErrorMessage(err, 'Failed to remove vision projector.'));
+              Alert.alert('Delete Error', getErrorMessage(err, 'Failed to remove vision add-on.'));
             }
           },
         },
       ]
     );
   };
+
+  const switchTrackColor = {
+    false: theme.isDarkMode ? '#3f3f46' : '#d1d5db',
+    true: theme.isDarkMode ? '#0369a1' : '#7dd3fc',
+  };
+  const getSwitchThumbColor = (value: boolean) =>
+    value ? theme.primary : theme.isDarkMode ? '#e5e7eb' : '#ffffff';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -840,11 +947,7 @@ export const SettingsScreen = () => {
         >
           <Ionicons name="chevron-back" size={24} color={theme.text} />
         </TouchableOpacity>
-        <View style={styles.headerCopy}>
-          <Text style={[styles.headerEyebrow, { color: theme.textMuted }, captionScale]}>Preferences</Text>
-          <Text style={[styles.headerTitle, { color: theme.text }, headingScale]}>Settings</Text>
-        </View>
-        <View style={styles.headerSpacer} />
+        <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>Settings</Text>
       </View>
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 132 }]} showsVerticalScrollIndicator={false}>
@@ -1011,6 +1114,8 @@ export const SettingsScreen = () => {
                     ]}
                     onPress={() => setDateFormat(option.key)}
                     accessibilityRole="button"
+                    accessibilityLabel={`Date format ${option.label}`}
+                    accessibilityState={{ selected: isSelected }}
                   >
                     <Text
                       style={[
@@ -1103,22 +1208,31 @@ export const SettingsScreen = () => {
             <Switch
               value={useThousandsSeparator}
               onValueChange={setUseThousandsSeparator}
-              trackColor={{ false: '#767577', true: theme.primary }}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(useThousandsSeparator)}
+              accessibilityLabel="Use thousands separator"
             />
           </View>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          {/* Income first in reports Toggle */}
+          {/* Default Reports view: Income Toggle */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
               <Ionicons name="swap-vertical-outline" size={18} color={theme.primary} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Show income first in reports</Text>
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Default Reports view: Income</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Open Reports on Income instead of Expenses
+                </Text>
+              </View>
             </View>
             <Switch
               value={showIncomeInReportsFirst}
               onValueChange={setShowIncomeInReportsFirst}
-              trackColor={{ false: '#767577', true: theme.primary }}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(showIncomeInReportsFirst)}
+              accessibilityLabel="Default Reports view: Income"
             />
           </View>
         </View>
@@ -1140,7 +1254,8 @@ export const SettingsScreen = () => {
               value={dailyReminderEnabled}
               onValueChange={(next) => void handleDailyReminderToggle(next)}
               disabled={isUpdatingReminder}
-              trackColor={{ false: '#767577', true: theme.primary }}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(dailyReminderEnabled)}
               accessibilityLabel="Daily reminder"
             />
           </View>
@@ -1182,14 +1297,14 @@ export const SettingsScreen = () => {
         </View>
 
         {/* AI & Receipt Scanning Section */}
-        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>AI & INFERENCE ENGINE</Text>
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>AI & RECEIPT SCANNING</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {/* Inference Mode Toggle (On-Device vs External API) */}
           <View style={styles.rowBlock}>
             <View style={styles.rowBlockHeader}>
               <View style={styles.rowLeft}>
                 <Ionicons name="hardware-chip-outline" size={18} color={theme.primary} />
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>AI Inference Engine</Text>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>AI Mode</Text>
               </View>
             </View>
             <View style={styles.segmentedRow}>
@@ -1203,6 +1318,8 @@ export const SettingsScreen = () => {
                 ]}
                 onPress={() => setAiInferenceMode('local')}
                 accessibilityRole="button"
+                accessibilityLabel="On-Device (Offline)"
+                accessibilityState={{ selected: aiInferenceMode === 'local' }}
               >
                 <Ionicons
                   name="phone-portrait-outline"
@@ -1230,6 +1347,8 @@ export const SettingsScreen = () => {
                 ]}
                 onPress={() => setAiInferenceMode('external')}
                 accessibilityRole="button"
+                accessibilityLabel="External API"
+                accessibilityState={{ selected: aiInferenceMode === 'external' }}
               >
                 <Ionicons
                   name="cloud-outline"
@@ -1254,7 +1373,7 @@ export const SettingsScreen = () => {
           {aiInferenceMode === 'local' ? (
             /* Offline Model Card */
             <View style={styles.rowBlock}>
-              <Text style={[styles.cardSectionHeading, { color: theme.text }, textScale]}>Offline Model Package</Text>
+              <Text style={[styles.cardSectionHeading, { color: theme.text }, textScale]}>Offline AI Model</Text>
               <View
                 style={[
                   styles.modelCard,
@@ -1274,10 +1393,10 @@ export const SettingsScreen = () => {
                         style={[styles.modelName, { color: theme.text, fontSize: theme.scaleFont(15) }]}
                         testID="model-card-name"
                       >
-                        {activeModel.displayName.replace(' (Offline)', '')} (GGUF)
+                        {activeModel.displayName.replace(' (Offline)', '')}
                       </Text>
                       <Text style={[styles.modelSpec, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                        {modelDownloadLabel} · {formatGb(activeModel.requiredRamBytes)} RAM required · {formatGb(activeModel.recommendedRamBytes)} recommended
+                        {modelDownloadLabel} · Needs {formatGb(activeModel.requiredRamBytes)} RAM ({formatGb(activeModel.recommendedRamBytes)} recommended)
                       </Text>
                     </View>
                   </View>
@@ -1327,7 +1446,7 @@ export const SettingsScreen = () => {
                 </View>
 
                 <Text style={[styles.modelDesc, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-                  High-performance quantized edge language model. Runs 100% locally on Android without internet connection.
+                  Compact offline AI model. Runs completely on your phone with no internet connection.
                 </Text>
 
                 {/* Progress bar if downloading or paused */}
@@ -1467,9 +1586,12 @@ export const SettingsScreen = () => {
                       onPress={handleAiDelete}
                       disabled={isAiActionLoading}
                       accessibilityRole="button"
+                      accessibilityLabel="Delete offline model"
                     >
                       <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 6 }} />
-                      <Text style={[styles.modelSecondaryActionText, { color: theme.expense, fontSize: theme.scaleFont(13) }]}>Delete Weights</Text>
+                      <Text style={[styles.modelSecondaryActionText, { color: theme.expense, fontSize: theme.scaleFont(13) }]}>
+                        Delete Model
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1484,7 +1606,9 @@ export const SettingsScreen = () => {
                 <Switch
                   value={aiWifiOnlyDownload}
                   onValueChange={setAiWifiOnlyDownload}
-                  trackColor={{ false: '#767577', true: theme.primary }}
+                  trackColor={switchTrackColor}
+                  thumbColor={getSwitchThumbColor(aiWifiOnlyDownload)}
+                  accessibilityLabel="Wi-Fi only downloads"
                 />
               </View>
             </View>
@@ -1510,6 +1634,7 @@ export const SettingsScreen = () => {
                       ]}
                       onPress={() => {
                         setExternalApiProvider(providerKey);
+                        setConnectionTestResult(null);
                         const preset = EXTERNAL_API_PRESETS[providerKey];
                         if (preset) {
                           setExternalApiUrl(preset.url);
@@ -1517,6 +1642,8 @@ export const SettingsScreen = () => {
                         }
                       }}
                       accessibilityRole="button"
+                      accessibilityLabel={`External provider ${preset.label}`}
+                      accessibilityState={{ selected: isSelected }}
                     >
                       <Text
                         style={[
@@ -1547,9 +1674,13 @@ export const SettingsScreen = () => {
                 placeholder="https://api.openai.com/v1"
                 placeholderTextColor={theme.textMuted}
                 value={externalApiUrl}
-                onChangeText={setExternalApiUrl}
+                onChangeText={(value) => {
+                  setExternalApiUrl(value);
+                  setConnectionTestResult(null);
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
+                accessibilityLabel="Endpoint Base URL"
               />
 
               <Text style={[styles.inputLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
@@ -1568,9 +1699,13 @@ export const SettingsScreen = () => {
                 placeholder="gpt-4o-mini"
                 placeholderTextColor={theme.textMuted}
                 value={externalApiModel}
-                onChangeText={setExternalApiModel}
+                onChangeText={(value) => {
+                  setExternalApiModel(value);
+                  setConnectionTestResult(null);
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
+                accessibilityLabel="Model Identifier"
               />
 
               <Text style={[styles.inputLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
@@ -1578,24 +1713,69 @@ export const SettingsScreen = () => {
                   ? 'API Key (Required)'
                   : 'API Key (Optional)'}
               </Text>
-              <TextInput
-                style={[
-                  styles.formInput,
-                  {
-                    backgroundColor: theme.background,
-                    borderColor: theme.border,
-                    color: theme.text,
-                    fontSize: theme.scaleFont(14),
-                  },
-                ]}
-                placeholder="sk-..."
-                placeholderTextColor={theme.textMuted}
-                value={externalApiKey}
-                onChangeText={setExternalApiKey}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+              <View style={[styles.apiKeyRow, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                <TextInput
+                  style={[styles.apiKeyInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+                  placeholder="sk-..."
+                  placeholderTextColor={theme.textMuted}
+                  value={externalApiKey}
+                  onChangeText={(value) => {
+                    setExternalApiKey(value);
+                    setConnectionTestResult(null);
+                  }}
+                  secureTextEntry={!showApiKey}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="External API Key"
+                />
+                <TouchableOpacity
+                  style={styles.apiKeyEyeBtn}
+                  onPress={() => setShowApiKey((prev) => !prev)}
+                  accessibilityRole="button"
+                  accessibilityLabel={showApiKey ? 'Hide API key' : 'Show API key'}
+                >
+                  <Ionicons name={showApiKey ? 'eye-off-outline' : 'eye-outline'} size={18} color={theme.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.externalApiFooter}>
+                <Text style={[styles.autoSaveHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Settings save automatically
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.testConnectionBtn,
+                    { borderColor: theme.primary, backgroundColor: theme.primaryMuted, opacity: isTestingConnection ? 0.7 : 1 },
+                  ]}
+                  onPress={() => void handleTestExternalConnection()}
+                  disabled={isTestingConnection}
+                  accessibilityRole="button"
+                  accessibilityLabel="Test Connection"
+                >
+                  {isTestingConnection ? (
+                    <ActivityIndicator size="small" color={theme.primary} />
+                  ) : (
+                    <>
+                      <Ionicons name="pulse-outline" size={16} color={theme.primary} />
+                      <Text style={[styles.testConnectionText, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>
+                        Test Connection
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {connectionTestResult ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={[
+                    styles.connectionResultText,
+                    { color: connectionTestResult.ok ? theme.income : theme.expense, fontSize: theme.scaleFont(12) },
+                  ]}
+                >
+                  {connectionTestResult.message}
+                </Text>
+              ) : null}
             </View>
           )}
 
@@ -1620,9 +1800,10 @@ export const SettingsScreen = () => {
                         borderColor: isSelected ? theme.primary : theme.border,
                       },
                     ]}
-                    onPress={() => setReceiptReadingMode(mode.id)}
+                    onPress={() => handleSelectReceiptReadingMode(mode.id)}
                     accessibilityRole="button"
                     accessibilityLabel={mode.label}
+                    accessibilityState={{ selected: isSelected }}
                   >
                     <Text
                       style={[
@@ -1637,10 +1818,12 @@ export const SettingsScreen = () => {
               })}
             </View>
             <Text style={[styles.modelDesc, { color: theme.textMuted, marginTop: 6, marginBottom: 0, fontSize: theme.scaleFont(12) }]}>
-              AI vision reads the photo directly: more accurate (90% vs 67% totals in our Indonesian receipt benchmark) but slower, and needs an extra 670 MB download.
+              {aiInferenceMode === 'external'
+                ? 'AI vision reads the photo directly: more accurate on complex receipts using your connected AI provider.'
+                : `AI vision reads the photo directly: more accurate on complex receipts, but slower, and needs an extra ${visionAddOnSizeLabel} download.`}
             </Text>
 
-            {receiptReadingMode === 'vision' && (
+            {(receiptReadingMode === 'vision' || visionSetupOpen) && (
               <View style={{ marginTop: 10 }}>
                 {aiInferenceMode === 'external' ? (
                   <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0, fontSize: theme.scaleFont(12) }]}>
@@ -1696,7 +1879,7 @@ export const SettingsScreen = () => {
                         {
                           flex: 0,
                           paddingHorizontal: 16,
-                          minHeight: 36,
+                          minHeight: 44,
                           backgroundColor: theme.expenseMuted,
                           borderWidth: 1,
                           borderColor: theme.expense,
@@ -1711,6 +1894,11 @@ export const SettingsScreen = () => {
                   </View>
                 ) : (
                   <View>
+                    {visionSetupOpen && receiptReadingMode !== 'vision' ? (
+                      <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 8, fontSize: theme.scaleFont(12) }]}>
+                        Download the vision add-on before enabling Accurate (AI vision).
+                      </Text>
+                    ) : null}
                     {projectorError && (
                       <Text style={[styles.modelErrorText, { color: theme.expense, marginBottom: 8, fontSize: theme.scaleFont(12) }]}>
                         {projectorError}
@@ -1721,7 +1909,9 @@ export const SettingsScreen = () => {
                         style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
                         onPress={handleDownloadProjector}
                         accessibilityRole="button"
-                        accessibilityLabel={projectorError ? 'Retry vision download' : 'Download vision add-on (670 MB)'}
+                        accessibilityLabel={
+                          projectorError ? 'Retry vision download' : `Download vision add-on (${visionAddOnSizeLabel})`
+                        }
                       >
                         <Ionicons
                           name={projectorError ? 'refresh-outline' : 'download-outline'}
@@ -1730,7 +1920,7 @@ export const SettingsScreen = () => {
                           style={{ marginRight: 6 }}
                         />
                         <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>
-                          {projectorError ? 'Retry' : 'Download vision add-on (670 MB)'}
+                          {projectorError ? 'Retry' : `Download vision add-on (${visionAddOnSizeLabel})`}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -1782,19 +1972,23 @@ export const SettingsScreen = () => {
                   <TouchableOpacity
                     onPress={() => openEditCategoryModal(category)}
                     style={styles.iconActionBtn}
+                    hitSlop={4}
                     accessibilityRole="button"
                     accessibilityLabel={`Edit ${category.name}`}
                   >
                     <Ionicons name="create-outline" size={18} color={theme.textMuted} />
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteCategory(category)}
-                    style={styles.iconActionBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${category.name}`}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={theme.expense} />
-                  </TouchableOpacity>
+                  {!category.isSystem ? (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCategory(category)}
+                      style={styles.iconActionBtn}
+                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${category.name}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
             ))}
@@ -1837,19 +2031,23 @@ export const SettingsScreen = () => {
                   <TouchableOpacity
                     onPress={() => openEditCategoryModal(category)}
                     style={styles.iconActionBtn}
+                    hitSlop={4}
                     accessibilityRole="button"
                     accessibilityLabel={`Edit ${category.name}`}
                   >
                     <Ionicons name="create-outline" size={18} color={theme.textMuted} />
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteCategory(category)}
-                    style={styles.iconActionBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${category.name}`}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={theme.expense} />
-                  </TouchableOpacity>
+                  {!category.isSystem ? (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCategory(category)}
+                      style={styles.iconActionBtn}
+                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${category.name}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
             ))}
@@ -1870,7 +2068,8 @@ export const SettingsScreen = () => {
             <Switch
               value={appLockEnabled}
               onValueChange={(next) => void handleAppLockToggle(next)}
-              trackColor={{ false: '#767577', true: theme.primary }}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(appLockEnabled)}
               accessibilityLabel="App Lock"
             />
           </View>
@@ -1966,6 +2165,7 @@ export const SettingsScreen = () => {
             style={styles.row}
             onPress={() => navigation.navigate('SystemLogs')}
             accessibilityRole="button"
+            accessibilityLabel="System Logs & Diagnostics"
           >
             <View style={styles.rowLeft}>
               <Ionicons name="terminal-outline" size={18} color={theme.primary} />
@@ -2070,6 +2270,7 @@ export const SettingsScreen = () => {
           mode="time"
           is24Hour
           display="default"
+          accentColor={theme.primary}
           onChange={(event, picked) => {
             void handleReminderTimeChange(event, picked);
           }}
@@ -2080,7 +2281,7 @@ export const SettingsScreen = () => {
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
         <KeyboardAvoidingView
           style={styles.keyboardShell}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <TouchableOpacity
             style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
@@ -2144,16 +2345,14 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 56,
     borderBottomWidth: 1,
+    gap: 6,
   },
-  headerCopy: { flex: 1, marginHorizontal: 8 },
-  headerEyebrow: { fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
-  headerTitle: { fontWeight: '700' },
+  headerTitle: { flex: 1, fontWeight: '700' },
   backButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerSpacer: { width: 44 },
   content: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 28 },
   sectionTitle: {
     fontWeight: '800',
@@ -2229,9 +2428,9 @@ const styles = StyleSheet.create({
   optionChip: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    minHeight: 38,
+    minHeight: 44,
     justifyContent: 'center',
   },
   optionChipText: { fontWeight: '700', fontSize: 12 },
@@ -2299,6 +2498,37 @@ const styles = StyleSheet.create({
   modelSecondaryActionText: { fontSize: 13, fontWeight: '800' },
   inputLabel: { fontSize: 12, fontWeight: '700', marginTop: 10, marginBottom: 4 },
   formInput: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 14 },
+  apiKeyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingLeft: 12,
+    paddingRight: 4,
+  },
+  apiKeyInput: { flex: 1, minHeight: 44, fontSize: 14 },
+  apiKeyEyeBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  externalApiFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 10,
+  },
+  autoSaveHint: { flex: 1, fontWeight: '500' },
+  testConnectionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 44,
+    paddingHorizontal: 14,
+  },
+  testConnectionText: { fontWeight: '700' },
+  connectionResultText: { marginTop: 8, fontWeight: '600', lineHeight: 17 },
   categorySplitWrap: { marginBottom: 6 },
   categoryColumnCard: { borderWidth: 1, borderRadius: 18, padding: 14 },
   categoryColumnHeader: {
@@ -2324,7 +2554,7 @@ const styles = StyleSheet.create({
   categoryPillText: { fontWeight: '600', fontSize: 14 },
   badgeText: { fontSize: 10, fontWeight: '700' },
   categoryActions: { flexDirection: 'row', alignItems: 'center' },
-  iconActionBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconActionBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
   modalCard: { borderWidth: 1, borderRadius: 20, padding: 18 },
   modalTitle: { fontWeight: '800', marginBottom: 2 },

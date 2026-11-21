@@ -192,7 +192,6 @@ android {
                 '**/arm64-v8a/librnllama_jni_v8_2_i8mm.so',
                 '**/arm64-v8a/librnllama_v8_2.so',
                 '**/arm64-v8a/librnllama_jni_v8_2.so',
-                '**/arm64-v8a/librnllama_jni.so',
             ]
         }
     }

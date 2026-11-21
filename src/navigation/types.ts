@@ -15,7 +15,7 @@ export type RootTabParamList = {
 export type RootStackParamList = {
   // FIX: Tell TypeScript that MainTabs is a navigator that accepts Tab routes!
   MainTabs: NavigatorScreenParams<RootTabParamList>;
-  Chatbot: { initialMessage?: string };
+  Chatbot: { initialMessage?: string; autoSend?: boolean };
   AddTransactionStack: {
     transactionId?: number;
     receiptQueueId?: number;

@@ -1,5 +1,22 @@
 const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'JPY', 'KRW', 'VND']);
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  IDR: 'Rp',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  SGD: 'S$',
+  JPY: '¥',
+};
+
+/**
+ * Returns the short user-facing currency prefix/symbol for inputs and labels (e.g. IDR -> "Rp", USD -> "$").
+ */
+export function getCurrencySymbol(currencyCode: string = 'IDR'): string {
+  const normalized = (currencyCode || 'IDR').trim().toUpperCase();
+  return CURRENCY_SYMBOLS[normalized] ?? normalized;
+}
+
 /**
  * Returns the number of minor-unit decimal places for a currency code.
  * Zero-decimal currencies (IDR, JPY, etc.) return 0; standard currencies return 2.

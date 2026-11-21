@@ -23,7 +23,7 @@ export const darkTheme = {
   onPrimary: '#ffffff',
   primaryMuted: '#082f49',
   text: '#f9fafb',    // Off-White
-  textMuted: '#9ca3af',
+  textMuted: '#b5bcc7',
   border: '#374151',  // Dark Gray Border
   borderLight: '#1f2937',
   expense: '#f87171', // Softer Red

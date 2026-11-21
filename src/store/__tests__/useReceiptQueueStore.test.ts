@@ -306,4 +306,33 @@ describe('useReceiptQueueStore', () => {
       ensureSpy.mockRestore();
     }
   });
+
+  it('persists computed image_hash back to SQLite for legacy rows with NULL hash so subsequent enqueues do not re-hash them (MIN-03)', async () => {
+    mockDb.runSync(
+      `INSERT INTO receipt_queue (image_uri, image_hash, status, created_at) VALUES ('file:///docs/receipts/legacy-nohash.jpg', NULL, 'done', 100);`
+    );
+    mockAnalyze.mockResolvedValue({ merchantName: 'New Cafe', totalAmount: 15000, confidence: 'high' });
+    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
+      exists: true,
+      size: 2048,
+      md5: uri.includes('legacy-nohash') ? 'legacy-md5-abc' : `md5-${uri}`,
+    }));
+
+    // First enqueue hashes the legacy row once and persists its image_hash to SQLite
+    await useReceiptQueueStore.getState().enqueue(['file:///picker/new-1.jpg']);
+    await waitIdle();
+
+    const persisted = rawDb
+      .prepare(`SELECT image_hash FROM receipt_queue WHERE image_uri = 'file:///docs/receipts/legacy-nohash.jpg';`)
+      .get() as { image_hash: string | null };
+    expect(persisted.image_hash).toBe('md5:legacy-md5-abc');
+
+    // Second enqueue must NOT re-hash legacy-nohash.jpg on disk
+    (FileSystem.getInfoAsync as jest.Mock).mockClear();
+    await useReceiptQueueStore.getState().enqueue(['file:///picker/new-2.jpg']);
+    await waitIdle();
+
+    const hashedUris = (FileSystem.getInfoAsync as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(hashedUris).not.toContain('file:///docs/receipts/legacy-nohash.jpg');
+  });
 });

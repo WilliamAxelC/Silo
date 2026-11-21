@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 6,
     paddingHorizontal: 6,
-    minHeight: 34,
+    minHeight: 44,
   },
   filterPillText: {
     fontSize: 11,
@@ -424,7 +424,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   clearSearchBtn: {
-    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -8,
   },
   content: {
     padding: 12,
@@ -511,11 +515,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   copySingleBtn: {
-    minWidth: 28,
-    minHeight: 28,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 4,
+    marginRight: -8,
   },
   logMessage: {
     fontSize: 12,

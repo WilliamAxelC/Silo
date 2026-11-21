@@ -13,6 +13,8 @@ const ReactTestRenderer = require('react-test-renderer');
 
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
+const mockGoBack = jest.fn();
+let mockCanGoBack = false;
 const mockRouteParams: {
   transactionId?: number;
   duplicateFromId?: number;
@@ -26,8 +28,8 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
     replace: mockReplace,
-    canGoBack: () => false,
-    goBack: jest.fn(),
+    canGoBack: () => mockCanGoBack,
+    goBack: mockGoBack,
   }),
   useRoute: () => ({ params: mockRouteParams }),
 }));
@@ -60,6 +62,7 @@ describe('AddTransactionScreen', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCanGoBack = false;
     delete mockRouteParams.transactionId;
     delete mockRouteParams.duplicateFromId;
     delete mockRouteParams.receiptQueueId;
@@ -68,33 +71,35 @@ describe('AddTransactionScreen', () => {
     delete mockRouteParams.initialDate;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
-    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true, fontScale: 1 });
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true, fontScale: 1 });
 
-    useTransactionStore.setState({
-      transactionsList: [
-        {
-          id: 99,
-          walletId: 1,
-          merchantName: 'Existing Cafe',
-          totalAmount: -45000,
-          type: 'expense',
-          category: 'Food & Dining',
-          date: Date.now(),
-          note: '',
-          lineItemsText: '',
-          imageUri: 'file:///existing.jpg',
-        },
-      ],
-      categories: [
-        { id: 1, name: 'Food & Dining', type: 'expense', isSystem: true, createdAt: 1000 },
-        { id: 2, name: 'Salary', type: 'income', isSystem: true, createdAt: 1000 },
-      ],
-      isSaving: false,
-      addTransaction: mockAddTransaction,
-      updateTransaction: mockUpdateTransaction,
-      deleteTransaction: mockDeleteTransaction,
-      addCategory: mockAddCategory,
-    } as any);
+      useTransactionStore.setState({
+        transactionsList: [
+          {
+            id: 99,
+            walletId: 1,
+            merchantName: 'Existing Cafe',
+            totalAmount: -45000,
+            type: 'expense',
+            category: 'Food & Dining',
+            date: Date.now(),
+            note: '',
+            lineItemsText: '',
+            imageUri: 'file:///existing.jpg',
+          },
+        ],
+        categories: [
+          { id: 1, name: 'Food & Dining', type: 'expense', isSystem: true, createdAt: 1000 },
+          { id: 2, name: 'Salary', type: 'income', isSystem: true, createdAt: 1000 },
+        ],
+        isSaving: false,
+        addTransaction: mockAddTransaction,
+        updateTransaction: mockUpdateTransaction,
+        deleteTransaction: mockDeleteTransaction,
+        addCategory: mockAddCategory,
+      } as any);
+    });
   });
 
   afterEach(() => {
@@ -130,6 +135,7 @@ describe('AddTransactionScreen', () => {
     expect(
       renderer.root.findAllByType(Text).some((t: any) => t.props.children === 'Amount must be greater than 0')
     ).toBe(true);
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('alerts and returns when camera permission is denied, and uses mediaTypes: ["images"] for gallery', async () => {
@@ -176,6 +182,7 @@ describe('AddTransactionScreen', () => {
       allowsMultipleSelection: false,
       selectionLimit: 1,
     });
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('defers scanned new category creation until handleSave and renders collapsible Raw OCR text', async () => {
@@ -247,6 +254,7 @@ describe('AddTransactionScreen', () => {
 
     expect(mockAddCategory).toHaveBeenCalledWith('Specialty Coffee', 'expense');
     expect(mockAddTransaction).toHaveBeenCalledTimes(1);
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('shows Alert on add/update/delete failures', async () => {
@@ -269,6 +277,7 @@ describe('AddTransactionScreen', () => {
       await saveBtn.props.onPress();
     });
     expect(Alert.alert).toHaveBeenCalledWith('Save Failed', 'DB write failed');
+    ReactTestRenderer.act(() => renderer.unmount());
 
     // Edit mode delete failure
     mockRouteParams.transactionId = 99;
@@ -289,6 +298,7 @@ describe('AddTransactionScreen', () => {
       await confirmButton.onPress();
     });
     expect(Alert.alert).toHaveBeenCalledWith('Delete Failed', 'Delete boom');
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('shows the low-confidence notice from a scan and clears it on amount edit', async () => {
@@ -334,6 +344,7 @@ describe('AddTransactionScreen', () => {
     });
 
     expect(findNotice()).toBeUndefined();
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('sends several gallery picks from Scan to the Receipt Inbox instead of scanning one', async () => {
@@ -362,6 +373,7 @@ describe('AddTransactionScreen', () => {
     expect(enqueue).toHaveBeenCalledWith(['file:///a.jpg', 'file:///b.jpg']);
     expect(analyzeReceiptImage).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('requires a different destination account before saving a transfer', async () => {
@@ -388,6 +400,7 @@ describe('AddTransactionScreen', () => {
       await saveBtn.props.onPress();
     });
     expect(Alert.alert).toHaveBeenCalledWith('Choose accounts', expect.any(String));
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('saves a repeat rule along with a new transaction when Repeat is set', async () => {
@@ -409,6 +422,7 @@ describe('AddTransactionScreen', () => {
     });
     expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ merchantName: 'Netflix', totalAmount: -186000 }), 'monthly', expect.any(Number));
     createRule.mockRestore();
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('opens calculator keypad on amount tap and preserves USD decimals end-to-end', async () => {
@@ -1049,8 +1063,10 @@ describe('AddTransactionScreen', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
-  it('applies bottom safe-area inset padding to the action stack and scales fonts with fontScale (F-06, F-12)', () => {
-    useSettingsStore.setState({ fontScale: 1.2 });
+  it('applies bottom safe-area inset padding to the action stack and scales fonts with fontScale (F-06, F-12, NIT-03)', () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ fontScale: 1.2 });
+    });
 
     let renderer: any;
     ReactTestRenderer.act(() => {
@@ -1070,6 +1086,151 @@ describe('AddTransactionScreen', () => {
       .find((t: any) => t.props.children === 'Save Transaction');
     expect(StyleSheet.flatten(saveText.props.style).fontSize).toBeCloseTo(18, 1);
 
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('validates empty Title inline without blocking Alert and keeps red error border off the currency badge (F-21)', async () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(mockAddTransaction).not.toHaveBeenCalled();
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) => String(t.props.children ?? ''));
+    expect(texts).toContain('Please enter a title');
+    expect(texts).toContain('Amount must be greater than 0');
+
+    // Editable amount box shows red border, read-only currency badge does NOT
+    const currencyBadge = renderer.root.findByProps({ testID: 'amount-currency-badge' });
+    const amountBox = renderer.root.findByProps({ testID: 'amount-input-box' });
+    expect(StyleSheet.flatten(amountBox.props.style).borderColor).not.toBe(
+      StyleSheet.flatten(currencyBadge.props.style).borderColor
+    );
+
+    // Typing a title clears the inline error
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Coffee');
+    });
+    const textsAfterType = renderer.root.findAllByType(Text).map((t: any) => String(t.props.children ?? ''));
+    expect(textsAfterType).not.toContain('Please enter a title');
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('stacks Details above Note|Items|Both, adapts Income/Transfer placeholders & Scan CTA, formats scanned item prices, and drops duplicate bottom SafeArea edge (F-15, F-31, NIT-01)', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///single-scan.jpg' }],
+    });
+    (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({
+      merchantName: 'Toast Cafe',
+      totalAmount: 31000,
+      lineItemsText: 'Trad Ky Toast | 28182',
+      rawText: 'TOAST CAFE\nTOTAL 31.000',
+    });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    // F-15: Details header stacks vertically so Note/Items/Both never clip off right edge
+    const detailsHeader = renderer.root.findByProps({ testID: 'details-section-header' });
+    expect(StyleSheet.flatten(detailsHeader.props.style).flexDirection).toBe('column');
+
+    // Single scan formats line item price consistently (28182 -> 28.182) with Rp badge
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    const inputValues = renderer.root
+      .findAllByType(TextInput)
+      .map((node: any) => node.props.value)
+      .filter((v: any) => typeof v === 'string');
+    expect(inputValues).toContain('31.000');
+    expect(inputValues).toContain('28.182');
+    const currencyBadgeTexts = renderer.root
+      .findByProps({ testID: 'amount-currency-badge' })
+      .findAllByType(Text)
+      .map((t: any) => String(t.props.children));
+    expect(currencyBadgeTexts).toContain('Rp');
+
+    // F-31: Income adapts placeholder to Source, Transfer hides Scan and uses optional Description
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Set Income type' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ placeholder: 'Source (e.g. Salary, Client)' })).toBeTruthy();
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Set Transfer type' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ placeholder: 'Description (optional)' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Scan receipt' })).toHaveLength(0);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('calls navigation.goBack() on delete and edit save when canGoBack() is true to preserve caller screen state (F-17)', async () => {
+    mockCanGoBack = true;
+    mockRouteParams.transactionId = 99;
+    mockDeleteTransaction.mockResolvedValueOnce(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Delete transaction' }).props.onPress();
+    });
+    const deleteAlertCall = (Alert.alert as jest.Mock).mock.calls.find((c) => c[0] === 'Delete Transaction');
+    const confirmButton = deleteAlertCall[2].find((b: any) => b.text === 'Delete');
+    await ReactTestRenderer.act(async () => {
+      await confirmButton.onPress();
+    });
+
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).not.toHaveBeenCalledWith('MainTabs', expect.anything());
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('surfaces duplicate feedback when multi-select gallery scan skips already-queued receipts (MIN-02)', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///dup1.jpg' }, { uri: 'file:///dup2.jpg' }],
+    });
+    const enqueueSpy = jest
+      .spyOn(useReceiptQueueStore.getState(), 'enqueue')
+      .mockResolvedValue({ added: 1, skippedDuplicates: 1 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'Duplicate receipts skipped',
+      expect.stringContaining('1 duplicate receipt was already in the inbox')
+    );
+    expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
+
+    enqueueSpy.mockRestore();
     ReactTestRenderer.act(() => renderer.unmount());
   });
 });

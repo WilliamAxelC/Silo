@@ -103,6 +103,9 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     jest.clearAllMocks();
     (modelLifecycle.isActiveModelInstalled as jest.Mock).mockResolvedValue(true);
     (modelLifecycle.isVisionProjectorInstalled as jest.Mock).mockResolvedValue(false);
+    (modelLifecycle.downloadVisionProjector as jest.Mock).mockResolvedValue(undefined);
+    (modelLifecycle.cancelVisionProjectorDownload as jest.Mock).mockResolvedValue(undefined);
+    (modelLifecycle.deleteVisionProjector as jest.Mock).mockResolvedValue(undefined);
 
     ReactTestRenderer.act(() => {
       useSettingsStore.setState({
@@ -164,7 +167,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
       renderer = ReactTestRenderer.create(<SettingsScreen />);
     });
 
-    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (670 MB)' });
+    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (about 195 MB)' });
     expect(downloadBtn).toBeTruthy();
     expect(downloadBtn.props.accessibilityRole).toBe('button');
   });
@@ -184,7 +187,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
       renderer = ReactTestRenderer.create(<SettingsScreen />);
     });
 
-    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (670 MB)' });
+    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (about 195 MB)' });
 
     await ReactTestRenderer.act(async () => {
       downloadBtn.props.onPress();
@@ -237,7 +240,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
 
     expect(alertSpy).toHaveBeenCalledWith(
       'Remove Vision Add-on',
-      expect.stringContaining('670 MB'),
+      expect.stringContaining('about 195 MB'),
       expect.any(Array)
     );
 
@@ -263,7 +266,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
       renderer = ReactTestRenderer.create(<SettingsScreen />);
     });
 
-    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (670 MB)' });
+    const downloadBtn = renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (about 195 MB)' });
     await ReactTestRenderer.act(async () => {
       await downloadBtn.props.onPress();
     });
@@ -1035,6 +1038,120 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     expect(afterText).toContain('Resume');
     expect(afterText).not.toContain('Download Model');
     expect(mockSettingsLifecycleManager.retryProvisioning).not.toHaveBeenCalled();
+  });
+
+  it('uses plain language without dev jargon, consistent "about 0.7 GB" size, gates AI vision on download, and supports External API Test Connection (F-23, NIT-04)', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as any;
+
+    try {
+      await ReactTestRenderer.act(async () => {
+        renderer = ReactTestRenderer.create(<SettingsScreen />);
+      });
+
+      const readText = () =>
+        renderer.root
+          .findAllByType(Text)
+          .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')))
+          .join(' ');
+
+      const localText = readText();
+      expect(localText).toContain('about 0.7 GB');
+      expect(localText).not.toContain('GGUF');
+      expect(localText).not.toContain('quantized');
+      expect(localText).not.toContain('benchmark');
+      expect(localText).not.toContain('1.5GB');
+
+      // Delete confirmation matches "about 0.7 GB"
+      await ReactTestRenderer.act(async () => {
+        renderer.root.findByProps({ accessibilityLabel: 'Delete offline model' }).props.onPress();
+      });
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Delete Offline Model',
+        expect.stringContaining('about 0.7 GB'),
+        expect.any(Array)
+      );
+
+      // Tapping Accurate (AI vision) before vision add-on is installed must NOT activate vision mode yet
+      await ReactTestRenderer.act(async () => {
+        renderer.root.findByProps({ accessibilityLabel: 'Accurate (AI vision)' }).props.onPress();
+      });
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('ocr');
+      expect(renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (about 195 MB)' })).toBeTruthy();
+
+      // Completing download activates Accurate (AI vision)
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Download vision add-on (about 195 MB)' }).props.onPress();
+      });
+      expect(useSettingsStore.getState().receiptReadingMode).toBe('vision');
+
+      // Switch to External API -> hides offline download note, masks key, and Test Connection works
+      ReactTestRenderer.act(() => {
+        useSettingsStore.setState({
+          aiInferenceMode: 'external',
+          externalApiProvider: 'openai',
+          externalApiUrl: 'https://api.openai.com/v1',
+          externalApiModel: 'gpt-4o-mini',
+          externalApiKey: 'sk-test-key',
+        });
+      });
+      const extText = readText();
+      expect(extText).not.toContain('about 195 MB download');
+      expect(renderer.root.findByProps({ accessibilityLabel: 'External API Key' }).props.secureTextEntry).toBe(true);
+
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Test Connection' }).props.onPress();
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.openai.com/v1/models',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(readText()).toContain('Connection successful');
+    } finally {
+      global.fetch = originalFetch;
+      alertSpy.mockRestore();
+    }
+  });
+
+  it('hides delete button on default system categories, keeps >=44pt action targets, offers Security Settings on App Lock, and renames Reports default toggle (F-25, F-28, MIN-04)', async () => {
+    const LocalAuthentication = require('expo-local-authentication');
+    (LocalAuthentication.getEnrolledLevelAsync as jest.Mock).mockResolvedValueOnce(0);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    ReactTestRenderer.act(() => {
+      useTransactionStore.setState({
+        categories: [
+          { id: 1, name: 'Bills', type: 'expense', isSystem: true, createdAt: 1000 },
+          { id: 2, name: 'Pets', type: 'expense', isSystem: false, createdAt: 1001 },
+        ],
+      } as any);
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    // Default category hides Delete button; custom category keeps Delete button with >=44pt target
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Delete Bills' })).toHaveLength(0);
+    const deletePets = renderer.root.findByProps({ accessibilityLabel: 'Delete Pets' });
+    expect(StyleSheet.flatten(deletePets.props.style).width).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(deletePets.props.style).height).toBeGreaterThanOrEqual(44);
+
+    // Renamed reports toggle
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Default Reports view: Income' })).toBeTruthy();
+
+    // App Lock without screen lock offers Open Security Settings action
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'App Lock' }).props.onValueChange(true);
+    });
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Set up a screen lock first',
+      expect.any(String),
+      expect.arrayContaining([expect.objectContaining({ text: 'Open Security Settings' })])
+    );
+
+    alertSpy.mockRestore();
   });
 
   it('imports SettingsScreen without loading expo-notifications at startup when native module is missing (R2B-1)', () => {

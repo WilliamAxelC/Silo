@@ -1,6 +1,8 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Appearance } from 'react-native';
 import { lightTheme, darkTheme } from '../theme/colors';
+import { scaleFontSize } from '../theme/typography';
+import { useSettingsStore } from '../store/useSettingsStore';
 
 interface Props {
   children: ReactNode;
@@ -29,12 +31,25 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       const isDark = Appearance.getColorScheme() === 'dark';
       const palette = isDark ? darkTheme : lightTheme;
+      let fontScale = 1;
+      try {
+        const storedScale = useSettingsStore.getState().fontScale;
+        if (typeof storedScale === 'number' && Number.isFinite(storedScale) && storedScale > 0) {
+          fontScale = storedScale;
+        }
+      } catch {
+        fontScale = 1;
+      }
 
       return (
         <View style={[styles.container, { backgroundColor: palette.background }]}>
-          <Text style={[styles.title, { color: palette.text }]}>Something went wrong</Text>
+          <Text style={[styles.title, { color: palette.text, fontSize: scaleFontSize(20, fontScale) }]}>
+            Something went wrong
+          </Text>
           {__DEV__ && this.state.error && (
-            <Text style={[styles.errorText, { color: palette.expense }]}>{this.state.error.toString()}</Text>
+            <Text style={[styles.errorText, { color: palette.expense, fontSize: scaleFontSize(14, fontScale) }]}>
+              {this.state.error.toString()}
+            </Text>
           )}
           <TouchableOpacity
             style={[styles.button, { backgroundColor: palette.primary }]}
@@ -42,7 +57,9 @@ export default class ErrorBoundary extends Component<Props, State> {
             accessibilityRole="button"
             accessibilityLabel="Restart"
           >
-            <Text style={[styles.buttonText, { color: palette.onPrimary }]}>Restart</Text>
+            <Text style={[styles.buttonText, { color: palette.onPrimary, fontSize: scaleFontSize(14, fontScale) }]}>
+              Restart
+            </Text>
           </TouchableOpacity>
         </View>
       );

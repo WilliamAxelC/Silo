@@ -2,6 +2,7 @@ import {
   MAX_TRANSACTION_AMOUNT,
   isAmountWithinRange,
   getCurrencyDecimals,
+  getCurrencySymbol,
   currencyHasDecimals,
   formatAmountInput,
   formatAmountForInput,
@@ -561,6 +562,19 @@ describe('amount utilities', () => {
       expect(formatCompactAmount(1_200_000, 'GBP')).toBe('1.2M');
       expect(formatCompactAmount(1_500_000_000, 'SGD')).toBe('1.5B');
       expect(formatCompactAmount(500, 'JPY')).toBe('500');
+    });
+  });
+
+  describe('getCurrencySymbol', () => {
+    it('returns short currency symbols for supported codes and falls back to uppercase code', () => {
+      expect(getCurrencySymbol('IDR')).toBe('Rp');
+      expect(getCurrencySymbol('idr')).toBe('Rp');
+      expect(getCurrencySymbol('USD')).toBe('$');
+      expect(getCurrencySymbol('EUR')).toBe('€');
+      expect(getCurrencySymbol('GBP')).toBe('£');
+      expect(getCurrencySymbol('SGD')).toBe('S$');
+      expect(getCurrencySymbol('JPY')).toBe('¥');
+      expect(getCurrencySymbol('AUD')).toBe('AUD');
     });
   });
 });

@@ -3,6 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 import { CashflowScreen } from '../CashflowScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../../features/transactions/constants';
 
 const ReactTestRenderer = require('react-test-renderer');
@@ -97,7 +98,9 @@ describe('CashflowScreen', () => {
       searchTransactions: mockSearchTransactions,
       summarizeSearchTransactions: mockSummarizeSearchTransactions,
       getDailyTotals: mockGetDailyTotals,
+      selectedCashflowDateMs: null,
     } as any);
+    useReceiptQueueStore.setState({ items: [] });
   });
 
   it('drops bottom SafeArea edge, renders dismissible error banner, uses id-ID locale and UNCATEGORIZED_EXPENSE_LABEL', () => {
@@ -493,5 +496,123 @@ describe('CashflowScreen', () => {
     ReactTestRenderer.act(() => {
       renderer.unmount();
     });
+  });
+
+  it('shows date and account on search result rows and hides receipt inbox banner during active search (F-16)', async () => {
+    const oct16 = new Date(new Date().getFullYear(), 9, 16, 10, 0, 0).getTime();
+    const expectedDate = new Date(oct16).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    useSettingsStore.setState({ dateFormat: 'en-GB', currencyCode: 'IDR', useThousandsSeparator: true });
+    // Even with a single active wallet, search results must display both date and account
+    useTransactionStore.setState({
+      wallets: [{ id: 2, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0 }],
+    } as any);
+    useReceiptQueueStore.setState({
+      items: [
+        {
+          id: 99,
+          imageUri: 'file:///r.jpg',
+          imageHash: 'h',
+          thumbnailUri: null,
+          status: 'done',
+          result: { merchantName: 'Cafe', totalAmount: 25000 },
+          error: null,
+          createdAt: Date.now(),
+        },
+      ],
+    });
+    mockSearchTransactions.mockResolvedValue([
+      {
+        id: 77,
+        merchantName: 'Kopi Tuku',
+        totalAmount: -28000,
+        type: 'expense',
+        category: 'Food & Dining',
+        date: oct16,
+        walletId: 2,
+      },
+    ]);
+    mockSummarizeSearchTransactions.mockResolvedValue({ count: 1, totalIn: 0, totalOut: 28000, net: -28000 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+
+    // Banner is visible before search
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Open Receipt Inbox' })).toBeTruthy();
+
+    // Activate filter/search
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Filter by account' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'Account option GoPay' }).props.onPress();
+    });
+
+    // Banner hidden while search/filters are active
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Open Receipt Inbox' })).toHaveLength(0);
+
+    // Search result row shows both date and account
+    const texts = renderer.root.findAllByType(Text).map((t: any) =>
+      Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+    );
+    expect(texts.some((t: string) => t.includes(expectedDate) && t.includes('GoPay') && t.includes('Food & Dining'))).toBe(true);
+
+    // Clearing filter brings receipt banner back
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Clear filters' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Open Receipt Inbox' })).toBeTruthy();
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('persists the user-selected past month across unmount/remount after deleting a transaction and resets on Today (F-17)', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 10, 15, 12, 0, 0)); // November 2026
+    try {
+      useSettingsStore.setState({ dateFormat: 'en-GB', monthStartDay: 1 });
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<CashflowScreen />);
+      });
+
+      // Go back to October 2026
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Previous month' }).props.onPress();
+      });
+
+      const readTexts = () =>
+        renderer.root
+          .findAllByType(Text)
+          .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+      expect(readTexts()).toContain('October 2026');
+
+      // Simulate leaving to delete a transaction and CashflowScreen remounting
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+      });
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<CashflowScreen />);
+      });
+
+      expect(readTexts()).toContain('October 2026');
+
+      // Tapping Today resets back to November 2026
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Jump to current month' }).props.onPress();
+      });
+      expect(readTexts()).toContain('November 2026');
+      expect(useTransactionStore.getState().selectedCashflowDateMs).toBeNull();
+
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

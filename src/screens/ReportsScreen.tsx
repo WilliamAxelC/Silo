@@ -8,8 +8,14 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
-import { formatDisplayCurrency } from '../features/transactions/amount';
-import { formatCachedLocaleDate, formatPeriodLabel, isSamePeriod, shiftPeriod } from '../features/transactions/periods';
+import { formatCompactAmount, formatDisplayCurrency } from '../features/transactions/amount';
+import {
+  formatCachedLocaleDate,
+  formatPeriodLabel,
+  getPeriodBounds,
+  isSamePeriod,
+  shiftPeriod,
+} from '../features/transactions/periods';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NavigationProps } from '../navigation/types';
@@ -27,7 +33,7 @@ const EXPENSE_PALETTE = [
   '#b45309',
   '#475569',
 ];
-const INCOME_PALETTE = ['#10b981', '#059669', '#0d9488', '#0284c7', '#3b82f6', '#6366f1', '#8b5cf6', '#14b8a6'];
+const INCOME_PALETTE = ['#10b981', '#0284c7', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#6366f1', '#84cc16'];
 
 function hashCategoryName(name: string): number {
   let hash = 0x811c9dc5;
@@ -48,6 +54,7 @@ export const getCategoryColor = (categoryName: string, type: 'expense' | 'income
 export const ReportsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
+  const transactionsList = useTransactionStore((state) => state.transactionsList);
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
@@ -148,8 +155,57 @@ export const ReportsScreen = () => {
   const periodLabel = formatPeriodLabel(periodBounds, locale);
   const compactPeriodLabel = formatPeriodLabel(periodBounds, locale, { compact: true });
 
+  const monthlyTrend = useMemo(() => {
+    const periods: Array<{
+      key: string;
+      anchor: Date;
+      label: string;
+      startMs: number;
+      endMs: number;
+      income: number;
+      expense: number;
+      isSelected: boolean;
+    }> = [];
+
+    for (let offset = -5; offset <= 0; offset += 1) {
+      const anchor = offset === 0 ? currentDate : shiftPeriod(currentDate, offset, monthStartDay);
+      const bounds = getPeriodBounds(anchor, monthStartDay);
+      const label = formatCachedLocaleDate(bounds.start, locale, { month: 'short' });
+      periods.push({
+        key: `${bounds.startMs}`,
+        anchor,
+        label,
+        startMs: bounds.startMs,
+        endMs: bounds.endMs,
+        income: 0,
+        expense: 0,
+        isSelected: offset === 0,
+      });
+    }
+
+    const windowStart = periods[0].startMs;
+    const windowEnd = periods[periods.length - 1].endMs;
+
+    for (let i = 0; i < transactionsList.length; i += 1) {
+      const tx = transactionsList[i];
+      if (!tx || tx.type === 'transfer' || typeof tx.date !== 'number') continue;
+      if (tx.date < windowStart || tx.date > windowEnd) continue;
+      for (let p = 0; p < periods.length; p += 1) {
+        if (tx.date >= periods[p].startMs && tx.date <= periods[p].endMs) {
+          const amt = tx.totalAmount || 0;
+          if (amt > 0) periods[p].income += amt;
+          else if (amt < 0) periods[p].expense += Math.abs(amt);
+          break;
+        }
+      }
+    }
+
+    const maxVal = periods.reduce((m, item) => Math.max(m, item.income, item.expense), 0);
+    return { periods, maxVal };
+  }, [transactionsList, currentDate, monthStartDay, locale]);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       {/* Pinned Month Header & Segmented Controls */}
       <View style={[styles.pinnedHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
         <View style={styles.monthSelector}>
@@ -249,7 +305,7 @@ export const ReportsScreen = () => {
       </View>
 
       {/* Main Scroll Content */}
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 14, paddingBottom: 136 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 14, paddingBottom: 28 }}>
         {/* Month Summary KPI Bar */}
         <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.summaryCol}>
@@ -277,34 +333,62 @@ export const ReportsScreen = () => {
         {/* Donut Pie Chart */}
         <View style={styles.chartContainer}>
           {totalForType > 0 ? (
-            <PieChart
-              donut
-              radius={96}
-              innerRadius={66}
-              data={chartData}
-              backgroundColor={theme.background}
-              textColor="#ffffff"
-              textSize={theme.scaleFont(10)}
-              fontWeight="700"
-              isAnimated
-              animationDuration={600}
-              centerLabelComponent={() => (
-                <View style={{ justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
-                  <Text
-                    style={{ fontSize: theme.scaleFont(16), color: theme.text, fontWeight: '800' }}
-                    adjustsFontSizeToFit
-                    numberOfLines={1}
+            <>
+              <PieChart
+                donut
+                showText
+                radius={96}
+                innerRadius={64}
+                data={chartData}
+                backgroundColor={theme.background}
+                textColor="#ffffff"
+                textSize={theme.scaleFont(10)}
+                fontWeight="700"
+                isAnimated
+                animationDuration={600}
+                centerLabelComponent={() => (
+                  <View style={{ justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
+                    <Text
+                      style={{ fontSize: theme.scaleFont(16), color: theme.text, fontWeight: '800' }}
+                      adjustsFontSizeToFit
+                      numberOfLines={1}
+                    >
+                      {formatDisplayCurrency(totalForType || 0, currencyCode, useThousandsSeparator)}
+                    </Text>
+                    <Text
+                      style={{ fontSize: theme.scaleFont(11), color: theme.textMuted, fontWeight: '600', marginTop: 2 }}
+                    >
+                      Total {reportType === 'expense' ? 'Expense' : 'Income'}
+                    </Text>
+                  </View>
+                )}
+              />
+              <View style={styles.donutLegendWrap} testID="reports-donut-legend">
+                {chartData.map((slice) => (
+                  <TouchableOpacity
+                    key={`legend-${slice.category}`}
+                    style={[
+                      styles.donutLegendPill,
+                      {
+                        backgroundColor: slice.focused ? theme.primaryMuted : theme.surface,
+                        borderColor: slice.focused ? theme.primary : theme.border,
+                      },
+                    ]}
+                    onPress={() => toggleCategory(slice.category)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${slice.category} ${slice.text}`}
                   >
-                    {formatDisplayCurrency(totalForType || 0, currencyCode, useThousandsSeparator)}
-                  </Text>
-                  <Text
-                    style={{ fontSize: theme.scaleFont(11), color: theme.textMuted, fontWeight: '600', marginTop: 2 }}
-                  >
-                    Total {reportType === 'expense' ? 'Expense' : 'Income'}
-                  </Text>
-                </View>
-              )}
-            />
+                    <View style={[styles.donutLegendDot, { backgroundColor: slice.color }]} />
+                    <Text
+                      style={[styles.donutLegendText, { color: theme.text, fontSize: theme.scaleFont(11) }]}
+                      numberOfLines={1}
+                    >
+                      {slice.category} · {slice.text}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
           ) : (
             <View style={[styles.emptyChartCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} style={{ marginBottom: 8 }} />
@@ -330,17 +414,105 @@ export const ReportsScreen = () => {
                 }}
               >
                 Top {reportType === 'expense' ? 'spending' : 'income'} was{' '}
-                <Text style={{ fontWeight: '800' }}>{topCategory.category}</Text> ({topCategory.text} of total).
+                <Text style={{ fontWeight: '800' }}>{topCategory.category}</Text> —{' '}
+                <Text style={{ fontWeight: '800' }}>
+                  {formatDisplayCurrency(topCategory.value || 0, currencyCode, useThousandsSeparator)}
+                </Text>{' '}
+                ({topCategory.text} of total).
               </Text>
             </View>
           </View>
         )}
 
+        {/* 6-Month Income vs Expense Trend */}
+        {monthlyTrend.maxVal > 0 ? (
+          <View
+            testID="reports-trend-chart"
+            style={[styles.trendCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+          >
+            <View style={styles.trendHeader}>
+              <Text style={[styles.trendTitle, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
+                6-Month Trend
+              </Text>
+              <View style={styles.trendLegend}>
+                <View style={styles.trendLegendItem}>
+                  <View style={[styles.trendLegendDot, { backgroundColor: theme.income }]} />
+                  <Text style={[styles.trendLegendLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                    Income
+                  </Text>
+                </View>
+                <View style={styles.trendLegendItem}>
+                  <View style={[styles.trendLegendDot, { backgroundColor: theme.expense }]} />
+                  <Text style={[styles.trendLegendLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                    Expense
+                  </Text>
+                </View>
+              </View>
+            </View>
+            <Text style={[styles.trendScaleHint, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+              Peak: {formatCompactAmount(monthlyTrend.maxVal, currencyCode)}
+            </Text>
+            <View style={styles.trendBarsRow}>
+              {monthlyTrend.periods.map((col) => {
+                const incomeHeight = col.income > 0 ? Math.max(4, Math.round((col.income / monthlyTrend.maxVal) * 76)) : 0;
+                const expenseHeight = col.expense > 0 ? Math.max(4, Math.round((col.expense / monthlyTrend.maxVal) * 76)) : 0;
+                return (
+                  <TouchableOpacity
+                    key={col.key}
+                    style={[
+                      styles.trendCol,
+                      col.isSelected && { backgroundColor: theme.primaryMuted, borderRadius: 10 },
+                    ]}
+                    onPress={() => {
+                      if (!col.isSelected) {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        setCurrentDate(col.anchor);
+                        setExpandedCategories({});
+                        setSelectedCategoryName(null);
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${col.label}: income ${formatDisplayCurrency(col.income, currencyCode, useThousandsSeparator)}, expense ${formatDisplayCurrency(col.expense, currencyCode, useThousandsSeparator)}`}
+                  >
+                    <View style={styles.trendBarPair}>
+                      <View
+                        style={[
+                          styles.trendBar,
+                          { height: incomeHeight, backgroundColor: theme.income },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.trendBar,
+                          { height: expenseHeight, backgroundColor: theme.expense },
+                        ]}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.trendColLabel,
+                        {
+                          color: col.isSelected ? theme.primary : theme.textMuted,
+                          fontWeight: col.isSelected ? '800' : '600',
+                          fontSize: theme.scaleFont(11),
+                        },
+                      ]}
+                    >
+                      {col.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
         {/* Collapsible Category Breakdown Drill-down */}
-        <View style={styles.legendContainer}>
-          <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-            CATEGORY BREAKDOWN ({chartData.length})
-          </Text>
+        {chartData.length > 0 ? (
+          <View style={styles.legendContainer}>
+            <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+              CATEGORY BREAKDOWN ({chartData.length})
+            </Text>
 
           {chartData.map((item) => {
             const isExpanded = expandedCategories[item.category];
@@ -447,7 +619,8 @@ export const ReportsScreen = () => {
               </View>
             );
           })}
-        </View>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -464,9 +637,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
-  monthTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
+  monthTextWrap: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
   monthText: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
-  todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  todayBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   todayBadgeText: { fontSize: 10, fontWeight: '700' },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   toggleContainer: {
@@ -476,7 +649,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-  toggleBtn: { flex: 1, minHeight: 38, justifyContent: 'center', alignItems: 'center' },
+  toggleBtn: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   toggleText: { fontWeight: '700', fontSize: 13 },
   summaryCard: {
     flexDirection: 'row',
@@ -493,6 +666,44 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 11, fontWeight: '600', marginBottom: 2 },
   summaryValue: { fontSize: 13, fontWeight: '800' },
   chartContainer: { alignItems: 'center', marginBottom: 16 },
+  donutLegendWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 14,
+  },
+  donutLegendPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    maxWidth: '48%',
+  },
+  donutLegendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  donutLegendText: { fontWeight: '600', flexShrink: 1 },
+  trendCard: {
+    marginHorizontal: 14,
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  trendHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  trendTitle: { fontWeight: '700' },
+  trendLegend: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  trendLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  trendLegendDot: { width: 8, height: 8, borderRadius: 4 },
+  trendLegendLabel: { fontWeight: '600' },
+  trendScaleHint: { marginBottom: 8, fontWeight: '500' },
+  trendBarsRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 4 },
+  trendCol: { flex: 1, alignItems: 'center', paddingVertical: 6, minHeight: 108, justifyContent: 'flex-end' },
+  trendBarPair: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 78 },
+  trendBar: { width: 10, borderRadius: 4 },
+  trendColLabel: { marginTop: 6 },
   emptyChartCard: {
     width: '92%',
     paddingVertical: 32,

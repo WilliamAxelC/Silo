@@ -416,19 +416,18 @@ export const ReceiptInboxScreen = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
-          hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="chevron-back" size={22} color={theme.text} />
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text
-            style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(20) }]}
+            style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(18) }]}
             numberOfLines={1}
             adjustsFontSizeToFit
           >
@@ -585,16 +584,25 @@ export const ReceiptInboxScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, gap: 10 },
-  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 56,
+    gap: 6,
+  },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, minWidth: 0 },
-  title: { fontSize: 20, fontWeight: '700' },
-  subtitle: { fontSize: 12, marginTop: 2 },
+  title: { fontSize: 18, fontWeight: '700' },
+  subtitle: { fontSize: 12, marginTop: 1 },
   primaryActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 16,
+    marginTop: 10,
     marginBottom: 10,
   },
   importBtn: {
@@ -652,5 +660,5 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowSub: { fontSize: 12 },
   rowActions: { alignItems: 'center', gap: 6 },
-  rowIconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  rowIconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

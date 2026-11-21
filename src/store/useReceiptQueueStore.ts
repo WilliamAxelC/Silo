@@ -191,6 +191,15 @@ function persistThumbnailUri(id: number, imageUri: string, thumbnailUri: string)
   }
 }
 
+function persistImageHash(id: number, imageUri: string, imageHash: string) {
+  inMemoryHashByUri.set(imageUri, imageHash);
+  try {
+    expoDb.runSync(`UPDATE receipt_queue SET image_hash = ? WHERE id = ?;`, [imageHash, id]);
+  } catch {
+    // Graceful fallback if an isolated test table predates image_hash.
+  }
+}
+
 export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
   const refresh = () => set({ items: readAll() });
 
@@ -258,6 +267,7 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
           seenFingerprints.add(item.imageHash);
         } else {
           const existingFp = await computeImageFingerprint(item.imageUri);
+          persistImageHash(item.id, item.imageUri, existingFp);
           seenFingerprints.add(existingFp);
         }
         seenFingerprints.add(`uri:${item.imageUri}`);

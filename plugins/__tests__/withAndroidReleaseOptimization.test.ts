@@ -40,11 +40,12 @@ describe('withAndroidReleaseOptimization Expo config plugin', () => {
     expect(gradle).toContain('**/arm64-v8a/librnllama_jni_v8_2_i8mm.so');
     expect(gradle).toContain('**/arm64-v8a/librnllama_v8_2.so');
     expect(gradle).toContain('**/arm64-v8a/librnllama_jni_v8_2.so');
-    expect(gradle).toContain('**/arm64-v8a/librnllama_jni.so');
+    expect(gradle).not.toContain('**/arm64-v8a/librnllama_jni.so');
 
     // Kept libraries MUST NOT appear in excludes
     const mustKeep = [
       'librnllama.so',
+      'librnllama_jni.so',
       'librnllama_v8.so',
       'librnllama_jni_v8.so',
       'librnllama_v8_2_dotprod.so',

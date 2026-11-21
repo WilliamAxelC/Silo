@@ -830,7 +830,7 @@ export class QModelLifecycleManager {
     if (snapshot.status === 'ready' && !snapshot.updateAvailable) {
       const resolvedInstalledPath = await findExistingModelPath(snapshot.modelPath);
       if (!resolvedInstalledPath) {
-        await this.clearInvalidInstalledState('Previously installed GGUF model metadata pointed to a missing file. The stale path was cleared so setup can restart safely.');
+        await this.clearInvalidInstalledState('Previously installed AI model metadata pointed to a missing file. The stale path was cleared so setup can restart safely.');
       } else {
         if (resolvedInstalledPath !== snapshot.modelPath) {
           this.updateProvisioning({ modelPath: resolvedInstalledPath, lastError: null, pausedReason: null });
@@ -915,6 +915,7 @@ export class QModelLifecycleManager {
 
   async pauseDownload(reason = 'Model download paused.') {
     const pauseToken = ++this.downloadToken;
+    this.pendingDeferredRecovery = null;
     const resumable = this.downloadResumable;
     this.downloadResumable = null;
     this.inFlightDownloadPromise = null;
@@ -1013,6 +1014,7 @@ export class QModelLifecycleManager {
 
   async cancelDownload(reason = 'Cancelled model download and cleared temporary files.') {
     const cancelToken = ++this.downloadToken;
+    this.pendingDeferredRecovery = null;
     const resumable = this.downloadResumable;
     this.downloadResumable = null;
 
@@ -1035,8 +1037,9 @@ export class QModelLifecycleManager {
   }
 
   async deleteInstalledModel(): Promise<void> {
+    this.pendingDeferredRecovery = null;
     try {
-      this.log('info', 'model-deletion-requested', 'User requested full deletion of offline AI model weights.');
+      this.log('info', 'model-deletion-requested', 'User requested full deletion of offline AI model.');
 
       // Cancel any active downloads first
       await this.cancelDownload('Model deletion requested by user.');
@@ -1639,10 +1642,10 @@ export class QModelLifecycleManager {
         return;
       }
       if (!resolvedModelPath) {
-        await this.clearInvalidInstalledState('The downloaded GGUF file could not be found at the expected location. The stale installation metadata was cleared so setup can restart safely.', {
+        await this.clearInvalidInstalledState('The downloaded model file could not be found at the expected location. The stale installation metadata was cleared so setup can restart safely.', {
           expectedModelPath: modelPath,
         });
-        throw new Error(`Local GGUF model file is missing. Expected it at: ${modelPath}`);
+        throw new Error(`Offline AI model file is missing. Expected it at: ${modelPath}`);
       }
 
       if (resolvedModelPath !== modelPath) {
@@ -1705,10 +1708,10 @@ export class QModelLifecycleManager {
         return;
       }
       if (!finalModelPath) {
-        await this.clearInvalidInstalledState('The GGUF file disappeared before installation metadata could be finalized. Setup metadata was reset to avoid a broken ready state.', {
+        await this.clearInvalidInstalledState('The model file disappeared before installation metadata could be finalized. Setup metadata was reset to avoid a broken ready state.', {
           expectedModelPath: useAIStore.getState().provisioning.modelPath ?? modelPath,
         });
-        throw new Error('GGUF model file was not available after registration completed.');
+        throw new Error('Offline AI model file was not available after registration completed.');
       }
 
       const latestProvisioning = useAIStore.getState().provisioning;
@@ -1805,16 +1808,18 @@ export class QModelLifecycleManager {
   }
 
   private async restorePersistedProvisioningMetadata(generation: number) {
+    const startDownloadToken = this.downloadToken;
+    const isStale = () => this.lifecycleGeneration !== generation || this.downloadToken !== startDownloadToken;
     if (typeof waitForSettingsLoaded === 'function') {
       await waitForSettingsLoaded();
     }
-    if (this.lifecycleGeneration !== generation) {
+    if (isStale()) {
       return;
     }
 
     const state = useAIStore.getState();
     const runtimeAlreadyActive = await this.isRuntimeActiveOrLoaded();
-    if (this.lifecycleGeneration !== generation) {
+    if (isStale()) {
       return;
     }
 
@@ -1836,12 +1841,12 @@ export class QModelLifecycleManager {
     }
 
     const manifest = await readManifest();
-    if (this.lifecycleGeneration !== generation) {
+    if (isStale()) {
       return;
     }
     if (manifest?.modelPath) {
       const resolvedManifestPath = await findExistingModelPath(manifest.modelPath);
-      if (this.lifecycleGeneration !== generation) {
+      if (isStale()) {
         return;
       }
       if (resolvedManifestPath) {
@@ -1876,13 +1881,13 @@ export class QModelLifecycleManager {
         await clearManifest();
         state.replaceProvisioning({
           ...createInitialProvisioningSnapshot(),
-          lastError: 'Saved GGUF installation metadata pointed to a file that no longer exists. Download the model again to reinstall it cleanly.',
+          lastError: 'Saved AI model installation metadata pointed to a file that no longer exists. Download the model again to reinstall it cleanly.',
         });
       }
     }
 
     const transferManifest = await readTransferManifest();
-    if (this.lifecycleGeneration !== generation) {
+    if (isStale()) {
       return;
     }
     if (!transferManifest) {
@@ -1891,7 +1896,7 @@ export class QModelLifecycleManager {
     }
 
     const tempInfo = await safeGetInfo(transferManifest.tempPath);
-    if (this.lifecycleGeneration !== generation) {
+    if (isStale()) {
       return;
     }
     if (!tempInfo.exists) {
@@ -1956,8 +1961,10 @@ export class QModelLifecycleManager {
   }
 
   private async restorePersistedState(generation: number = this.lifecycleGeneration) {
+    const tokenBeforeRestore = this.downloadToken;
     await this.hydratePersistedState();
-    if (this.lifecycleGeneration !== generation) {
+    if (this.lifecycleGeneration !== generation || this.downloadToken !== tokenBeforeRestore) {
+      this.pendingDeferredRecovery = null;
       return;
     }
 
@@ -1969,7 +1976,7 @@ export class QModelLifecycleManager {
 
     if (recovery.kind === 'cleanup-orphan-temp') {
       const tempInfo = await safeGetInfo(getTempDownloadPath());
-      if (this.lifecycleGeneration !== generation) {
+      if (this.lifecycleGeneration !== generation || this.downloadToken !== tokenBeforeRestore) {
         return;
       }
       if (tempInfo.exists) {
@@ -1979,6 +1986,16 @@ export class QModelLifecycleManager {
     }
 
     if (recovery.kind === 'verify') {
+      const [liveManifest, liveTemp] = await Promise.all([readTransferManifest(), safeGetInfo(recovery.tempPath)]);
+      if (
+        this.lifecycleGeneration !== generation ||
+        this.downloadToken !== tokenBeforeRestore ||
+        !liveManifest ||
+        liveManifest.status !== 'verifying' ||
+        !liveTemp.exists
+      ) {
+        return;
+      }
       try {
         await this.resumeVerification(recovery.tempPath);
       } catch (error) {
@@ -1988,7 +2005,17 @@ export class QModelLifecycleManager {
     }
 
     if (recovery.kind === 'resume-download') {
-      const transferManifest = recovery.manifest;
+      const liveManifest = await readTransferManifest();
+      if (
+        this.lifecycleGeneration !== generation ||
+        this.downloadToken !== tokenBeforeRestore ||
+        !liveManifest ||
+        !liveManifest.resumeData ||
+        (liveManifest.status !== 'downloading' && liveManifest.status !== 'queued')
+      ) {
+        return;
+      }
+      const transferManifest = liveManifest;
       this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
         tempPath: transferManifest.tempPath,
         downloadedBytes: transferManifest.downloadedBytes,
@@ -2003,14 +2030,22 @@ export class QModelLifecycleManager {
     }
 
     if (recovery.kind === 'cleanup-partial') {
-      const transferManifest = recovery.manifest;
+      const liveManifest = await readTransferManifest();
+      if (
+        this.lifecycleGeneration !== generation ||
+        this.downloadToken !== tokenBeforeRestore ||
+        !liveManifest
+      ) {
+        return;
+      }
+      const transferManifest = liveManifest;
       this.log('warn', 'restored-partial-download-cleared', 'Discarding restored partial model download to preserve atomic install behavior.', {
         tempPath: transferManifest.tempPath,
         downloadedBytes: transferManifest.downloadedBytes,
         status: transferManifest.status,
       });
       await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
-      if (this.lifecycleGeneration !== generation) {
+      if (this.lifecycleGeneration !== generation || this.downloadToken !== tokenBeforeRestore) {
         return;
       }
       const latestState = useAIStore.getState();
@@ -2126,6 +2161,7 @@ export class QModelLifecycleManager {
   }
 
   private async resetProvisioningArtifacts(options?: { preserveInstalledModel?: boolean }) {
+    this.pendingDeferredRecovery = null;
     this.downloadResumable = null;
     this.inFlightDownloadPromise = null;
     this.inFlightVerificationPromise = null;

@@ -135,7 +135,7 @@ function buildInitialAvailability(): LocalInferenceAvailability {
   return {
     available: false,
     reason: 'platform-unsupported',
-    message: 'Local GGUF inference is Android-only in this build.',
+    message: 'Offline AI is available on Android only in this build.',
   };
 }
 

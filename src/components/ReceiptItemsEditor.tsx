@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, TextInput, StyleSheet, Platform } from 'r
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
+import { formatDisplayCurrency, getCurrencySymbol, parseSignedAmount } from '../features/transactions/amount';
 import type { ReceiptLineItemDraft } from '../features/transactions/lineItems';
 
 export type { ReceiptLineItemDraft };
@@ -23,6 +23,7 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
 }) => {
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const currencySymbol = getCurrencySymbol(currencyCode);
   const useThousandsSeparator = useSettingsStore((s) => s.useThousandsSeparator);
 
   const itemsTotal = useMemo(() => {
@@ -101,20 +102,8 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
                   onChangeText={(value) => onUpdateRow(item.id, 'name', value)}
                   placeholder="Item name"
                   placeholderTextColor={theme.textMuted}
+                  accessibilityLabel={`Item ${index + 1} name`}
                 />
-                <View style={[styles.receiptPriceBox, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                  <Text style={[styles.receiptPricePrefix, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                    {currencyCode}
-                  </Text>
-                  <TextInput
-                    style={[styles.receiptPriceInput, { color: theme.text, fontSize: theme.scaleFont(13) }]}
-                    value={item.price}
-                    onChangeText={(value) => onUpdateRow(item.id, 'price', value)}
-                    placeholder="0"
-                    placeholderTextColor={theme.textMuted}
-                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
-                  />
-                </View>
                 <TouchableOpacity
                   style={styles.receiptRemoveBtn}
                   onPress={() => onRemoveRow(item.id)}
@@ -124,21 +113,38 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
                   <Ionicons name="trash-outline" size={18} color={theme.expense} />
                 </TouchableOpacity>
               </View>
-              <TextInput
-                style={[
-                  styles.receiptNoteInput,
-                  {
-                    color: theme.text,
-                    borderTopColor: theme.border,
-                    backgroundColor: theme.surface,
-                    fontSize: theme.scaleFont(12),
-                  },
-                ]}
-                value={item.note}
-                onChangeText={(value) => onUpdateRow(item.id, 'note', value)}
-                placeholder="Item notes / quantity (optional)"
-                placeholderTextColor={theme.textMuted}
-              />
+              <View style={[styles.receiptRowBottom, { borderTopColor: theme.border }]}>
+                <View style={[styles.receiptPriceBox, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                  <Text style={[styles.receiptPricePrefix, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                    {currencySymbol}
+                  </Text>
+                  <TextInput
+                    style={[styles.receiptPriceInput, { color: theme.text, fontSize: theme.scaleFont(13) }]}
+                    value={item.price}
+                    onChangeText={(value) => onUpdateRow(item.id, 'price', value)}
+                    placeholder="0"
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                    accessibilityLabel={`Item ${index + 1} price`}
+                  />
+                </View>
+                <TextInput
+                  style={[
+                    styles.receiptNoteInput,
+                    {
+                      color: theme.text,
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                      fontSize: theme.scaleFont(12),
+                    },
+                  ]}
+                  value={item.note}
+                  onChangeText={(value) => onUpdateRow(item.id, 'note', value)}
+                  placeholder="Notes / qty (optional)"
+                  placeholderTextColor={theme.textMuted}
+                  accessibilityLabel={`Item ${index + 1} note`}
+                />
+              </View>
             </View>
           ))}
 
@@ -191,8 +197,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    minHeight: 34,
+    paddingHorizontal: 14,
+    minHeight: 44,
     justifyContent: 'center',
   },
   inlineAddButtonText: {
@@ -245,8 +251,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     fontSize: 13,
   },
+  receiptRowBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    padding: 8,
+    gap: 8,
+  },
   receiptPriceBox: {
-    width: 110,
+    width: 132,
     minHeight: 44,
     borderWidth: 1,
     borderRadius: 10,
@@ -255,7 +268,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   receiptPricePrefix: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     marginRight: 4,
   },
@@ -272,9 +285,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   receiptNoteInput: {
-    minHeight: 40,
-    borderTopWidth: 1,
-    paddingHorizontal: 12,
+    flex: 1,
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 12,
   },

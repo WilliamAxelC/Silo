@@ -18,6 +18,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import {
   formatAmountForInput,
   formatAmountInput,
+  getCurrencySymbol,
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
@@ -168,7 +169,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => void handleSkip()}>
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View
           testID="welcome-sheet"
@@ -252,7 +253,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
               ]}
             >
               <Text style={[styles.currencyPrefix, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
-                {selectedCurrency}
+                {getCurrencySymbol(selectedCurrency)}
               </Text>
               <TextInput
                 style={[styles.balanceInput, { color: theme.text, fontSize: theme.scaleFont(16) }]}

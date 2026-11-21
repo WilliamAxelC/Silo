@@ -69,7 +69,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <KeyboardAvoidingView
         style={styles.keyboardShell}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <TouchableOpacity
           style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 16)]}
@@ -291,10 +291,11 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   clearSearchBtn: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: -6,
   },
   categoryScroll: {
     maxHeight: 280,

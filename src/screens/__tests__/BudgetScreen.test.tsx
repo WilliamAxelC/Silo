@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { Animated, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { BudgetScreen } from '../BudgetScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -470,5 +470,68 @@ describe('BudgetScreen', () => {
     ReactTestRenderer.act(() => {
       renderer.unmount();
     });
+  });
+
+  it('hides redundant pencil icon on unconfigured cards, uses clean modal prompt and Remove button, and uses height KAV on Android (F-29, MIN-01)', async () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      useTransactionStore.setState({
+        transactionsList: [],
+        budgets: { Groceries: 1000000 },
+        categories: [
+          { id: 1, name: 'Groceries', type: 'expense', isSystem: true, createdAt: 1000 },
+          { id: 2, name: 'Entertainment', type: 'expense', isSystem: true, createdAt: 1000 },
+        ],
+      } as any);
+
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<BudgetScreen />);
+      });
+
+      const groceriesCard = renderer.root.findByProps({ accessibilityLabel: 'Groceries budget limit' });
+      const entertainmentCard = renderer.root.findByProps({ accessibilityLabel: 'Entertainment budget limit' });
+
+      expect(groceriesCard.findAllByProps({ name: 'create-outline' })).toHaveLength(1);
+      expect(entertainmentCard.findAllByProps({ name: 'create-outline' })).toHaveLength(0);
+
+      // Open configured category modal -> Remove button, clean prompt, Android height KAV
+      ReactTestRenderer.act(() => {
+        groceriesCard.props.onPress();
+      });
+
+      const kav = renderer.root.findByType(KeyboardAvoidingView);
+      expect(kav.props.behavior).toBe('height');
+
+      const modalTexts = renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+      expect(modalTexts).toContain('Update monthly spending limit:');
+      expect(modalTexts.some((t: string) => t.includes('0 to remove'))).toBe(false);
+
+      const removeBtn = renderer.root.findByProps({ accessibilityLabel: 'Remove budget limit' });
+      expect(removeBtn.findByType(Text).props.children).toBe('Remove');
+      await ReactTestRenderer.act(async () => {
+        await removeBtn.props.onPress();
+      });
+      expect(mockSetBudget).toHaveBeenCalledWith('Groceries', 0);
+
+      // Open unconfigured category modal -> no Remove button and clean prompt
+      ReactTestRenderer.act(() => {
+        entertainmentCard.props.onPress();
+      });
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Remove budget limit' })).toHaveLength(0);
+      const unconfiguredTexts = renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+      expect(unconfiguredTexts).toContain('Enter monthly spending limit:');
+
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+      });
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+    }
   });
 });

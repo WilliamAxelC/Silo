@@ -73,14 +73,14 @@ export const AppLockGate = ({ children }: { children: React.ReactNode }) => {
           {isLoaded ? (
             <>
               <Image source={require('../../assets/icon.png')} style={styles.logo} accessibilityIgnoresInvertColors />
-              <Text style={[styles.title, { color: theme.text }]}>Silo is locked</Text>
+              <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(18) }]}>Silo is locked</Text>
               <TouchableOpacity
                 style={[styles.button, { backgroundColor: theme.primary }]}
                 onPress={unlock}
                 accessibilityRole="button"
                 accessibilityLabel="Unlock Silo"
               >
-                <Text style={[styles.buttonText, { color: theme.onPrimary }]}>Unlock</Text>
+                <Text style={[styles.buttonText, { color: theme.onPrimary, fontSize: theme.scaleFont(15) }]}>Unlock</Text>
               </TouchableOpacity>
             </>
           ) : null}
@@ -95,6 +95,6 @@ const styles = StyleSheet.create({
   cover: { alignItems: 'center', justifyContent: 'center', gap: 16, zIndex: 100, elevation: 100 },
   logo: { width: 72, height: 72, borderRadius: 18 },
   title: { fontSize: 18, fontWeight: '700' },
-  button: { borderRadius: 999, paddingHorizontal: 28, paddingVertical: 12 },
+  button: { borderRadius: 999, paddingHorizontal: 28, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   buttonText: { fontSize: 15, fontWeight: '700' },
 });

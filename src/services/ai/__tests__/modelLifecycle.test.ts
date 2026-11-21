@@ -1103,5 +1103,109 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
       );
       expect(useAIStore.getState().provisioning.status).toBe('ready');
     });
+
+    it('clears pendingDeferredRecovery on cancelDownload, pauseDownload fallback, and deleteInstalledModel before deferred initialize() runs (R4B-01)', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+      let tempExists = true;
+      let manifestText: string | null = JSON.stringify({
+        version: 'qwen3.5-2b',
+        status: 'downloading',
+        downloadUrl: 'https://example.com/model.gguf',
+        targetPath: tempUri,
+        tempPath: tempUri,
+        totalBytes: EXPECTED_SIZE,
+        downloadedBytes: 500000,
+        progress: 500000 / EXPECTED_SIZE,
+        resumeData: mockResumeData,
+        startedAt: '2026-11-21T00:00:00.000Z',
+        updatedAt: '2026-11-21T00:00:01.000Z',
+        lastProgressAt: '2026-11-21T00:00:01.000Z',
+        bytesPerSecond: 100000,
+        sessionId: 'sess-r4b01-dl',
+        pausedReason: null,
+      });
+
+      fsMock.getInfoAsync.mockImplementation(async (path: string) => {
+        if (path === tempUri) return { exists: tempExists, size: tempExists ? 500000 : 0, uri: tempUri };
+        return { exists: false, uri: path };
+      });
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('download-manifest.json') && manifestText) return manifestText;
+        throw new Error('not found');
+      });
+      fsMock.deleteAsync.mockImplementation(async (path: string) => {
+        if (path === tempUri) tempExists = false;
+        if (path.endsWith('download-manifest.json')) manifestText = null;
+      });
+
+      // Case 1: cancelDownload() in the window after hydratePersistedState() and before initialize()
+      const mgr1 = new QModelLifecycleManager(createMockAdapter());
+      await mgr1.hydratePersistedState();
+      expect(useAIStore.getState().provisioning.status).toBe('downloading');
+      await mgr1.cancelDownload();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+      await mgr1.initialize();
+      expect(fsMock.createDownloadResumable).not.toHaveBeenCalled();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+      // Case 2: pauseDownload() fallback (resumable is null) after hydratePersistedState() and before initialize()
+      tempExists = true;
+      manifestText = JSON.stringify({
+        version: 'qwen3.5-2b',
+        status: 'downloading',
+        downloadUrl: 'https://example.com/model.gguf',
+        targetPath: tempUri,
+        tempPath: tempUri,
+        totalBytes: EXPECTED_SIZE,
+        downloadedBytes: 500000,
+        progress: 500000 / EXPECTED_SIZE,
+        resumeData: mockResumeData,
+        startedAt: '2026-11-21T00:00:00.000Z',
+        updatedAt: '2026-11-21T00:00:01.000Z',
+        lastProgressAt: '2026-11-21T00:00:01.000Z',
+        bytesPerSecond: 100000,
+        sessionId: 'sess-r4b01-pause',
+        pausedReason: null,
+      });
+      const mgr2 = new QModelLifecycleManager(createMockAdapter());
+      await mgr2.hydratePersistedState();
+      await mgr2.pauseDownload();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+      await mgr2.initialize();
+      expect(fsMock.createDownloadResumable).not.toHaveBeenCalled();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+      // Case 3: verifying manifest cancelled/deleted before initialize() must NOT fail verification on deleted .part
+      tempExists = true;
+      manifestText = JSON.stringify({
+        version: 'qwen3.5-2b',
+        status: 'verifying',
+        downloadUrl: 'https://example.com/model.gguf',
+        targetPath: tempUri,
+        tempPath: tempUri,
+        totalBytes: EXPECTED_SIZE,
+        downloadedBytes: EXPECTED_SIZE,
+        progress: 1,
+        resumeData: null,
+        startedAt: '2026-11-21T00:00:00.000Z',
+        updatedAt: '2026-11-21T00:00:01.000Z',
+        lastProgressAt: '2026-11-21T00:00:01.000Z',
+        bytesPerSecond: null,
+        sessionId: 'sess-r4b01-verify',
+        pausedReason: null,
+      });
+      const mgr3 = new QModelLifecycleManager(createMockAdapter());
+      await mgr3.hydratePersistedState();
+      expect(useAIStore.getState().provisioning.status).toBe('verifying');
+      await mgr3.deleteInstalledModel();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+
+      await mgr3.initialize();
+      expect(useAIStore.getState().provisioning.status).toBe('not-installed');
+      expect(useAIStore.getState().provisioning.lastError).toBeNull();
+    });
   });
 });

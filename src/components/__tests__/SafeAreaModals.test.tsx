@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 import { AccountPickerModal } from '../AccountPickerModal';
@@ -169,5 +169,39 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
     expect(scrollTexts).toContain('Restore from archive');
 
     ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('uses explicit height KeyboardAvoidingView behavior on Android for CategorySelectorModal and WelcomeSheet (MIN-01)', () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      let catRenderer: any;
+      ReactTestRenderer.act(() => {
+        catRenderer = ReactTestRenderer.create(
+          withInsets(
+            <CategorySelectorModal
+              visible
+              onClose={jest.fn()}
+              categories={[{ id: 1, name: 'Bills', type: 'expense', isSystem: true, createdAt: 1 }]}
+              onSelectCategory={jest.fn()}
+              customCategory=""
+              onChangeCustomCategory={jest.fn()}
+              onAddCustomCategory={jest.fn()}
+            />
+          )
+        );
+      });
+      expect(catRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('height');
+      ReactTestRenderer.act(() => catRenderer.unmount());
+
+      let welcomeRenderer: any;
+      ReactTestRenderer.act(() => {
+        welcomeRenderer = ReactTestRenderer.create(withInsets(<WelcomeSheet visible />));
+      });
+      expect(welcomeRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('height');
+      ReactTestRenderer.act(() => welcomeRenderer.unmount());
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+    }
   });
 });

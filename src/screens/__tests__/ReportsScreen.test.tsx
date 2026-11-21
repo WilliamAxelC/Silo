@@ -297,4 +297,85 @@ describe('ReportsScreen', () => {
       renderer.unmount();
     });
   });
+
+  it('hides CATEGORY BREAKDOWN (0) when empty, renders donut legend, exact insight amount, distinct income colors, and 6-month trend chart (F-27)', () => {
+    const now = new Date();
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    useSettingsStore.setState({
+      isLoaded: true,
+      showIncomeInReportsFirst: false,
+      dateFormat: 'en-GB',
+      currencyCode: 'IDR',
+      useThousandsSeparator: true,
+      monthStartDay: 1,
+    });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 201,
+          merchantName: 'Groceries Mart',
+          totalAmount: -450000,
+          type: 'expense',
+          category: 'Groceries',
+          date: now.getTime(),
+        },
+        {
+          id: 202,
+          merchantName: 'Last Month Rent',
+          totalAmount: -1200000,
+          type: 'expense',
+          category: 'Bills',
+          date: prevMonth.getTime(),
+        },
+        {
+          id: 203,
+          merchantName: 'Employer',
+          totalAmount: 5000000,
+          type: 'income',
+          category: 'Salary',
+          date: now.getTime(),
+        },
+        {
+          id: 204,
+          merchantName: 'Side Gig',
+          totalAmount: 1500000,
+          type: 'income',
+          category: 'Freelance',
+          date: now.getTime(),
+        },
+      ],
+      fetchTransactions: mockFetchTransactions,
+    } as any);
+
+    // Distinct colors for different income categories
+    expect(getCategoryColor('Salary', 'income')).not.toBe(getCategoryColor('Freelance', 'income'));
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+
+    // Donut legend and exact formatted currency amount in Insight callout
+    expect(renderer.root.findByProps({ testID: 'reports-donut-legend' })).toBeDefined();
+    const allTexts = renderer.root
+      .findAllByType(Text)
+      .map((t: any) =>
+        (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')).replace(/\u00a0/g, ' ')
+      );
+    expect(allTexts.some((t: string) => t.includes('Rp 450.000'))).toBe(true);
+    expect(renderer.root.findByProps({ testID: 'reports-trend-chart' })).toBeDefined();
+
+    // Navigate to next month (no records) -> CATEGORY BREAKDOWN (0) must be hidden
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Next month' }).props.onPress();
+    });
+    const emptyTexts = renderer.root
+      .findAllByType(Text)
+      .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+    expect(emptyTexts.some((t: string) => t.includes('CATEGORY BREAKDOWN'))).toBe(false);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
 });

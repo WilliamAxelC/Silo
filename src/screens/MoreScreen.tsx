@@ -10,7 +10,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 
 export const MoreScreen = () => {
   const navigation = useNavigation<NavigationProps>();
-  const [dummyQuery, setDummyQuery] = useState('');
+  const [quickQuery, setQuickQuery] = useState('');
   const theme = useAppTheme();
 
   const clearAllData = useTransactionStore((state) => state.clearAllData);
@@ -23,10 +23,20 @@ export const MoreScreen = () => {
     ]);
   };
 
+  const handleOpenChat = () => {
+    const trimmed = quickQuery.trim();
+    setQuickQuery('');
+    if (trimmed) {
+      navigation.navigate('Chatbot', { initialMessage: trimmed, autoSend: true });
+    } else {
+      navigation.navigate('Chatbot', {});
+    }
+  };
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(17) }]}>More</Text>
+        <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>More</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -51,14 +61,17 @@ export const MoreScreen = () => {
               ]}
               placeholderTextColor={theme.textMuted}
               placeholder="Ask a finance question"
-              value={dummyQuery}
-              onChangeText={setDummyQuery}
+              accessibilityLabel="Ask a finance question"
+              value={quickQuery}
+              onChangeText={setQuickQuery}
+              returnKeyType="send"
+              onSubmitEditing={handleOpenChat}
             />
             <TouchableOpacity
               style={[styles.chatButton, { backgroundColor: theme.primary }]}
-              onPress={() => navigation.navigate('Chatbot', { initialMessage: dummyQuery })}
+              onPress={handleOpenChat}
               accessibilityRole="button"
-              accessibilityLabel="Open chatbot"
+              accessibilityLabel={quickQuery.trim() ? 'Ask Silo AI' : 'Open chatbot'}
             >
               <Ionicons name="arrow-forward" size={18} color={theme.onPrimary} />
             </TouchableOpacity>
@@ -67,25 +80,46 @@ export const MoreScreen = () => {
 
         {__DEV__ ? (
           <>
-            <Text style={[styles.sectionTitle, { color: theme.textMuted }]}>Developer Tools</Text>
+            <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+              Developer Tools
+            </Text>
             <View style={[styles.devCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <TouchableOpacity style={styles.devButton} onPress={injectDummyData}>
+              <TouchableOpacity
+                style={styles.devButton}
+                onPress={injectDummyData}
+                accessibilityRole="button"
+                accessibilityLabel="Inject Dummy Data"
+              >
                 <Ionicons name="add-circle-outline" size={20} color={theme.primary} />
-                <Text style={[styles.devButtonText, { color: theme.text }]}>Inject Dummy Data</Text>
+                <Text style={[styles.devButtonText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                  Inject Dummy Data
+                </Text>
               </TouchableOpacity>
 
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-              <TouchableOpacity style={styles.devButton} onPress={handleClear}>
+              <TouchableOpacity
+                style={styles.devButton}
+                onPress={handleClear}
+                accessibilityRole="button"
+                accessibilityLabel="Clear Database"
+              >
                 <Ionicons name="trash-outline" size={20} color={theme.expense} />
-                <Text style={[styles.devButtonText, { color: theme.expense }]}>Clear Database</Text>
+                <Text style={[styles.devButtonText, { color: theme.expense, fontSize: theme.scaleFont(14) }]}>
+                  Clear Database
+                </Text>
               </TouchableOpacity>
             </View>
           </>
         ) : null}
 
         <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Accounts')} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('Accounts')}
+            accessibilityRole="button"
+            accessibilityLabel="Accounts"
+          >
             <View style={styles.settingRowLeft}>
               <Ionicons name="wallet-outline" size={20} color={theme.primary} />
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Accounts</Text>
@@ -95,7 +129,12 @@ export const MoreScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Recurring')} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('Recurring')}
+            accessibilityRole="button"
+            accessibilityLabel="Recurring"
+          >
             <View style={styles.settingRowLeft}>
               <Ionicons name="repeat-outline" size={20} color={theme.primary} />
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Recurring</Text>
@@ -105,7 +144,12 @@ export const MoreScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('ReceiptInbox')} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('ReceiptInbox')}
+            accessibilityRole="button"
+            accessibilityLabel="Receipt Inbox"
+          >
             <View style={styles.settingRowLeft}>
               <Ionicons name="receipt-outline" size={20} color={theme.primary} />
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Receipt Inbox</Text>
@@ -115,17 +159,12 @@ export const MoreScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('SystemLogs')} accessibilityRole="button">
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="document-text-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>System Logs</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Settings')} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityRole="button"
+            accessibilityLabel="App Settings"
+          >
             <View style={styles.settingRowLeft}>
               <Ionicons name="settings-outline" size={20} color={theme.primary} />
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>App Settings</Text>
@@ -144,9 +183,15 @@ export const MoreScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingVertical: 10, alignItems: 'center', borderBottomWidth: 1 },
-  headerTitle: { fontSize: 17, fontWeight: '600' },
-  scrollContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 124 },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 56,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+  },
+  headerTitle: { fontSize: 18, fontWeight: '700' },
+  scrollContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 28 },
   aiCard: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
   aiHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   aiIconWrap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
@@ -154,8 +199,8 @@ const styles = StyleSheet.create({
   aiTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
   aiDesc: { fontSize: 12 },
   aiInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  input: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
-  chatButton: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  input: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
+  chatButton: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6, marginLeft: 4 },
   devCard: { borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: 'hidden' },
   devButton: { flexDirection: 'row', alignItems: 'center', minHeight: 50, paddingHorizontal: 14, paddingVertical: 10 },

@@ -27,6 +27,7 @@ import {
   formatAmountForInput,
   formatAmountInput,
   formatDisplayCurrency,
+  getCurrencySymbol,
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
@@ -76,6 +77,7 @@ export const BudgetScreen = () => {
   const theme = useAppTheme();
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
+  const currencySymbol = getCurrencySymbol(currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
   const monthStartDay = useSettingsStore((state) => state.monthStartDay);
@@ -251,10 +253,9 @@ export const BudgetScreen = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.background }]}>
-        <Text style={[styles.eyebrow, { color: theme.textMuted }, smallScale]}>Budgets</Text>
+      <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
         <View style={styles.headerRow}>
           <View style={styles.headerTitleBlock}>
             <Text style={[styles.headerTitle, { color: theme.text }, titleScale]}>Monthly Plan</Text>
@@ -327,7 +328,7 @@ export const BudgetScreen = () => {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 132 }]}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -449,9 +450,11 @@ export const BudgetScreen = () => {
                           : 'No budget set'}
                     </Text>
                   </View>
-                  <View style={[styles.editDotWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                    <Ionicons name="create-outline" size={16} color={theme.textMuted} />
-                  </View>
+                  {item.hasBudget ? (
+                    <View style={[styles.editDotWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                      <Ionicons name="create-outline" size={16} color={theme.textMuted} />
+                    </View>
+                  ) : null}
                 </View>
 
                 {item.hasBudget ? (
@@ -513,7 +516,7 @@ export const BudgetScreen = () => {
         {modalVisible ? (
           <KeyboardAvoidingView
             style={styles.keyboardShell}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
             <View
               style={[
@@ -561,7 +564,9 @@ export const BudgetScreen = () => {
                   </View>
 
                   <Text style={[styles.modalInputLabel, { color: theme.textMuted }, smallScale]}>
-                    Enter monthly limit amount (0 to remove budget):
+                    {budgets[selectedCategory] && budgets[selectedCategory] > 0
+                      ? 'Update monthly spending limit:'
+                      : 'Enter monthly spending limit:'}
                   </Text>
 
                   <TouchableOpacity
@@ -584,7 +589,7 @@ export const BudgetScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel="Edit budget amount"
                   >
-                    <Text style={[styles.currencyPrefix, { color: theme.textMuted }, bodyScale]}>{currencyCode}</Text>
+                    <Text style={[styles.currencyPrefix, { color: theme.textMuted }, bodyScale]}>{currencySymbol}</Text>
                     <TextInput
                       style={[styles.input, { color: theme.text }, metricScale]}
                       keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
@@ -631,10 +636,10 @@ export const BudgetScreen = () => {
                           style={[styles.clearBtn, { borderColor: theme.expense, backgroundColor: theme.background }]}
                           onPress={handleClearBudget}
                           accessibilityRole="button"
-                          accessibilityLabel="Clear budget limit"
+                          accessibilityLabel="Remove budget limit"
                         >
                           <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 4 }} />
-                          <Text style={[styles.clearBtnText, { color: theme.expense }, bodyScale]}>Clear</Text>
+                          <Text style={[styles.clearBtnText, { color: theme.expense }, bodyScale]}>Remove</Text>
                         </TouchableOpacity>
                       ) : null}
 
@@ -670,8 +675,7 @@ export const BudgetScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardShell: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-  eyebrow: { fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 4 },
+  header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 1 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   headerTitleBlock: { flex: 1 },
   headerTitle: { fontWeight: '800', letterSpacing: -0.5 },
@@ -705,7 +709,7 @@ const styles = StyleSheet.create({
   periodSubtitle: { fontWeight: '700', flexShrink: 1 },
   todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   todayBadgeText: { fontWeight: '700' },
-  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 28 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28 },
   heroPanel: { borderWidth: 1, borderRadius: 20, padding: 14, marginBottom: 14 },
   heroMetricGrid: { flexDirection: 'row', alignItems: 'stretch' },
   metricCell: { flex: 1 },
@@ -761,7 +765,7 @@ const styles = StyleSheet.create({
   remainingText: { fontWeight: '700', textAlign: 'right', flexShrink: 1 },
   emptyBudgetStrip: { minHeight: 46, borderWidth: 1, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   emptyBudgetStripText: { marginLeft: 8, fontWeight: '700' },
-  bottomSpacer: { height: 92 },
+  bottomSpacer: { height: 12 },
   modalOverlay: { flex: 1, justifyContent: 'center', padding: 16 },
   modalCard: { borderWidth: 1, borderRadius: 24, maxHeight: '90%', overflow: 'hidden' },
   modalScrollContent: { padding: 18 },

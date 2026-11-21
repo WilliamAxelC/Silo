@@ -39,9 +39,9 @@ const EXCLUDED_ARM64_LLAMA_LIBS = [
   // SIMD gain over v8; pre-dotprod ARMv8.2 devices cleanly fall through to rnllama_jni_v8.
   '**/arm64-v8a/librnllama_v8_2.so',
   '**/arm64-v8a/librnllama_jni_v8_2.so',
-  // Unreachable on arm64-v8a because RNLlama.java:236-241 unconditionally loads rnllama_jni_v8 before line 254.
-  // NOTE: librnllama.so (non-JNI base library) MUST remain because RNLlama.java:260 loads it unconditionally.
-  '**/arm64-v8a/librnllama_jni.so',
+  // Kept on purpose: librnllama.so (base library, RNLlama.java:260 loads it unconditionally) and
+  // librnllama_jni.so (the generic fallback RNLlama.java:256 loads if rnllama_jni_v8 ever fails; small,
+  // and without it that path would crash at startup).
 ];
 
 const APP_BUILD_GRADLE_BLOCK = `

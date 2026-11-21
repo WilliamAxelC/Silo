@@ -22,6 +22,7 @@ import {
   formatAmountForInput,
   formatAmountInput,
   formatDisplayCurrency,
+  getCurrencySymbol,
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
@@ -99,8 +100,10 @@ export const AddTransactionScreen = () => {
 
   const [type, setType] = useState<TransactionType>('expense');
   const [title, setTitle] = useState('');
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [amountError, setAmountError] = useState<string | null>(null);
+  const [toAccountError, setToAccountError] = useState<string | null>(null);
   const [scanConfidence, setScanConfidence] = useState<ReceiptConfidenceAssessment | null>(null);
   const wallets = useTransactionStore((s) => s.wallets);
   const defaultWalletId = wallets.find((w) => w.isActive)?.id ?? null;
@@ -208,8 +211,10 @@ export const AddTransactionScreen = () => {
     const nextForm = createTransactionInput({ category: fallbackCategory, type: 'expense' });
     skipNextCategorySyncRef.current = true;
     setTitle(nextForm.merchantName);
+    setTitleError(null);
     setAmount('');
     setAmountError(null);
+    setToAccountError(null);
     setScanConfidence(null);
     setCategory(nextForm.category);
     setPendingScannedCategory(null);
@@ -250,18 +255,25 @@ export const AddTransactionScreen = () => {
 
     skipNextCategorySyncRef.current = true;
     setTitle(editableTransaction.merchantName);
+    setTitleError(null);
     setAmount(
       editableTransaction.totalAmount !== 0
         ? formatAmountForInput(editableTransaction.totalAmount, currencyCode)
         : ''
     );
     setAmountError(null);
+    setToAccountError(null);
     setScanConfidence(null);
     setType(editableType);
     setCategory(resolvedCategory);
     setPendingScannedCategory(null);
     setNote(editableTransaction.note || '');
-    setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
+    setLineItems(
+      parseReceiptLineItemsText(editableTransaction.lineItemsText || '').map((item) => ({
+        ...item,
+        price: item.price ? formatAmountInput(item.price, currencyCode) : '',
+      }))
+    );
     setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
     setSelectedDate(
       options.dateOverride
@@ -327,7 +339,10 @@ export const AddTransactionScreen = () => {
       setRawOcrText(rawText);
       setIsRawTextExpanded(false);
     }
-    if (parsedData.merchantName) setTitle(parsedData.merchantName);
+    if (parsedData.merchantName) {
+      setTitle(parsedData.merchantName);
+      setTitleError(null);
+    }
     if (parsedData.totalAmount) {
       setAmount(formatAmountForInput(parsedData.totalAmount, currencyCode));
       setAmountError(isAmountWithinRange(parsedData.totalAmount) ? null : 'Amount is too large');
@@ -420,6 +435,8 @@ export const AddTransactionScreen = () => {
   const handleTypeChange = (nextType: TransactionType) => {
     if (nextType === type) return;
     setType(nextType);
+    setTitleError(null);
+    setToAccountError(null);
     setPendingScannedCategory(null);
     if (nextType !== 'transfer') {
       const nextCats = getCategoriesByType(getCategoryTypeForTransaction(nextType));
@@ -457,7 +474,10 @@ export const AddTransactionScreen = () => {
   };
 
   const setParsedLineItems = (value: string) => {
-    const parsedItems = parseReceiptLineItemsText(value);
+    const parsedItems = parseReceiptLineItemsText(value).map((item) => ({
+      ...item,
+      price: item.price ? formatAmountInput(item.price, currencyCode) : '',
+    }));
     setLineItems(parsedItems.length > 0 ? parsedItems : [createReceiptItemDraft()]);
   };
 
@@ -485,6 +505,15 @@ export const AddTransactionScreen = () => {
     }
   };
 
+  const notifySkippedDuplicates = (skippedDuplicates?: number) => {
+    if (!skippedDuplicates || skippedDuplicates <= 0) return;
+    const noun = skippedDuplicates === 1 ? 'duplicate receipt was' : 'duplicate receipts were';
+    Alert.alert(
+      'Duplicate receipts skipped',
+      `${skippedDuplicates} ${noun} already in the inbox and skipped.`
+    );
+  };
+
   const launchGalleryPicker = async (target: 'attachment' | 'scan' | null) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -498,7 +527,8 @@ export const AddTransactionScreen = () => {
       if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
 
       if (target === 'scan' && result.assets.length > 1) {
-        await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
+        const queued = await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
+        notifySkippedDuplicates(queued?.skippedDuplicates);
         navigation.navigate('ReceiptInbox');
         return;
       }
@@ -528,7 +558,8 @@ export const AddTransactionScreen = () => {
       });
       if (captured.status !== 'captured') return;
       if (captured.uris.length > 1) {
-        await useReceiptQueueStore.getState().enqueue(captured.uris);
+        const queued = await useReceiptQueueStore.getState().enqueue(captured.uris);
+        notifySkippedDuplicates(queued?.skippedDuplicates);
         navigation.navigate('ReceiptInbox');
       } else if (captured.uris.length === 1) {
         void processScanReceipt(captured.uris[0]);
@@ -623,25 +654,45 @@ export const AddTransactionScreen = () => {
     );
   };
 
+  const returnToPreviousScreen = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('MainTabs', { screen: 'Cashflow' });
+    }
+  };
+
   const handleSave = async () => {
+    let hasValidationError = false;
+
     if (type === 'transfer') {
       if (!effectiveToWalletId || effectiveToWalletId === effectiveWalletId) {
+        setToAccountError('Choose a different destination account');
         Alert.alert('Choose accounts', 'Pick the account the money goes to (different from the one it leaves).');
         return;
       }
+      setToAccountError(null);
+      setTitleError(null);
       if (!title.trim()) setTitle('Transfer');
     } else if (!title.trim()) {
-      Alert.alert('Missing Required Fields', 'Please enter a title');
-      return;
+      setTitleError(type === 'income' ? 'Please enter a source' : 'Please enter a title');
+      hasValidationError = true;
+    } else {
+      setTitleError(null);
     }
 
     const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, currencyCode));
     if (!amount || parsedAmt === 0 || Number.isNaN(parsedAmt)) {
       setAmountError('Amount must be greater than 0');
-      return;
-    }
-    if (!isAmountWithinRange(parsedAmt)) {
+      hasValidationError = true;
+    } else if (!isAmountWithinRange(parsedAmt)) {
       setAmountError('Amount is too large');
+      hasValidationError = true;
+    } else {
+      setAmountError(null);
+    }
+
+    if (hasValidationError) {
       return;
     }
 
@@ -726,7 +777,7 @@ export const AddTransactionScreen = () => {
         }
       }
 
-      navigation.navigate('MainTabs', { screen: 'Cashflow' });
+      returnToPreviousScreen();
       setTimeout(() => resetForm(), 100);
     } catch (error: any) {
       Alert.alert('Save Failed', error?.message || 'Failed to save transaction. Please try again.');
@@ -741,12 +792,16 @@ export const AddTransactionScreen = () => {
   const handleSaveAsTemplate = () => {
     if (type === 'transfer') {
       if (!effectiveToWalletId || effectiveToWalletId === effectiveWalletId) {
+        setToAccountError('Choose a different destination account');
         Alert.alert('Choose accounts', 'Pick the account the money goes to (different from the one it leaves).');
         return;
       }
+      setToAccountError(null);
     } else if (!title.trim()) {
-      Alert.alert('Missing Title', 'Please enter a title before saving as a template.');
+      setTitleError(type === 'income' ? 'Please enter a source' : 'Please enter a title');
       return;
+    } else {
+      setTitleError(null);
     }
 
     if (amount.trim().length > 0) {
@@ -822,7 +877,7 @@ export const AddTransactionScreen = () => {
           try {
             await deleteTransaction(editingId);
             resetForm();
-            navigation.navigate('MainTabs', { screen: 'Cashflow' });
+            returnToPreviousScreen();
           } catch (error: any) {
             Alert.alert('Delete Failed', error?.message || 'Failed to delete transaction. Please try again.');
           }
@@ -849,53 +904,60 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const scrollBottomPadding = getBottomInsetPadding(insets.bottom, 32);
+  const currencySymbol = getCurrencySymbol(currencyCode);
+  const titleLabel = type === 'transfer' ? 'Description' : type === 'income' ? 'Source *' : 'Title *';
+  const titlePlaceholder =
+    type === 'transfer'
+      ? 'Description (optional)'
+      : type === 'income'
+        ? 'Source (e.g. Salary, Client)'
+        : 'Merchant or title';
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+      {/* Pinned Top Header */}
+      <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <TouchableOpacity
+          style={styles.headerBackButton}
+          onPress={() => {
+            resetForm();
+            if (receiptQueueId) {
+              navigation.navigate('ReceiptInbox');
+            } else if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate('MainTabs', { screen: 'Cashflow' });
+            }
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerScreenTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>
+            {editingId ? 'Edit Transaction' : receiptQueueId ? 'Review Receipt' : 'Add Transaction'}
+          </Text>
+          {reviewProgress ? (
+            <Text
+              style={[styles.reviewProgressText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}
+              accessibilityLabel={`Receipt ${reviewProgress.index} of ${reviewProgress.total}`}
+            >
+              {reviewProgress.index} of {reviewProgress.total}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
       <KeyboardAvoidingView
         style={styles.keyboardShell}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPadding }]}
+          contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Top Header */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={[styles.headerBackButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
-              onPress={() => {
-                resetForm();
-                if (receiptQueueId) {
-                  navigation.navigate('ReceiptInbox');
-                } else if (navigation.canGoBack()) {
-                  navigation.goBack();
-                } else {
-                  navigation.navigate('MainTabs', { screen: 'Cashflow' });
-                }
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <Ionicons name="chevron-back" size={22} color={theme.text} />
-            </TouchableOpacity>
-            <View style={styles.headerCenter}>
-              <Text style={[styles.headerScreenTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>
-                {editingId ? 'Edit Transaction' : receiptQueueId ? 'Review Receipt' : 'Add Transaction'}
-              </Text>
-              {reviewProgress ? (
-                <Text
-                  style={[styles.reviewProgressText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}
-                  accessibilityLabel={`Receipt ${reviewProgress.index} of ${reviewProgress.total}`}
-                >
-                  {reviewProgress.index} of {reviewProgress.total}
-                </Text>
-              ) : null}
-            </View>
-            <View style={styles.headerSpacer} />
-          </View>
 
           {/* Quick-entry Templates Strip */}
           {!editingId && templates.length > 0 ? (
@@ -978,7 +1040,13 @@ export const AddTransactionScreen = () => {
 
           {/* Type Toggle + Scan Receipt Button */}
           <View style={styles.compactRow}>
-            <View style={[styles.typeToggle, styles.compactTypeToggle, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+            <View
+              style={[
+                styles.typeToggle,
+                type !== 'transfer' ? styles.compactTypeToggle : styles.flexField,
+                { borderColor: theme.border, backgroundColor: theme.surface },
+              ]}
+            >
               <TouchableOpacity
                 style={[
                   styles.toggleBtn,
@@ -1038,59 +1106,87 @@ export const AddTransactionScreen = () => {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[styles.scanButtonCompact, { backgroundColor: theme.primary, opacity: isScanning ? 0.7 : 1 }]}
-              onPress={openScanSourceModal}
-              disabled={isScanning}
-              accessibilityRole="button"
-              accessibilityLabel="Scan receipt"
-            >
-              {isScanning ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Ionicons name="scan-outline" size={18} color="#fff" />
-              )}
-              <Text style={[styles.scanButtonTextCompact, { fontSize: theme.scaleFont(13) }]}>
-                {isScanning ? 'Scanning…' : 'Scan'}
-              </Text>
-            </TouchableOpacity>
+            {type !== 'transfer' ? (
+              <TouchableOpacity
+                style={[
+                  styles.scanButtonCompact,
+                  type === 'income'
+                    ? { backgroundColor: theme.surface, borderColor: theme.primary, borderWidth: 1, opacity: isScanning ? 0.7 : 1 }
+                    : { backgroundColor: theme.primary, opacity: isScanning ? 0.7 : 1 },
+                ]}
+                onPress={openScanSourceModal}
+                disabled={isScanning}
+                accessibilityRole="button"
+                accessibilityLabel="Scan receipt"
+              >
+                {isScanning ? (
+                  <ActivityIndicator color={type === 'income' ? theme.primary : '#fff'} size="small" />
+                ) : (
+                  <Ionicons name="scan-outline" size={18} color={type === 'income' ? theme.primary : '#fff'} />
+                )}
+                <Text
+                  style={[
+                    styles.scanButtonTextCompact,
+                    { color: type === 'income' ? theme.primary : '#fff', fontSize: theme.scaleFont(13) },
+                  ]}
+                >
+                  {isScanning ? 'Scanning…' : 'Scan'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Title & Amount Fields */}
           <View style={styles.compactRow}>
             <View style={[styles.fieldCard, styles.flexField]}>
-              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Title *</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>{titleLabel}</Text>
               <TextInput
                 style={[
                   styles.compactInput,
                   {
                     backgroundColor: theme.surface,
-                    borderColor: theme.border,
+                    borderColor: titleError ? theme.expense : theme.border,
                     color: theme.text,
                     fontSize: theme.scaleFont(14),
                   },
                 ]}
                 placeholderTextColor={theme.textMuted}
                 value={title}
-                onChangeText={setTitle}
-                placeholder="Merchant or title"
+                onChangeText={(nextTitle) => {
+                  setTitle(nextTitle);
+                  if (titleError && nextTitle.trim()) {
+                    setTitleError(null);
+                  }
+                }}
+                placeholder={titlePlaceholder}
+                accessibilityLabel={titleLabel.replace(' *', '')}
               />
+              {titleError ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}
+                >
+                  {titleError}
+                </Text>
+              ) : null}
             </View>
             <View style={[styles.fieldCard, styles.amountField]}>
               <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Amount *</Text>
               <View style={styles.amountInputContainer}>
                 <View
+                  testID="amount-currency-badge"
                   style={[
                     styles.currencyBadge,
                     styles.compactCurrencyBadge,
-                    { backgroundColor: theme.surface, borderColor: amountError ? theme.expense : theme.border },
+                    { backgroundColor: theme.surface, borderColor: theme.border },
                   ]}
                 >
                   <Text style={[styles.currencyText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-                    {currencyCode}
+                    {currencySymbol}
                   </Text>
                 </View>
                 <TouchableOpacity
+                  testID="amount-input-box"
                   style={[
                     styles.amountInput,
                     styles.amountPressable,
@@ -1125,7 +1221,10 @@ export const AddTransactionScreen = () => {
                 </TouchableOpacity>
               </View>
               {amountError ? (
-                <Text style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}>
+                <Text
+                  accessibilityRole="alert"
+                  style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}
+                >
                   {amountError}
                 </Text>
               ) : null}
@@ -1162,7 +1261,10 @@ export const AddTransactionScreen = () => {
                 <View style={[styles.fieldCard, styles.flexField]}>
                   <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>To</Text>
                   <TouchableOpacity
-                    style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                    style={[
+                      styles.compactPicker,
+                      { backgroundColor: theme.surface, borderColor: toAccountError ? theme.expense : theme.border },
+                    ]}
                     onPress={() => setAccountPicker('to')}
                     accessibilityRole="button"
                     accessibilityLabel={`Transfer to: ${walletName(effectiveToWalletId)}`}
@@ -1178,6 +1280,14 @@ export const AddTransactionScreen = () => {
                     </Text>
                     <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
                   </TouchableOpacity>
+                  {toAccountError ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}
+                    >
+                      {toAccountError}
+                    </Text>
+                  ) : null}
                 </View>
               </>
             ) : null}
@@ -1268,8 +1378,8 @@ export const AddTransactionScreen = () => {
 
           {/* Details Section (Note vs Items vs Both) */}
           <View style={styles.inputGroupCompact}>
-            <View style={styles.inlineSectionHeader}>
-              <Text style={[styles.sectionTitleCompact, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+            <View testID="details-section-header" style={styles.detailsSectionHeader}>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
                 Details
               </Text>
               <View style={[styles.detailsModeToggle, styles.compactDetailsToggle, { borderColor: theme.border, backgroundColor: theme.surface }]}>
@@ -1286,12 +1396,12 @@ export const AddTransactionScreen = () => {
                       onPress={() => handleDetailsModeChange(option.key)}
                       accessibilityRole="button"
                       accessibilityLabel={`Show ${option.label} details`}
-                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                      accessibilityState={{ selected: isActive }}
                     >
                       <Text
                         style={[
                           styles.detailsModeText,
-                          { color: isActive ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(12) },
+                          { color: isActive ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(13) },
                         ]}
                       >
                         {option.label}
@@ -1414,27 +1524,8 @@ export const AddTransactionScreen = () => {
             </View>
           ) : null}
 
-          {/* Save, Template, Duplicate & Delete Actions */}
-          <View
-            testID="add-transaction-actions"
-            style={[styles.actionStack, { paddingBottom: getBottomInsetPadding(insets.bottom, 12) }]}
-          >
-            <TouchableOpacity
-              style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]}
-              onPress={handleSave}
-              disabled={isSaving}
-              accessibilityRole="button"
-              accessibilityLabel="Save transaction"
-            >
-              {isSaving ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={[styles.saveButtonText, { fontSize: theme.scaleFont(15) }]}>
-                  {editingId ? 'Update Transaction' : 'Save Transaction'}
-                </Text>
-              )}
-            </TouchableOpacity>
-
+          {/* Secondary Actions (Template / Duplicate & Delete) */}
+          <View style={styles.secondaryStack}>
             {editingId ? (
               <View style={styles.secondaryActionRow}>
                 <TouchableOpacity
@@ -1488,10 +1579,45 @@ export const AddTransactionScreen = () => {
             )}
           </View>
         </ScrollView>
+
+        {/* Pinned Primary Save CTA */}
+        <View
+          testID="add-transaction-actions"
+          style={[
+            styles.pinnedFooter,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              paddingBottom: getBottomInsetPadding(insets.bottom, 12),
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]}
+            onPress={handleSave}
+            disabled={isSaving}
+            accessibilityRole="button"
+            accessibilityLabel="Save transaction"
+          >
+            {isSaving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={[styles.saveButtonText, { fontSize: theme.scaleFont(15) }]}>
+                {editingId ? 'Update Transaction' : 'Save Transaction'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
 
       {showPicker && (
-        <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />
+        <DateTimePicker
+          value={selectedDate}
+          mode={pickerMode}
+          display="default"
+          accentColor={theme.primary}
+          onChange={onDateChange}
+        />
       )}
 
       <AmountCalculatorModal
@@ -1511,6 +1637,7 @@ export const AddTransactionScreen = () => {
         onSelect={(id) => {
           if (accountPicker === 'to') {
             setToWalletId(id);
+            setToAccountError(null);
           } else {
             setWalletId(id);
             if (id === effectiveToWalletId) setToWalletId(null);
@@ -1555,28 +1682,27 @@ export const AddTransactionScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardShell: { flex: 1 },
-  scrollContent: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 32 },
+  scrollContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 20 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 56,
   },
   headerBackButton: {
     width: 44,
     height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerCenter: {
     flex: 1,
-    alignItems: 'center',
+    marginLeft: 4,
   },
   headerScreenTitle: { fontSize: 18, fontWeight: '700' },
   reviewProgressText: { fontSize: 12, fontWeight: '700', marginTop: 2 },
-  headerSpacer: { width: 44 },
   scanStatusBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1611,7 +1737,7 @@ const styles = StyleSheet.create({
   amountField: { width: 160, marginLeft: 10 },
   dateGroup: { width: 180, marginLeft: 10 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 38, justifyContent: 'center' },
+  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
   repeatChipText: { fontSize: 13, fontWeight: '600' },
   transferArrow: { alignSelf: 'flex-end', marginHorizontal: 6, marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
@@ -1649,18 +1775,15 @@ const styles = StyleSheet.create({
   },
   miniActionText: { marginLeft: 4, fontSize: 12, fontWeight: '600' },
   inputGroupCompact: { marginBottom: 12 },
-  inlineSectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  detailsSectionHeader: {
+    flexDirection: 'column',
     marginBottom: 8,
   },
-  sectionTitleCompact: { fontSize: 14, fontWeight: '700' },
-  detailsModeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
-  compactDetailsToggle: { minHeight: 38 },
-  detailsModeBtn: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', minWidth: 54 },
-  compactDetailsBtn: { paddingHorizontal: 12 },
-  detailsModeText: { fontSize: 12, fontWeight: '700' },
+  detailsModeToggle: { flexDirection: 'row', width: '100%', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
+  compactDetailsToggle: { minHeight: 44 },
+  detailsModeBtn: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  compactDetailsBtn: { paddingHorizontal: 10 },
+  detailsModeText: { fontSize: 13, fontWeight: '700' },
   noteInputCompact: { minHeight: 88, paddingTop: 12 },
   attachmentCompact: {
     minHeight: 90,
@@ -1690,13 +1813,14 @@ const styles = StyleSheet.create({
   zoomHintText: { color: '#fff', fontWeight: '700' },
   removeImageBtnCompact: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 10,
+    right: 10,
     width: 44,
     height: 44,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 2,
   },
   rawOcrCard: {
     borderWidth: 1,
@@ -1752,7 +1876,12 @@ const styles = StyleSheet.create({
   templateDot: { width: 8, height: 8, borderRadius: 4 },
   templateChipName: { fontSize: 13, fontWeight: '700', flexShrink: 1 },
   templateChipAmount: { fontSize: 12, fontWeight: '600' },
-  actionStack: { marginTop: 8, gap: 10 },
+  secondaryStack: { marginTop: 4, gap: 10 },
+  pinnedFooter: {
+    borderTopWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+  },
   secondaryActionRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   secondaryActionButton: {
     flex: 1,
