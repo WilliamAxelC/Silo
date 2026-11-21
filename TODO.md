@@ -306,6 +306,6 @@ Kotlin → JNI → C++ (`gguf_runner`) bridge built before `llama.rn` was adopte
 - [x] Fix dark-mode system theme detection in [`src/theme/useAppTheme.ts`](file:///home/agent/orca/Silo/src/theme/useAppTheme.ts) when set to `system`.
 - [x] Indonesian Rupiah parsing and formatting fixes (`parseSignedAmount` with `,-` trailing sen, thousand/decimal separator handling in [`src/features/transactions/amount.ts`](file:///home/agent/orca/Silo/src/features/transactions/amount.ts)).
 - [x] Add "Made by CDev" attribution in Settings screen About section ([`src/screens/SettingsScreen.tsx`](file:///home/agent/orca/Silo/src/screens/SettingsScreen.tsx)).
-- [x] Add new Silo brand assets (`assets/brand/mark.png`, `assets/brand/preview-512.png`). Receipt-and-coin icon, 2D vector style, generated with the agy image generator.
+- [x] Add new Silo brand assets (`assets/brand/mark.png`, `assets/brand/preview-512.png`). Coin-slot silo icon (a savings silo), 2D vector style, picked from 40 agy image generator options.
 - [x] Add dismissible error banner in [`src/screens/CashflowScreen.tsx`](file:///home/agent/orca/Silo/src/screens/CashflowScreen.tsx) connected to `useTransactionStore` error state.
 - [x] Use `FlatList` virtualization for chat messages ([`src/screens/ChatbotScreen.tsx`](file:///home/agent/orca/Silo/src/screens/ChatbotScreen.tsx)) and system logs ([`src/screens/SystemLogsScreen.tsx`](file:///home/agent/orca/Silo/src/screens/SystemLogsScreen.tsx)).
