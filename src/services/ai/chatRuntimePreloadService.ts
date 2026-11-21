@@ -1,7 +1,8 @@
 import { getAIRuntimeAvailability, useAIStore } from '../../store/useAIStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
+import { isSettingsLoadPending, useSettingsStore, waitForSettingsLoaded } from '../../store/useSettingsStore';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from './generationService';
 import { getErrorMessage } from './localInferenceTypes';
+import { getModelLifecycleManager } from './modelLifecycle';
 
 export type ChatRuntimePreloadSnapshot = {
   requested: boolean;
@@ -41,6 +42,7 @@ class ChatRuntimePreloadService {
   private generationSubscription: { unsubscribe: () => void } | null = null;
   private storeSubscription: (() => void) | null = null;
   private preloadPromise: Promise<void> | null = null;
+  private lifecycleInitPromise: Promise<void> | null = null;
   private attemptedForCurrentRequest = false;
   private isPreloadInFlight = false;
   private isSyncing = false;
@@ -100,6 +102,7 @@ class ChatRuntimePreloadService {
     this.storeSubscription = null;
     this.listeners.clear();
     this.preloadPromise = null;
+    this.lifecycleInitPromise = null;
     this.attemptedForCurrentRequest = false;
     this.isPreloadInFlight = false;
     this.isSyncing = false;
@@ -118,6 +121,31 @@ class ChatRuntimePreloadService {
         this.attemptedForCurrentRequest = true;
       }
       return this.preloadPromise;
+    }
+
+    if (isSettingsLoadPending()) {
+      await waitForSettingsLoaded();
+      if (!this.state.requested) {
+        return;
+      }
+    }
+
+    const lifecycle = getModelLifecycleManager?.();
+    if (
+      useSettingsStore.getState().aiInferenceMode === 'local' &&
+      lifecycle &&
+      typeof lifecycle.ensureInitialized === 'function' &&
+      !lifecycle.isInitialized?.()
+    ) {
+      if (!this.lifecycleInitPromise) {
+        this.lifecycleInitPromise = lifecycle.ensureInitialized().finally(() => {
+          this.lifecycleInitPromise = null;
+        });
+      }
+      await this.lifecycleInitPromise;
+      if (!this.state.requested) {
+        return;
+      }
     }
 
     const runtimeSnapshot = this.generationService.getSnapshot();
@@ -192,6 +220,7 @@ class ChatRuntimePreloadService {
 
       shouldPreload =
         this.state.requested &&
+        !this.lifecycleInitPromise &&
         readiness.canPreload &&
         !this.attemptedForCurrentRequest &&
         !this.isPreloadInFlight &&
@@ -214,6 +243,7 @@ class ChatRuntimePreloadService {
       runtimeReady: store.runtimeReady,
       warmupPending: store.warmupPending,
       runtime: store.runtime,
+      provisioningHydrated: store.provisioningHydrated,
     });
 
     const isLocalMode = settings.aiInferenceMode === 'local';

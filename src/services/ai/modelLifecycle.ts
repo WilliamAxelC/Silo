@@ -24,7 +24,7 @@ import {
   createInitialProvisioningSnapshot,
   useAIStore,
 } from '../../store/useAIStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
+import { useSettingsStore, waitForSettingsLoaded } from '../../store/useSettingsStore';
 import { DEFAULT_APP_SETTINGS, MODEL_CATALOG, type VisionProjectorConfig } from '../../features/transactions/constants';
 
 type DownloadProgress = {
@@ -575,7 +575,11 @@ async function writeJsonFile(path: string, value: unknown) {
 }
 
 async function readManifest(): Promise<ModelManifest | null> {
-  return readJsonFile<ModelManifest>(getManifestFile());
+  const parsed = await readJsonFile<Partial<ModelManifest>>(getManifestFile());
+  if (!parsed || typeof parsed.modelPath !== 'string' || !parsed.modelPath.trim()) {
+    return null;
+  }
+  return parsed as ModelManifest;
 }
 
 async function writeManifest(manifest: ModelManifest) {
@@ -587,7 +591,11 @@ async function clearManifest() {
 }
 
 async function readTransferManifest(): Promise<TransferManifest | null> {
-  return readJsonFile<TransferManifest>(getTransferManifestFile());
+  const parsed = await readJsonFile<Partial<TransferManifest>>(getTransferManifestFile());
+  if (!parsed || typeof parsed.status !== 'string' || typeof parsed.tempPath !== 'string' || !parsed.tempPath.trim()) {
+    return null;
+  }
+  return parsed as TransferManifest;
 }
 
 async function writeTransferManifest(manifest: TransferManifest) {
@@ -660,10 +668,22 @@ function createSessionId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+type PendingDeferredRecovery =
+  | { kind: 'cleanup-orphan-temp' }
+  | { kind: 'verify'; tempPath: string }
+  | { kind: 'resume-download'; manifest: TransferManifest }
+  | { kind: 'cleanup-partial'; manifest: TransferManifest };
+
 export class QModelLifecycleManager {
   private downloadResumable: DownloadResumableLike | null = null;
   private inferenceAdapter: LocalInferenceAdapter;
   private active = false;
+  private initialized = false;
+  private hydrated = false;
+  private hydratePromise: Promise<void> | null = null;
+  private initializePromise: Promise<void> | null = null;
+  private lifecycleGeneration = 0;
+  private pendingDeferredRecovery: PendingDeferredRecovery | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
   private inFlightDownloadPromise: Promise<void> | null = null;
   private inFlightVerificationPromise: Promise<void> | null = null;
@@ -674,30 +694,122 @@ export class QModelLifecycleManager {
     this.inferenceAdapter = inferenceAdapter;
   }
 
-  async initialize() {
-    if (this.active) {
-      return;
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  isHydrated(): boolean {
+    return this.hydrated;
+  }
+
+  /**
+   * Eagerly hydrates persisted provisioning metadata (installed manifest + paused/active transfer
+   * manifest) via small file reads without creating directories or starting expensive verification
+   * hashing / background downloads. Shared across concurrent callers.
+   */
+  hydratePersistedState(): Promise<void> {
+    if (this.hydrated) {
+      return Promise.resolve();
+    }
+    if (this.hydratePromise) {
+      return this.hydratePromise;
     }
 
+    const generation = this.lifecycleGeneration;
+    let promise!: Promise<void>;
+    promise = (async () => {
+      try {
+        await this.restorePersistedProvisioningMetadata(generation);
+        if (this.lifecycleGeneration !== generation) {
+          return;
+        }
+        this.hydrated = true;
+        useAIStore.getState().setProvisioningHydrated(true);
+      } finally {
+        if (this.hydratePromise === promise) {
+          this.hydratePromise = null;
+        }
+      }
+    })();
+
+    this.hydratePromise = promise;
+    return promise;
+  }
+
+  /**
+   * Returns one shared lifecycle-ready promise that completes full filesystem setup,
+   * persisted state restoration, deferred recovery, and AppState registration.
+   */
+  ensureInitialized(): Promise<void> {
+    return this.initialize();
+  }
+
+  initialize(): Promise<void> {
+    if (this.initialized) {
+      return Promise.resolve();
+    }
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
+
+    const generation = this.lifecycleGeneration;
     this.active = true;
-    await this.ensureFilesystemLayout();
-    await this.restorePersistedState();
-    this.watchAppState();
 
-    if (AI_BOOTSTRAP_OPTIONS.autoStartOnLaunch) {
-      setTimeout(() => {
-        void this.startProvisioningIfNeeded();
-      }, 1_200);
-    }
+    let promise!: Promise<void>;
+    promise = (async () => {
+      try {
+        await this.ensureFilesystemLayout();
+        if (this.lifecycleGeneration !== generation) {
+          return;
+        }
+
+        await this.restorePersistedState(generation);
+        if (this.lifecycleGeneration !== generation) {
+          return;
+        }
+
+        this.watchAppState();
+        this.initialized = true;
+        useAIStore.getState().setProvisioningHydrated(true);
+
+        if (AI_BOOTSTRAP_OPTIONS.autoStartOnLaunch) {
+          setTimeout(() => {
+            if (this.lifecycleGeneration === generation) {
+              void this.startProvisioningIfNeeded();
+            }
+          }, 1_200);
+        }
+      } catch (error) {
+        if (this.lifecycleGeneration === generation) {
+          this.active = false;
+        }
+        throw error;
+      } finally {
+        if (this.initializePromise === promise) {
+          this.initializePromise = null;
+        }
+      }
+    })();
+
+    this.initializePromise = promise;
+    return promise;
   }
 
   dispose() {
+    this.lifecycleGeneration += 1;
     this.active = false;
+    this.initialized = false;
+    this.hydrated = false;
+    this.hydratePromise = null;
+    this.initializePromise = null;
+    this.pendingDeferredRecovery = null;
     this.appStateSubscription?.remove();
     this.appStateSubscription = null;
+    useAIStore.getState().setProvisioningHydrated(false);
   }
 
   async startProvisioningIfNeeded() {
+    await this.ensureInitialized();
     const state = useAIStore.getState();
     const snapshot = state.provisioning;
     const availability = state.refreshRuntimeAvailability();
@@ -783,6 +895,16 @@ export class QModelLifecycleManager {
   }
 
   async retryProvisioning() {
+    const wasInitialized = this.initialized;
+    await this.ensureInitialized();
+    const current = useAIStore.getState().provisioning;
+    if (!wasInitialized && (current.status === 'paused' || current.canResume)) {
+      await this.resumeDownload();
+      return;
+    }
+    if (!wasInitialized && current.status === 'ready' && !current.updateAvailable) {
+      return;
+    }
     const state = useAIStore.getState();
     await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
     state.resetProvisioningError();
@@ -848,6 +970,7 @@ export class QModelLifecycleManager {
   }
 
   async resumeDownload() {
+    await this.ensureInitialized();
     const wifiAllowed = await this.checkWifiRequirement();
     if (!wifiAllowed) {
       return;
@@ -1644,15 +1767,66 @@ export class QModelLifecycleManager {
     await ensureDirectory(getAiTempDirectory());
   }
 
-  private async restorePersistedState() {
+  private async isRuntimeActiveOrLoaded(): Promise<boolean> {
     const state = useAIStore.getState();
-    state.markRuntimeReady(false);
-    state.setWarmupPending(false);
-    state.setRuntimeHealth(false, null);
-    state.setRuntimeModelLoaded(false, null);
+    if (
+      state.runtimeReady ||
+      state.runtime.modelLoaded ||
+      state.runtime.activeGenerationRequestId !== null ||
+      state.runtime.runtimeState === 'loading' ||
+      state.runtime.runtimeState === 'loaded' ||
+      state.runtime.runtimeState === 'warming' ||
+      state.runtime.runtimeState === 'busy' ||
+      state.runtime.runtimeState === 'healthy'
+    ) {
+      return true;
+    }
+
+    try {
+      const { getGenerationService } = require('./generationService') as typeof import('./generationService');
+      const genSnapshot = getGenerationService().getSnapshot();
+      if (genSnapshot.isPreparingRuntime || genSnapshot.isGenerating) {
+        return true;
+      }
+    } catch {
+      // Ignore if generationService is unavailable in isolated tests.
+    }
+
+    try {
+      const adapterInfo = await getLlamaRnAdapter().getRuntimeInfo();
+      if (adapterInfo?.isModelLoaded) {
+        return true;
+      }
+    } catch {
+      // Ignore native probe errors during persisted-state restore.
+    }
+
+    return false;
+  }
+
+  private async restorePersistedProvisioningMetadata(generation: number) {
+    if (typeof waitForSettingsLoaded === 'function') {
+      await waitForSettingsLoaded();
+    }
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
+
+    const state = useAIStore.getState();
+    const runtimeAlreadyActive = await this.isRuntimeActiveOrLoaded();
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
+
+    if (!runtimeAlreadyActive) {
+      state.markRuntimeReady(false);
+      state.setWarmupPending(false);
+      state.setRuntimeHealth(false, null);
+      state.setRuntimeModelLoaded(false, null);
+    }
 
     const availability = state.refreshRuntimeAvailability();
-    if (!availability.available) {
+    if (!availability.available && !runtimeAlreadyActive) {
       state.setRuntimeState('unavailable');
       state.setRuntimeError({
         code: 'backend-unavailable',
@@ -1662,8 +1836,14 @@ export class QModelLifecycleManager {
     }
 
     const manifest = await readManifest();
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
     if (manifest?.modelPath) {
       const resolvedManifestPath = await findExistingModelPath(manifest.modelPath);
+      if (this.lifecycleGeneration !== generation) {
+        return;
+      }
       if (resolvedManifestPath) {
         if (resolvedManifestPath !== manifest.modelPath) {
           await writeManifest({
@@ -1689,7 +1869,7 @@ export class QModelLifecycleManager {
           tempPath: null,
         });
 
-        if (availability.available) {
+        if (availability.available && !(await this.isRuntimeActiveOrLoaded())) {
           state.setRuntimeState('model-unloaded');
         }
       } else {
@@ -1702,18 +1882,22 @@ export class QModelLifecycleManager {
     }
 
     const transferManifest = await readTransferManifest();
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
     if (!transferManifest) {
-      const tempInfo = await safeGetInfo(getTempDownloadPath());
-      if (tempInfo.exists) {
-        await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
-      }
+      this.pendingDeferredRecovery = { kind: 'cleanup-orphan-temp' };
       return;
     }
 
     const tempInfo = await safeGetInfo(transferManifest.tempPath);
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
     if (!tempInfo.exists) {
       await clearTransferManifest();
       state.resetTransfer();
+      this.pendingDeferredRecovery = null;
       return;
     }
 
@@ -1730,11 +1914,7 @@ export class QModelLifecycleManager {
         lastError: null,
         transfer: createTransferSnapshot(transferManifest),
       });
-      try {
-        await this.resumeVerification(transferManifest.tempPath);
-      } catch (error) {
-        this.failProvisioning(error, 'Restored model verification failed.');
-      }
+      this.pendingDeferredRecovery = { kind: 'verify', tempPath: transferManifest.tempPath };
       return;
     }
 
@@ -1751,14 +1931,11 @@ export class QModelLifecycleManager {
         lastError: null,
         transfer: createTransferSnapshot(transferManifest),
       });
+      this.pendingDeferredRecovery = null;
       return;
     }
 
     if ((transferManifest.status === 'downloading' || transferManifest.status === 'queued') && transferManifest.resumeData) {
-      this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
-        tempPath: transferManifest.tempPath,
-        downloadedBytes: transferManifest.downloadedBytes,
-      });
       state.replaceProvisioning({
         status: 'downloading',
         progress: transferManifest.progress,
@@ -1771,6 +1948,51 @@ export class QModelLifecycleManager {
         lastError: null,
         transfer: createTransferSnapshot(transferManifest),
       });
+      this.pendingDeferredRecovery = { kind: 'resume-download', manifest: transferManifest };
+      return;
+    }
+
+    this.pendingDeferredRecovery = { kind: 'cleanup-partial', manifest: transferManifest };
+  }
+
+  private async restorePersistedState(generation: number = this.lifecycleGeneration) {
+    await this.hydratePersistedState();
+    if (this.lifecycleGeneration !== generation) {
+      return;
+    }
+
+    const recovery = this.pendingDeferredRecovery;
+    this.pendingDeferredRecovery = null;
+    if (!recovery) {
+      return;
+    }
+
+    if (recovery.kind === 'cleanup-orphan-temp') {
+      const tempInfo = await safeGetInfo(getTempDownloadPath());
+      if (this.lifecycleGeneration !== generation) {
+        return;
+      }
+      if (tempInfo.exists) {
+        await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
+      }
+      return;
+    }
+
+    if (recovery.kind === 'verify') {
+      try {
+        await this.resumeVerification(recovery.tempPath);
+      } catch (error) {
+        this.failProvisioning(error, 'Restored model verification failed.');
+      }
+      return;
+    }
+
+    if (recovery.kind === 'resume-download') {
+      const transferManifest = recovery.manifest;
+      this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
+        tempPath: transferManifest.tempPath,
+        downloadedBytes: transferManifest.downloadedBytes,
+      });
       const restoredToken = ++this.downloadToken;
       this.inFlightDownloadPromise = this.runResumableDownload(transferManifest.resumeData, transferManifest, restoredToken).finally(() => {
         if (this.downloadToken === restoredToken) {
@@ -1780,23 +2002,33 @@ export class QModelLifecycleManager {
       return;
     }
 
-    this.log('warn', 'restored-partial-download-cleared', 'Discarding restored partial model download to preserve atomic install behavior.', {
-      tempPath: transferManifest.tempPath,
-      downloadedBytes: transferManifest.downloadedBytes,
-      status: transferManifest.status,
-    });
-    await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
-    state.replaceProvisioning({
-      ...state.provisioning,
-      status: 'not-installed',
-      progress: 0,
-      downloadedBytes: 0,
-      totalBytes: null,
-      tempPath: null,
-      canResume: false,
-      pausedReason: null,
-      lastError: 'An incomplete model download was discarded. Restart setup to download the full model in one pass.',
-    });
+    if (recovery.kind === 'cleanup-partial') {
+      const transferManifest = recovery.manifest;
+      this.log('warn', 'restored-partial-download-cleared', 'Discarding restored partial model download to preserve atomic install behavior.', {
+        tempPath: transferManifest.tempPath,
+        downloadedBytes: transferManifest.downloadedBytes,
+        status: transferManifest.status,
+      });
+      await this.resetProvisioningArtifacts({ preserveInstalledModel: true });
+      if (this.lifecycleGeneration !== generation) {
+        return;
+      }
+      const latestState = useAIStore.getState();
+      const hasInstalledModel = latestState.provisioning.status === 'ready' && Boolean(latestState.provisioning.modelPath);
+      latestState.replaceProvisioning({
+        ...latestState.provisioning,
+        status: hasInstalledModel ? 'ready' : 'not-installed',
+        progress: hasInstalledModel ? latestState.provisioning.progress : 0,
+        downloadedBytes: 0,
+        totalBytes: null,
+        tempPath: null,
+        canResume: false,
+        pausedReason: null,
+        lastError: hasInstalledModel
+          ? null
+          : 'An incomplete model download was discarded. Restart setup to download the full model in one pass.',
+      });
+    }
   }
 
   private watchAppState() {
@@ -1901,18 +2133,36 @@ export class QModelLifecycleManager {
 
     await safeDelete(getTempDownloadPath());
     await clearTransferManifest();
-    useAIStore.getState().resetTransfer();
-    useAIStore.getState().markRuntimeReady(false);
-    useAIStore.getState().setWarmupPending(false);
+    const store = useAIStore.getState();
+    store.resetTransfer();
+    const currentProvisioning = store.provisioning;
+    const preserveInstalled = Boolean(options?.preserveInstalledModel && currentProvisioning.status === 'ready');
+    const preserveRuntime = preserveInstalled && (await this.isRuntimeActiveOrLoaded());
 
-    this.updateProvisioning({
-      ...createInitialProvisioningSnapshot(),
-      status: options?.preserveInstalledModel ? useAIStore.getState().provisioning.status : 'not-installed',
-      tempPath: null,
-      lastError: null,
-      pausedReason: null,
-      canResume: false,
-    });
+    if (!preserveRuntime) {
+      store.markRuntimeReady(false);
+      store.setWarmupPending(false);
+    }
+
+    this.updateProvisioning(
+      preserveInstalled
+        ? {
+            tempPath: null,
+            lastError: null,
+            pausedReason: null,
+            canResume: false,
+            downloadedBytes: 0,
+            totalBytes: null,
+          }
+        : {
+            ...createInitialProvisioningSnapshot(),
+            status: options?.preserveInstalledModel ? currentProvisioning.status : 'not-installed',
+            tempPath: null,
+            lastError: null,
+            pausedReason: null,
+            canResume: false,
+          },
+    );
   }
 
   private failProvisioning(error: unknown, fallbackMessage: string) {

@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 import { expoDb } from '../db/index';
 import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
+import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
+import { useSettingsStore } from './useSettingsStore';
 
 export type ReceiptQueueStatus = 'pending' | 'processing' | 'done' | 'failed';
 
@@ -10,6 +13,7 @@ export interface ReceiptQueueItem {
   id: number;
   imageUri: string;
   imageHash: string | null;
+  thumbnailUri: string | null;
   status: ReceiptQueueStatus;
   result: ParsedReceiptResult | null;
   error: string | null;
@@ -25,6 +29,7 @@ interface ReceiptQueueRow {
   id: number;
   image_uri: string;
   image_hash?: string | null;
+  thumbnail_uri?: string | null;
   status: string;
   result_json: string | null;
   error: string | null;
@@ -38,6 +43,8 @@ interface ReceiptQueueState {
   load: () => void;
   /** Copies picked images into app storage (picker URIs are temporary), skips duplicates already in queue, and queues them. */
   enqueue: (uris: string[]) => Promise<EnqueueReceiptsResult>;
+  /** Lazily generates and persists a small JPEG thumbnail for a queue item that doesn't have one yet. */
+  ensureThumbnail: (id: number, options?: { force?: boolean }) => Promise<string | null>;
   retry: (id: number) => void;
   /** Removes a receipt from the queue. Pass deleteImage=false when a saved transaction now owns the image. */
   remove: (id: number, deleteImage?: boolean) => Promise<void>;
@@ -47,10 +54,57 @@ interface ReceiptQueueState {
   clearByStatus: (statuses: ReceiptQueueStatus[]) => Promise<number>;
 }
 
-const RECEIPTS_DIR = `${FileSystem.documentDirectory ?? ''}receipts/`;
+const THUMBNAIL_WIDTH_PX = 168;
+const THUMBNAIL_COMPRESS = 0.7;
 
-// In-memory fallback map when running against test DBs created without the image_hash column.
+function getReceiptsDir(): string {
+  return `${FileSystem.documentDirectory ?? ''}receipts/`;
+}
+
+function getThumbsDir(): string {
+  return `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? ''}thumbs/`;
+}
+
+// In-memory fallback maps when running against test DBs created without the image_hash/thumbnail_uri columns.
 const inMemoryHashByUri = new Map<string, string>();
+const inMemoryThumbByUri = new Map<string, string>();
+
+const inFlightThumbIds = new Set<number>();
+const failedThumbIds = new Set<number>();
+let thumbGenerationChain: Promise<void> = Promise.resolve();
+
+export async function createReceiptThumbnail(sourceUri: string, tag: string): Promise<string | null> {
+  if (!sourceUri) return null;
+  try {
+    const thumbsDir = getThumbsDir();
+    await FileSystem.makeDirectoryAsync(thumbsDir, { intermediates: true }).catch(() => undefined);
+    const manipulated = await manipulateAsync(
+      sourceUri,
+      [{ resize: { width: THUMBNAIL_WIDTH_PX } }],
+      { compress: THUMBNAIL_COMPRESS, format: SaveFormat.JPEG },
+    );
+    if (!manipulated?.uri) return null;
+
+    const dest = `${thumbsDir}thumb-${tag}.jpg`;
+    if (typeof FileSystem.moveAsync === 'function' && manipulated.uri !== dest) {
+      try {
+        await FileSystem.moveAsync({ from: manipulated.uri, to: dest });
+        return dest;
+      } catch {
+        return manipulated.uri;
+      }
+    }
+    return manipulated.uri;
+  } catch (error) {
+    console.warn('Could not create receipt thumbnail; falling back to original image:', error);
+    return null;
+  }
+}
+
+async function deleteThumbnailQuietly(thumbnailUri: string | null | undefined, originalImageUri: string) {
+  if (!thumbnailUri || thumbnailUri === originalImageUri) return;
+  await FileSystem.deleteAsync(thumbnailUri, { idempotent: true }).catch(() => undefined);
+}
 
 function toItem(row: ReceiptQueueRow): ReceiptQueueItem {
   let result: ParsedReceiptResult | null = null;
@@ -66,6 +120,7 @@ function toItem(row: ReceiptQueueRow): ReceiptQueueItem {
     id: row.id,
     imageUri: row.image_uri,
     imageHash: row.image_hash ?? inMemoryHashByUri.get(row.image_uri) ?? null,
+    thumbnailUri: row.thumbnail_uri ?? inMemoryThumbByUri.get(row.image_uri) ?? null,
     status,
     result,
     error: row.error,
@@ -100,19 +155,39 @@ async function computeImageFingerprint(uri: string): Promise<string> {
   return `uri:${uri}`;
 }
 
-function insertQueueRow(imageUri: string, imageHash: string, createdAt: number) {
+function insertQueueRow(imageUri: string, imageHash: string, thumbnailUri: string | null, createdAt: number) {
   inMemoryHashByUri.set(imageUri, imageHash);
+  if (thumbnailUri) {
+    inMemoryThumbByUri.set(imageUri, thumbnailUri);
+  }
   try {
     expoDb.runSync(
-      `INSERT INTO receipt_queue (image_uri, image_hash, status, created_at) VALUES (?, ?, 'pending', ?);`,
-      [imageUri, imageHash, createdAt],
+      `INSERT INTO receipt_queue (image_uri, image_hash, thumbnail_uri, status, created_at) VALUES (?, ?, ?, 'pending', ?);`,
+      [imageUri, imageHash, thumbnailUri, createdAt],
     );
   } catch {
-    // Graceful fallback if an isolated test table predates the image_hash column.
-    expoDb.runSync(`INSERT INTO receipt_queue (image_uri, status, created_at) VALUES (?, 'pending', ?);`, [
-      imageUri,
-      createdAt,
-    ]);
+    try {
+      // Graceful fallback if an isolated test table predates the thumbnail_uri column.
+      expoDb.runSync(
+        `INSERT INTO receipt_queue (image_uri, image_hash, status, created_at) VALUES (?, ?, 'pending', ?);`,
+        [imageUri, imageHash, createdAt],
+      );
+    } catch {
+      // Graceful fallback if an isolated test table predates both image_hash and thumbnail_uri.
+      expoDb.runSync(`INSERT INTO receipt_queue (image_uri, status, created_at) VALUES (?, 'pending', ?);`, [
+        imageUri,
+        createdAt,
+      ]);
+    }
+  }
+}
+
+function persistThumbnailUri(id: number, imageUri: string, thumbnailUri: string) {
+  inMemoryThumbByUri.set(imageUri, thumbnailUri);
+  try {
+    expoDb.runSync(`UPDATE receipt_queue SET thumbnail_uri = ? WHERE id = ?;`, [thumbnailUri, id]);
+  } catch {
+    // Graceful fallback if an isolated test table predates thumbnail_uri.
   }
 }
 
@@ -122,8 +197,18 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
   // Reads queued receipts one at a time; the generation service serializes model access with chat and single scans.
   const processQueue = async () => {
     if (get().isProcessing) return;
+    if (!get().items.some((item) => item.status === 'pending')) return;
     set({ isProcessing: true });
     try {
+      // Wait for SQLite settings and either SecureStore secrets (external mode) or shared
+      // model lifecycle init (local mode) before starting launch-time queued AI requests.
+      await useSettingsStore.getState().waitForSettingsLoaded?.();
+      if (useSettingsStore.getState().aiInferenceMode === 'external') {
+        await useSettingsStore.getState().waitForSecretsHydrated?.();
+      } else {
+        await getModelLifecycleManager?.()?.ensureInitialized?.();
+      }
+
       for (;;) {
         const next = get().items.find((item) => item.status === 'pending');
         if (!next) break;
@@ -154,6 +239,7 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
     isProcessing: false,
 
     load: () => {
+      failedThumbIds.clear();
       expoDb.runSync(`UPDATE receipt_queue SET status = 'pending' WHERE status = 'processing';`);
       refresh();
       void processQueue();
@@ -161,7 +247,8 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
 
     enqueue: async (uris) => {
       if (uris.length === 0) return { added: 0, skippedDuplicates: 0 };
-      await FileSystem.makeDirectoryAsync(RECEIPTS_DIR, { intermediates: true }).catch(() => undefined);
+      const receiptsDir = getReceiptsDir();
+      await FileSystem.makeDirectoryAsync(receiptsDir, { intermediates: true }).catch(() => undefined);
 
       // Build existing fingerprint set from persisted queue rows
       const existingItems = readAll();
@@ -191,7 +278,7 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
         }
 
         const extension = /\.(jpe?g|png|heic|webp)$/i.exec(sourceUri)?.[0] ?? '.jpg';
-        const dest = `${RECEIPTS_DIR}receipt-${now}-${added}${extension}`;
+        const dest = `${receiptsDir}receipt-${now}-${added}${extension}`;
         let stored = sourceUri;
         try {
           await FileSystem.copyAsync({ from: sourceUri, to: dest });
@@ -200,7 +287,8 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
           console.warn('Could not copy receipt image into app storage; using picker URI:', error);
         }
 
-        insertQueueRow(stored, fingerprint, now + added);
+        const thumbnailUri = await createReceiptThumbnail(stored, `${now}-${added}`);
+        insertQueueRow(stored, fingerprint, thumbnailUri, now + added);
         seenFingerprints.add(fingerprint);
         seenFingerprints.add(`uri:${sourceUri}`);
         seenFingerprints.add(`uri:${stored}`);
@@ -214,6 +302,62 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
       return { added, skippedDuplicates };
     },
 
+    ensureThumbnail: async (id, options) => {
+      const force = Boolean(options?.force);
+      const initial = get().items.find((entry) => entry.id === id);
+      if (!initial) return null;
+      if (!force && initial.thumbnailUri) return initial.thumbnailUri;
+      if (!force && failedThumbIds.has(id)) return null;
+      if (inFlightThumbIds.has(id)) return null;
+
+      inFlightThumbIds.add(id);
+      let resolvedThumbUri: string | null = null;
+
+      const task = thumbGenerationChain.then(async () => {
+        try {
+          const current = get().items.find((entry) => entry.id === id);
+          if (!current) return;
+          if (!force && current.thumbnailUri) {
+            resolvedThumbUri = current.thumbnailUri;
+            return;
+          }
+
+          const previousThumb = current.thumbnailUri;
+          const nextThumb = await createReceiptThumbnail(current.imageUri, `${id}-${Date.now()}`);
+          if (!nextThumb) {
+            failedThumbIds.add(id);
+            return;
+          }
+
+          const stillPresent = get().items.find((entry) => entry.id === id);
+          if (!stillPresent) {
+            // Item was removed while thumbnail was being generated; clean up orphan file.
+            await deleteThumbnailQuietly(nextThumb, current.imageUri);
+            return;
+          }
+
+          failedThumbIds.delete(id);
+          persistThumbnailUri(id, stillPresent.imageUri, nextThumb);
+          resolvedThumbUri = nextThumb;
+          set((state) => ({
+            items: state.items.map((entry) =>
+              entry.id === id ? { ...entry, thumbnailUri: nextThumb } : entry,
+            ),
+          }));
+
+          if (previousThumb && previousThumb !== nextThumb) {
+            await deleteThumbnailQuietly(previousThumb, stillPresent.imageUri);
+          }
+        } finally {
+          inFlightThumbIds.delete(id);
+        }
+      });
+
+      thumbGenerationChain = task.catch(() => undefined);
+      await task;
+      return resolvedThumbUri;
+    },
+
     retry: (id) => {
       expoDb.runSync(`UPDATE receipt_queue SET status = 'pending', error = NULL WHERE id = ?;`, [id]);
       refresh();
@@ -223,12 +367,18 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
     remove: async (id, deleteImage = true) => {
       const item = get().items.find((entry) => entry.id === id);
       expoDb.runSync('DELETE FROM receipt_queue WHERE id = ?;', [id]);
+      failedThumbIds.delete(id);
       if (item) {
         inMemoryHashByUri.delete(item.imageUri);
+        inMemoryThumbByUri.delete(item.imageUri);
       }
       refresh();
-      if (deleteImage && item?.imageUri.startsWith(RECEIPTS_DIR)) {
+      const receiptsDir = getReceiptsDir();
+      if (deleteImage && item?.imageUri.startsWith(receiptsDir)) {
         await FileSystem.deleteAsync(item.imageUri, { idempotent: true }).catch(() => undefined);
+      }
+      if (item) {
+        await deleteThumbnailQuietly(item.thumbnailUri, item.imageUri);
       }
     },
 
@@ -238,17 +388,19 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
       const targets = get().items.filter((entry) => idSet.has(entry.id));
       for (const id of ids) {
         expoDb.runSync('DELETE FROM receipt_queue WHERE id = ?;', [id]);
+        failedThumbIds.delete(id);
       }
       for (const item of targets) {
         inMemoryHashByUri.delete(item.imageUri);
+        inMemoryThumbByUri.delete(item.imageUri);
       }
       refresh();
-      if (deleteImages) {
-        for (const item of targets) {
-          if (item.imageUri.startsWith(RECEIPTS_DIR)) {
-            await FileSystem.deleteAsync(item.imageUri, { idempotent: true }).catch(() => undefined);
-          }
+      const receiptsDir = getReceiptsDir();
+      for (const item of targets) {
+        if (deleteImages && item.imageUri.startsWith(receiptsDir)) {
+          await FileSystem.deleteAsync(item.imageUri, { idempotent: true }).catch(() => undefined);
         }
+        await deleteThumbnailQuietly(item.thumbnailUri, item.imageUri);
       }
     },
 

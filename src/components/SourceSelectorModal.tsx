@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
 

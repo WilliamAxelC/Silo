@@ -57,6 +57,18 @@ jest.mock('react-native-gifted-charts', () => {
   };
 });
 
+const mockLifecycleEnsureInitialized = jest.fn().mockResolvedValue(undefined);
+const mockLifecycleRetryProvisioning = jest.fn().mockResolvedValue(undefined);
+const mockLifecycleCancelDownload = jest.fn().mockResolvedValue(undefined);
+
+jest.mock('../../services/ai/modelLifecycle', () => ({
+  getModelLifecycleManager: () => ({
+    ensureInitialized: mockLifecycleEnsureInitialized,
+    retryProvisioning: mockLifecycleRetryProvisioning,
+    cancelDownload: mockLifecycleCancelDownload,
+  }),
+}));
+
 let mockGenerationSnapshot: GenerationServiceRuntimeSnapshot = {
   isPreparingRuntime: false,
   runtimeStatus: '',
@@ -145,6 +157,7 @@ describe('ChatbotScreen', () => {
       selectedMode: 'rag',
       runtimeReady: false,
       warmupPending: false,
+      provisioningHydrated: true,
       localModelDisplayName: 'Qwen 3.5 2B',
       provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
       runtime,
@@ -418,6 +431,54 @@ describe('ChatbotScreen', () => {
       expect(text).toContain('OPENAI · Not configured');
       expect(text).not.toContain('Using external API');
       expect(renderer.root.findByProps({ accessibilityLabel: 'Configure external API' })).toBeTruthy();
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+    }
+  });
+
+  it('calls ensureInitialized on mount and shows checking state instead of Download prompt before provisioning is hydrated (R4-03)', async () => {
+    let resolveInit!: () => void;
+    mockLifecycleEnsureInitialized.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInit = resolve;
+        }),
+    );
+
+    useAIStore.setState({
+      selectedMode: 'chat',
+      provisioningHydrated: false,
+      provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
+    });
+
+    let renderer: any;
+    try {
+      await ReactTestRenderer.act(async () => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      expect(mockLifecycleEnsureInitialized).toHaveBeenCalledTimes(1);
+      const beforeText = collectText(renderer);
+      expect(beforeText).toContain('Checking');
+      expect(beforeText).not.toContain('Download the local AI model in Settings');
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Set Up AI Model' })).toHaveLength(0);
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Set up AI model' })).toHaveLength(0);
+
+      // Once hydration finishes with installed model, Download prompt is never shown
+      await ReactTestRenderer.act(async () => {
+        useAIStore.setState({
+          provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
+          provisioningHydrated: true,
+        });
+        resolveInit();
+        await Promise.resolve();
+      });
+
+      const afterText = collectText(renderer);
+      expect(afterText).not.toContain('Download the local AI model in Settings');
+      expect(afterText).toContain('Ready');
     } finally {
       ReactTestRenderer.act(() => {
         renderer?.unmount();

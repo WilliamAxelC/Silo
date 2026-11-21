@@ -13,7 +13,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
@@ -150,6 +150,7 @@ export const ChatbotScreen = () => {
   const updateChatMessage = useAIStore((state) => state.updateChatMessage);
   const clearChatHistory = useAIStore((state) => state.clearChatHistory);
   const provisioning = useAIStore((state) => state.provisioning);
+  const provisioningHydrated = useAIStore((state) => state.provisioningHydrated);
   const runtime = useAIStore((state) => state.runtime);
   const selectedMode = useAIStore((state) => state.selectedMode);
   const setSelectedMode = useAIStore((state) => state.setSelectedMode);
@@ -228,6 +229,10 @@ export const ChatbotScreen = () => {
     };
   }, [chatRuntimePreloadService]);
 
+  useEffect(() => {
+    void getModelLifecycleManager()?.ensureInitialized?.();
+  }, []);
+
   const handleCopyToClipboard = useCallback(async (text: string) => {
     await Clipboard.setStringAsync(text);
     Alert.alert('Copied', 'Message copied to clipboard.');
@@ -265,11 +270,17 @@ export const ChatbotScreen = () => {
     canRunNativeChat,
     hasUsableLocalInferenceBackend,
     localInferenceStatusMessage,
-  } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
+  } = getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime, provisioningHydrated });
+  const isCheckingLocalProvisioning =
+    aiInferenceMode === 'local' &&
+    hasUsableLocalInferenceBackend &&
+    !provisioningHydrated &&
+    provisioning.status === 'not-installed';
   const canSendMessage = aiMode === 'rag' ? canRunGroundedQueries : canRunNativeChat;
   const canStartOrRetryProvisioning =
     aiInferenceMode === 'local' &&
     hasUsableLocalInferenceBackend &&
+    !isCheckingLocalProvisioning &&
     ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
   const isBusyProvisioning =
     aiInferenceMode === 'local' &&
@@ -440,6 +451,10 @@ export const ChatbotScreen = () => {
       return loadingStatus || (aiInferenceMode === 'external' ? 'Generating response from external API...' : 'Generating a local response on-device...');
     }
 
+    if (isCheckingLocalProvisioning) {
+      return 'Checking local AI model status...';
+    }
+
     if (provisioning.status === 'queued') {
       return 'Queuing local model setup...';
     }
@@ -468,6 +483,7 @@ export const ChatbotScreen = () => {
   }, [
     aiInferenceMode,
     chatRuntimeStatus,
+    isCheckingLocalProvisioning,
     isLoading,
     isPreparingChatRuntime,
     loadingStatus,
@@ -614,7 +630,7 @@ export const ChatbotScreen = () => {
   );
 
   const showChatRuntimeGate = aiMode === 'chat' && chatRuntimeRequested && (!canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning);
-  const isNotInstalled = provisioning.status === 'not-installed';
+  const isNotInstalled = !isCheckingLocalProvisioning && provisioning.status === 'not-installed';
   const chatRuntimeActionLabel = isNotInstalled ? 'Set Up AI Model' : canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
   const inlineModelStatusLabel =
@@ -624,6 +640,8 @@ export const ChatbotScreen = () => {
         : 'Setup needed'
       : !hasUsableLocalInferenceBackend
       ? 'Unavailable'
+      : isCheckingLocalProvisioning
+      ? 'Checking…'
       : isPreparingChatRuntime
       ? 'Loading'
       : runtimeLoadError
@@ -856,7 +874,7 @@ export const ChatbotScreen = () => {
             showChatRuntimeGate ? (
               <View style={styles.emptyStateWrap}>
                 <View style={[styles.chatGateCard, styles.chatGateCardCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  {isPreparingChatRuntime || isBusyProvisioning ? (
+                  {isPreparingChatRuntime || isBusyProvisioning || isCheckingLocalProvisioning ? (
                     <>
                       <ActivityIndicator color={theme.primary} size="small" />
                       <Text style={[styles.chatGateText, { color: theme.textMuted }]}>

@@ -440,4 +440,35 @@ describe('useMonthlySummary', () => {
     expect(hook.current.periodBounds.end.getDate()).toBe(24);
     hook.unmount();
   });
+
+  it('memoizes periodBounds and summary references across distinct Date objects within the same billing period', () => {
+    useSettingsStore.setState({ monthStartDay: 1 });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 1,
+          merchantName: 'Coffee',
+          totalAmount: -35000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: new Date(2026, 10, 5, 9, 0, 0).getTime(),
+        },
+      ],
+    });
+
+    const hook = renderHookHarness((d: Date) => useMonthlySummary(d), new Date(2026, 10, 10, 8, 0, 0));
+    const firstBounds = hook.current.periodBounds;
+    const firstData = hook.current.currentMonthData;
+
+    // Different Date instance in the same month -> identical memoized object references
+    hook.rerender(new Date(2026, 10, 22, 18, 30, 0));
+    expect(hook.current.periodBounds).toBe(firstBounds);
+    expect(hook.current.currentMonthData).toBe(firstData);
+
+    // Date in next month -> recomputes bounds and data
+    hook.rerender(new Date(2026, 11, 1, 0, 0, 0));
+    expect(hook.current.periodBounds).not.toBe(firstBounds);
+    expect(hook.current.currentMonthData).toEqual([]);
+    hook.unmount();
+  });
 });

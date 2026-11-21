@@ -1,5 +1,9 @@
 import { Linking } from 'react-native';
 
+const mockModelHydrate = jest.fn(async () => {});
+const mockModelInitialize = jest.fn(async () => {});
+const mockModelDispose = jest.fn();
+
 jest.mock('@react-navigation/native', () => ({
   NavigationContainer: ({ children }: any) => children,
   DefaultTheme: { dark: false, colors: {} },
@@ -34,7 +38,12 @@ jest.mock('../../services/ai/generationService', () => ({
   getGenerationService: () => ({ dispose: jest.fn() }),
 }));
 jest.mock('../../services/ai/modelLifecycle', () => ({
-  getModelLifecycleManager: () => ({ initialize: jest.fn(), dispose: jest.fn() }),
+  getModelLifecycleManager: () => ({
+    hydratePersistedState: mockModelHydrate,
+    initialize: mockModelInitialize,
+    ensureInitialized: mockModelInitialize,
+    dispose: mockModelDispose,
+  }),
 }));
 jest.mock('../../services/recurring', () => ({
   materializeDueRecurring: jest.fn(async () => 0),
@@ -144,5 +153,50 @@ describe('AppNavigator notification linking & startup safety (R2B-1)', () => {
     unsubscribe();
     expect(removeLinkingSub).toHaveBeenCalledTimes(1);
     expect(removeNotifSub).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers modelLifecycle.initialize() until after first interactions and cancels on unmount', async () => {
+    const freshReact = require('react');
+    const FreshRenderer = require('react-test-renderer');
+    const { AppState: freshAppState, InteractionManager: freshInteractionManager } = require('react-native');
+
+    let scheduledTask: (() => void) | null = null;
+    const cancelSpy = jest.fn();
+    jest.spyOn(freshInteractionManager, 'runAfterInteractions').mockImplementation((cb: any) => {
+      scheduledTask = cb;
+      return { cancel: cancelSpy, then: jest.fn(), done: jest.fn() } as any;
+    });
+    jest.spyOn(freshAppState, 'addEventListener').mockReturnValue({ remove: jest.fn() } as any);
+
+    const { useSettingsStore } = require('../../store/useSettingsStore');
+    const { useTransactionStore } = require('../../store/useTransactionStore');
+    const { useReceiptQueueStore } = require('../../store/useReceiptQueueStore');
+    jest.spyOn(useSettingsStore.getState(), 'loadSettings').mockResolvedValue(undefined);
+    jest.spyOn(useTransactionStore.getState(), 'initDB').mockResolvedValue(undefined);
+    jest.spyOn(useReceiptQueueStore.getState(), 'load').mockImplementation(() => {});
+
+    const { AppNavigator } = require('../AppNavigator') as typeof import('../AppNavigator');
+
+    let renderer: any;
+    await FreshRenderer.act(async () => {
+      renderer = FreshRenderer.create(freshReact.createElement(AppNavigator));
+    });
+
+    // Eagerly hydrates small persisted provisioning manifests on mount, while deferring full
+    // modelLifecycle.initialize() (directory setup, verification/download recovery, AppState) until after interactions
+    expect(mockModelHydrate).toHaveBeenCalledTimes(1);
+    expect(mockModelInitialize).not.toHaveBeenCalled();
+    expect(scheduledTask).toEqual(expect.any(Function));
+
+    // Once interactions settle, modelLifecycle.initialize() runs
+    await FreshRenderer.act(async () => {
+      scheduledTask?.();
+    });
+    expect(mockModelInitialize).toHaveBeenCalledTimes(1);
+
+    await FreshRenderer.act(async () => {
+      renderer.unmount();
+    });
+    expect(cancelSpy).toHaveBeenCalledTimes(1);
   });
 });

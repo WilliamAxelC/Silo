@@ -78,12 +78,17 @@ jest.mock('expo-sharing', () => ({
   shareAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
+const mockSettingsLifecycleManager = {
+  ensureInitialized: jest.fn().mockResolvedValue(undefined),
+  retryProvisioning: jest.fn().mockResolvedValue(undefined),
+  resumeDownload: jest.fn().mockResolvedValue(undefined),
+  pauseDownload: jest.fn().mockResolvedValue(undefined),
+  cancelDownload: jest.fn().mockResolvedValue(undefined),
+  deleteInstalledModel: jest.fn().mockResolvedValue(undefined),
+};
+
 jest.mock('../../services/ai/modelLifecycle', () => ({
-  getModelLifecycleManager: jest.fn(() => ({
-    retryProvisioning: jest.fn(),
-    cancelDownload: jest.fn(),
-    deleteInstalledModel: jest.fn(),
-  })),
+  getModelLifecycleManager: jest.fn(() => mockSettingsLifecycleManager),
   isActiveModelInstalled: jest.fn().mockResolvedValue(true),
   isVisionProjectorInstalled: jest.fn().mockResolvedValue(false),
   downloadVisionProjector: jest.fn().mockResolvedValue(undefined),
@@ -114,6 +119,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
       readyProvisioning.status = 'ready';
       useAIStore.setState({
         provisioning: readyProvisioning,
+        provisioningHydrated: true,
         runtime: createInitialRuntimeSnapshot(),
       });
 
@@ -977,6 +983,58 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     expect(getSize('External mode needs no download.')).toBeGreaterThan(sizes100.visionNote);
     expect(getSize('Groceries')).toBeGreaterThan(sizes100.categoryName);
     expect(getSize('Silo')).toBeGreaterThan(sizes100.aboutName);
+  });
+
+  it('does not offer Download Model before provisioning state is hydrated and shows Resume once a paused download restores (R4-03)', async () => {
+    let resolveInit!: () => void;
+    mockSettingsLifecycleManager.ensureInitialized.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInit = resolve;
+        }),
+    );
+    (modelLifecycle.isActiveModelInstalled as jest.Mock).mockResolvedValue(false);
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ aiInferenceMode: 'local' });
+      useAIStore.setState({
+        provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed', canResume: false },
+        provisioningHydrated: false,
+      });
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const getAllText = () =>
+      renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')))
+        .join(' ');
+
+    expect(mockSettingsLifecycleManager.ensureInitialized).toHaveBeenCalled();
+    expect(getAllText()).toContain('Checking model status…');
+    expect(getAllText()).not.toContain('Download Model');
+
+    await ReactTestRenderer.act(async () => {
+      useAIStore.setState({
+        provisioning: {
+          ...createInitialProvisioningSnapshot(),
+          status: 'paused',
+          canResume: true,
+          pausedReason: 'Paused by user',
+        },
+        provisioningHydrated: true,
+      });
+      resolveInit();
+      await Promise.resolve();
+    });
+
+    const afterText = getAllText();
+    expect(afterText).toContain('Resume');
+    expect(afterText).not.toContain('Download Model');
+    expect(mockSettingsLifecycleManager.retryProvisioning).not.toHaveBeenCalled();
   });
 
   it('imports SettingsScreen without loading expo-notifications at startup when native module is missing (R2B-1)', () => {

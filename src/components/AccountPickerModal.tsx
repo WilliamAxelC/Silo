@@ -1,6 +1,6 @@
 import React from 'react';
 import { FlatList, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import type { Wallet, WalletType } from '../features/transactions/types';
 import { formatDisplayCurrency } from '../features/transactions/amount';

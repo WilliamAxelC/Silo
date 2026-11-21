@@ -1,12 +1,13 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { NavigationProps } from '../navigation/types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { formatDisplayCurrency } from '../features/transactions/amount';
+import { formatCachedLocaleDate } from '../features/transactions/periods';
 import {
   RECURRING_FREQUENCIES,
   deleteRecurringRule,
@@ -42,7 +43,11 @@ export const RecurringScreen = () => {
 
   const renderRule = ({ item }: { item: RecurringRule }) => {
     const label = RECURRING_FREQUENCIES.find((f) => f.key === item.frequency)?.label ?? item.frequency;
-    const next = new Date(item.nextDate).toLocaleDateString(dateFormat || 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const next = formatCachedLocaleDate(item.nextDate, dateFormat || 'en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
     const isIncome = item.template.type === 'income';
     return (
       <View style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: item.isActive ? 1 : 0.6 }]}>

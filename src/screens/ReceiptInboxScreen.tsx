@@ -1,7 +1,17 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  Alert,
+  ActivityIndicator,
+  InteractionManager,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -34,30 +44,67 @@ const STATUS_LABEL: Record<ReceiptQueueItem['status'], string> = {
   failed: "Couldn't read",
 };
 
+const receiptKeyExtractor = (item: ReceiptQueueItem) => String(item.id);
+
 interface RowProps {
   item: ReceiptQueueItem;
   selectionMode: boolean;
   isSelected: boolean;
+  theme: ReturnType<typeof useAppTheme>;
+  currencyCode: string;
+  useThousands: boolean;
   onOpen: (item: ReceiptQueueItem) => void;
   onToggleSelect: (id: number) => void;
   onEnterSelection: (id: number) => void;
   onRetry: (id: number) => void;
   onRemove: (item: ReceiptQueueItem) => void;
+  onEnsureThumbnail?: (id: number, options?: { force?: boolean }) => Promise<string | null>;
 }
 
 const ReceiptRow = React.memo(function ReceiptRow({
   item,
   selectionMode,
   isSelected,
+  theme,
+  currencyCode,
+  useThousands,
   onOpen,
   onToggleSelect,
   onEnterSelection,
   onRetry,
   onRemove,
+  onEnsureThumbnail,
 }: RowProps) {
-  const theme = useAppTheme();
-  const currencyCode = useSettingsStore((s) => s.currencyCode);
-  const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
+  const [thumbFailed, setThumbFailed] = useState(false);
+
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [item.thumbnailUri]);
+
+  useEffect(() => {
+    if (item.thumbnailUri || !onEnsureThumbnail) return;
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) {
+        void onEnsureThumbnail(item.id);
+      }
+    });
+    return () => {
+      cancelled = true;
+      handle?.cancel?.();
+    };
+  }, [item.id, item.thumbnailUri, onEnsureThumbnail]);
+
+  const activeImageUri = !thumbFailed && item.thumbnailUri ? item.thumbnailUri : item.imageUri;
+  const imageSource = useMemo(() => ({ uri: activeImageUri }), [activeImageUri]);
+
+  const handleImageError = useCallback(() => {
+    if (!thumbFailed && item.thumbnailUri) {
+      setThumbFailed(true);
+      void onEnsureThumbnail?.(item.id, { force: true });
+    }
+  }, [thumbFailed, item.thumbnailUri, item.id, onEnsureThumbnail]);
+
   const result = item.status === 'done' ? item.result : null;
   const title = result?.merchantName || STATUS_LABEL[item.status];
   const subtitle =
@@ -76,13 +123,25 @@ const ReceiptRow = React.memo(function ReceiptRow({
           ? 'Reading this receipt on your device'
           : 'Queued';
 
-  const handlePress = () => {
+  const handlePress = useCallback(() => {
     if (selectionMode) {
       onToggleSelect(item.id);
     } else if (item.status === 'done') {
       onOpen(item);
     }
-  };
+  }, [selectionMode, onToggleSelect, onOpen, item]);
+
+  const handleLongPress = useCallback(() => {
+    onEnterSelection(item.id);
+  }, [onEnterSelection, item.id]);
+
+  const handleRetryPress = useCallback(() => {
+    onRetry(item.id);
+  }, [onRetry, item.id]);
+
+  const handleRemovePress = useCallback(() => {
+    onRemove(item);
+  }, [onRemove, item]);
 
   return (
     <TouchableOpacity
@@ -94,7 +153,7 @@ const ReceiptRow = React.memo(function ReceiptRow({
         },
       ]}
       onPress={handlePress}
-      onLongPress={() => onEnterSelection(item.id)}
+      onLongPress={handleLongPress}
       disabled={!selectionMode && item.status !== 'done'}
       accessibilityRole="button"
       accessibilityState={selectionMode ? { selected: isSelected } : undefined}
@@ -114,7 +173,13 @@ const ReceiptRow = React.memo(function ReceiptRow({
           color={isSelected ? theme.primary : theme.textMuted}
         />
       ) : null}
-      <Image source={{ uri: item.imageUri }} style={[styles.thumb, { backgroundColor: theme.border }]} />
+      <Image
+        source={imageSource}
+        resizeMethod="resize"
+        fadeDuration={0}
+        onError={handleImageError}
+        style={[styles.thumb, { backgroundColor: theme.border }]}
+      />
       <View style={styles.rowBody}>
         <Text style={[styles.rowTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
           {title}
@@ -135,7 +200,7 @@ const ReceiptRow = React.memo(function ReceiptRow({
           {item.status === 'processing' ? <ActivityIndicator color={theme.primary} /> : null}
           {item.status === 'failed' ? (
             <TouchableOpacity
-              onPress={() => onRetry(item.id)}
+              onPress={handleRetryPress}
               style={styles.rowIconBtn}
               hitSlop={8}
               accessibilityRole="button"
@@ -145,7 +210,7 @@ const ReceiptRow = React.memo(function ReceiptRow({
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
-            onPress={() => onRemove(item)}
+            onPress={handleRemovePress}
             style={styles.rowIconBtn}
             hitSlop={8}
             accessibilityRole="button"
@@ -163,7 +228,10 @@ export const ReceiptInboxScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
   const insets = useSafeInsets();
+  const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
   const items = useReceiptQueueStore((s) => s.items);
+  const ensureThumbnail = useReceiptQueueStore((s) => s.ensureThumbnail);
   const retry = useReceiptQueueStore((s) => s.retry);
   const remove = useReceiptQueueStore((s) => s.remove);
   const removeMany = useReceiptQueueStore((s) => s.removeMany);
@@ -289,6 +357,62 @@ export const ReceiptInboxScreen = () => {
       ],
     );
   }, [removeMany, selectedIds]);
+
+  const renderReceiptItem = useCallback(
+    ({ item }: { item: ReceiptQueueItem }) => (
+      <ReceiptRow
+        item={item}
+        selectionMode={selectionMode}
+        isSelected={selectedIdSet.has(item.id)}
+        theme={theme}
+        currencyCode={currencyCode}
+        useThousands={useThousands}
+        onOpen={handleOpen}
+        onToggleSelect={handleToggleSelect}
+        onEnterSelection={handleEnterSelection}
+        onRetry={retry}
+        onRemove={handleRemove}
+        onEnsureThumbnail={ensureThumbnail}
+      />
+    ),
+    [
+      selectionMode,
+      selectedIdSet,
+      theme,
+      currencyCode,
+      useThousands,
+      handleOpen,
+      handleToggleSelect,
+      handleEnterSelection,
+      retry,
+      handleRemove,
+      ensureThumbnail,
+    ],
+  );
+
+  const listContentContainerStyle = useMemo(
+    () =>
+      items.length === 0
+        ? styles.emptyContainer
+        : [styles.list, { paddingBottom: getBottomInsetPadding(insets.bottom, 36) }],
+    [items.length, insets.bottom],
+  );
+
+  const listEmptyElement = useMemo(
+    () => (
+      <View style={styles.empty}>
+        <Ionicons name="receipt-outline" size={44} color={theme.textMuted} />
+        <Text style={[styles.emptyTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
+          No receipts waiting
+        </Text>
+        <Text style={[styles.emptyText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+          Scan a stack of receipts or pick several photos at once. Silo reads them in the background, then you check
+          and save each one.
+        </Text>
+      </View>
+    ),
+    [theme],
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -445,36 +569,15 @@ export const ReceiptInboxScreen = () => {
 
       <FlatList
         data={items}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <ReceiptRow
-            item={item}
-            selectionMode={selectionMode}
-            isSelected={selectedIdSet.has(item.id)}
-            onOpen={handleOpen}
-            onToggleSelect={handleToggleSelect}
-            onEnterSelection={handleEnterSelection}
-            onRetry={retry}
-            onRemove={handleRemove}
-          />
-        )}
-        contentContainerStyle={
-          items.length === 0
-            ? styles.emptyContainer
-            : [styles.list, { paddingBottom: getBottomInsetPadding(insets.bottom, 36) }]
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="receipt-outline" size={44} color={theme.textMuted} />
-            <Text style={[styles.emptyTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
-              No receipts waiting
-            </Text>
-            <Text style={[styles.emptyText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
-              Scan a stack of receipts or pick several photos at once. Silo reads them in the background, then you check
-              and save each one.
-            </Text>
-          </View>
-        }
+        keyExtractor={receiptKeyExtractor}
+        renderItem={renderReceiptItem}
+        contentContainerStyle={listContentContainerStyle}
+        ListEmptyComponent={listEmptyElement}
+        initialNumToRender={10}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={50}
+        windowSize={11}
+        removeClippedSubviews={false}
       />
     </SafeAreaView>
   );

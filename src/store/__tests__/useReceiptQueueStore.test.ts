@@ -15,8 +15,10 @@ jest.mock('../../db/index', () => ({
 }));
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///docs/',
+  cacheDirectory: 'file:///cache/',
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
   copyAsync: jest.fn(() => Promise.resolve()),
+  moveAsync: jest.fn(() => Promise.resolve()),
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn((uri: string) => Promise.resolve({ exists: true, size: 1024, md5: `hash-${uri}` })),
 }));
@@ -24,7 +26,10 @@ const mockAnalyze = jest.fn();
 jest.mock('../../services/ai/agent', () => ({ analyzeReceiptImage: (...args: unknown[]) => mockAnalyze(...args) }));
 
 import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { getModelLifecycleManager } from '../../services/ai/modelLifecycle';
 import { useReceiptQueueStore } from '../useReceiptQueueStore';
+import { useSettingsStore } from '../useSettingsStore';
 
 const flush = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -37,7 +42,7 @@ describe('useReceiptQueueStore', () => {
   beforeAll(() => {
     // Same table as db/index.ts createReceiptQueueTable (db/index is mocked here).
     rawDb.exec(`CREATE TABLE receipt_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, image_uri TEXT NOT NULL,
-      image_hash TEXT, status TEXT NOT NULL DEFAULT 'pending', result_json TEXT, error TEXT, created_at INTEGER NOT NULL);`);
+      image_hash TEXT, thumbnail_uri TEXT, status TEXT NOT NULL DEFAULT 'pending', result_json TEXT, error TEXT, created_at INTEGER NOT NULL);`);
   });
 
   beforeEach(() => {
@@ -94,17 +99,22 @@ describe('useReceiptQueueStore', () => {
     expect(useReceiptQueueStore.getState().items[0].status).toBe('done');
   });
 
-  it('keeps the photo when a saved transaction owns it, and deletes it otherwise', async () => {
+  it('keeps the photo when a saved transaction owns it, deletes it otherwise, and always cleans up thumbnails', async () => {
     mockAnalyze.mockResolvedValue({ totalAmount: 1 });
     await useReceiptQueueStore.getState().enqueue(['file:///cache/a.jpg', 'file:///cache/b.jpg']);
     await waitIdle();
     const [saved, discarded] = useReceiptQueueStore.getState().items;
+    expect(saved.thumbnailUri).toMatch(/^file:\/\/\/cache\/thumbs\/thumb-\d+-0\.jpg$/);
+    expect(discarded.thumbnailUri).toMatch(/^file:\/\/\/cache\/thumbs\/thumb-\d+-1\.jpg$/);
 
     await useReceiptQueueStore.getState().remove(saved.id, false);
     await useReceiptQueueStore.getState().remove(discarded.id);
 
-    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(1);
+    expect(FileSystem.deleteAsync).not.toHaveBeenCalledWith(saved.imageUri, expect.anything());
     expect(FileSystem.deleteAsync).toHaveBeenCalledWith(discarded.imageUri, { idempotent: true });
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(saved.thumbnailUri, { idempotent: true });
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(discarded.thumbnailUri, { idempotent: true });
+    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(3);
     expect(useReceiptQueueStore.getState().items).toEqual([]);
   });
 
@@ -156,6 +166,144 @@ describe('useReceiptQueueStore', () => {
 
     await useReceiptQueueStore.getState().removeMany([remaining[0].id]);
     expect(useReceiptQueueStore.getState().items).toEqual([]);
-    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(3);
+    // 3 original receipt images + 3 thumbnails deleted
+    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(6);
+  });
+
+  it('generates JPEG thumbnails on enqueue without generating for skipped duplicates', async () => {
+    mockAnalyze.mockResolvedValue({ merchantName: 'Cafe', totalAmount: 25000, confidence: 'high' });
+    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
+      exists: true,
+      size: 2048,
+      md5: uri.includes('dup') ? 'dup-hash' : `hash-${uri}`,
+    }));
+
+    await useReceiptQueueStore
+      .getState()
+      .enqueue(['file:///picker/dup-1.jpg', 'file:///picker/dup-2.jpg', 'file:///picker/unique.jpg']);
+    await waitIdle();
+
+    expect(manipulateAsync).toHaveBeenCalledTimes(2);
+    expect(manipulateAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/docs\/receipts\/receipt-\d+-0\.jpg$/),
+      [{ resize: { width: 168 } }],
+      { compress: 0.7, format: SaveFormat.JPEG },
+    );
+    const items = useReceiptQueueStore.getState().items;
+    expect(items).toHaveLength(2);
+    expect(items[0].thumbnailUri).toMatch(/^file:\/\/\/cache\/thumbs\/thumb-\d+-0\.jpg$/);
+    expect(items[1].thumbnailUri).toMatch(/^file:\/\/\/cache\/thumbs\/thumb-\d+-1\.jpg$/);
+  });
+
+  it('lazily generates and persists missing thumbnails for legacy queue items, and cleans up orphans if removed mid-generation', async () => {
+    mockDb.runSync(
+      `INSERT INTO receipt_queue (image_uri, image_hash, thumbnail_uri, status, created_at) VALUES (?, ?, NULL, 'done', 100);`,
+      ['file:///docs/receipts/legacy-1.jpg', 'md5:legacy-1'],
+    );
+    mockDb.runSync(
+      `INSERT INTO receipt_queue (image_uri, image_hash, thumbnail_uri, status, created_at) VALUES (?, ?, NULL, 'done', 200);`,
+      ['file:///docs/receipts/legacy-2.jpg', 'md5:legacy-2'],
+    );
+    useReceiptQueueStore.getState().load();
+    await waitIdle();
+
+    const [legacy1, legacy2] = useReceiptQueueStore.getState().items;
+    expect(legacy1.thumbnailUri).toBeNull();
+    expect(legacy2.thumbnailUri).toBeNull();
+
+    // Lazy creation persists to SQLite and updates item in store
+    const createdThumb = await useReceiptQueueStore.getState().ensureThumbnail(legacy1.id);
+    expect(createdThumb).toMatch(/^file:\/\/\/cache\/thumbs\/thumb-\d+-\d+\.jpg$/);
+    expect(useReceiptQueueStore.getState().items[0].thumbnailUri).toBe(createdThumb);
+    const persisted = rawDb
+      .prepare('SELECT thumbnail_uri FROM receipt_queue WHERE id = ?;')
+      .get(legacy1.id) as { thumbnail_uri: string | null };
+    expect(persisted.thumbnail_uri).toBe(createdThumb);
+
+    // Calling ensureThumbnail again when thumbnail already exists is a no-op
+    (manipulateAsync as jest.Mock).mockClear();
+    expect(await useReceiptQueueStore.getState().ensureThumbnail(legacy1.id)).toBe(createdThumb);
+    expect(manipulateAsync).not.toHaveBeenCalled();
+
+    // Removing an item while its lazy thumbnail is being generated deletes the orphan thumbnail file
+    let resolveManipulate!: (val: { uri: string; width: number; height: number }) => void;
+    (manipulateAsync as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveManipulate = resolve;
+        }),
+    );
+    const inFlight = useReceiptQueueStore.getState().ensureThumbnail(legacy2.id);
+    await flush();
+    await useReceiptQueueStore.getState().remove(legacy2.id);
+    resolveManipulate({ uri: 'file:///tmp/orphan.jpg', width: 168, height: 220 });
+    const orphanResult = await inFlight;
+    expect(orphanResult).toBeNull();
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/cache\/thumbs\/thumb-\d+-\d+\.jpg$/),
+      { idempotent: true },
+    );
+  });
+
+  it('awaits Secret hydration in external mode and modelLifecycle.ensureInitialized in local mode before analyzing queued receipts on launch (R4-01 & R4-02)', async () => {
+    // 1. External mode: must await waitForSecretsHydrated before analyzeReceiptImage runs
+    mockDb.runSync(`INSERT INTO receipt_queue (image_uri, status, created_at) VALUES ('file:///docs/receipts/ext.jpg', 'pending', 1);`);
+    mockAnalyze.mockResolvedValueOnce({ merchantName: 'Cloud Cafe', totalAmount: 32000 });
+
+    let resolveSecrets!: () => void;
+    const waitSecretsSpy = jest
+      .spyOn(useSettingsStore.getState(), 'waitForSecretsHydrated')
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSecrets = resolve;
+          }),
+      );
+    useSettingsStore.setState({ aiInferenceMode: 'external' });
+
+    try {
+      useReceiptQueueStore.getState().load();
+      await flush();
+      expect(mockAnalyze).not.toHaveBeenCalled();
+
+      resolveSecrets();
+      await waitIdle();
+      expect(mockAnalyze).toHaveBeenCalledTimes(1);
+      expect(useReceiptQueueStore.getState().items[0].status).toBe('done');
+    } finally {
+      waitSecretsSpy.mockRestore();
+      useSettingsStore.setState({ aiInferenceMode: 'local' });
+    }
+
+    // 2. Local mode: must await getModelLifecycleManager().ensureInitialized() before analyzeReceiptImage runs
+    rawDb.exec('DELETE FROM receipt_queue;');
+    useReceiptQueueStore.setState({ items: [], isProcessing: false });
+    mockAnalyze.mockReset();
+    mockAnalyze.mockResolvedValueOnce({ merchantName: 'Local Mart', totalAmount: 18000 });
+    mockDb.runSync(`INSERT INTO receipt_queue (image_uri, status, created_at) VALUES ('file:///docs/receipts/loc.jpg', 'pending', 2);`);
+
+    let resolveLifecycle!: () => void;
+    const ensureSpy = jest
+      .spyOn(getModelLifecycleManager(), 'ensureInitialized')
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveLifecycle = resolve;
+          }),
+      );
+
+    try {
+      useReceiptQueueStore.getState().load();
+      await flush();
+      expect(ensureSpy).toHaveBeenCalledTimes(1);
+      expect(mockAnalyze).not.toHaveBeenCalled();
+
+      resolveLifecycle();
+      await waitIdle();
+      expect(mockAnalyze).toHaveBeenCalledTimes(1);
+      expect(useReceiptQueueStore.getState().items[0].status).toBe('done');
+    } finally {
+      ensureSpy.mockRestore();
+    }
   });
 });

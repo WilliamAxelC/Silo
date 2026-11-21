@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -88,16 +88,14 @@ export const AddTransactionScreen = () => {
   const dateFormat = useSettingsStore((s) => s.dateFormat);
   const queueItems = useReceiptQueueStore((s) => s.items);
 
-  const {
-    addTransaction,
-    updateTransaction,
-    deleteTransaction,
-    isSaving,
-    categories,
-    addCategory,
-    getCategoriesByType,
-    normalizeCategoryForType,
-  } = useTransactionStore();
+  const addTransaction = useTransactionStore((s) => s.addTransaction);
+  const updateTransaction = useTransactionStore((s) => s.updateTransaction);
+  const deleteTransaction = useTransactionStore((s) => s.deleteTransaction);
+  const isSaving = useTransactionStore((s) => s.isSaving);
+  const categories = useTransactionStore((s) => s.categories);
+  const addCategory = useTransactionStore((s) => s.addCategory);
+  const getCategoriesByType = useTransactionStore((s) => s.getCategoriesByType);
+  const normalizeCategoryForType = useTransactionStore((s) => s.normalizeCategoryForType);
 
   const [type, setType] = useState<TransactionType>('expense');
   const [title, setTitle] = useState('');

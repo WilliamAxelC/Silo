@@ -1,7 +1,7 @@
 import { Image } from 'react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { expoDb, type AITransactionRow } from '../../db/index';
-import { isActiveModelInstalled } from './modelLifecycle';
+import { getModelLifecycleManager, isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
 import { isGrounded, isNonItemLine, isSuspiciousMerchantName, pickMerchantFromRows, pickTotalFromRows } from '../ocr/receiptText';
@@ -754,10 +754,14 @@ function isDateGrounded(isoDate: string, ocrText: string): boolean {
 }
 
 async function canRunReceiptLlm(): Promise<boolean> {
+  await useSettingsStore.getState().waitForSettingsLoaded?.();
   const settings = useSettingsStore.getState();
   if (settings.aiInferenceMode === 'external') {
+    await settings.waitForSecretsHydrated?.();
     return true;
   }
+
+  await getModelLifecycleManager?.()?.ensureInitialized?.();
 
   const aiState = useAIStore.getState();
   if (aiState.provisioning.status === 'ready' || (aiState.runtimeReady && aiState.runtime.modelLoaded)) {
@@ -768,6 +772,7 @@ async function canRunReceiptLlm(): Promise<boolean> {
     return true;
   }
 
+  await useSettingsStore.getState().waitForSecretsHydrated?.();
   return isExternalConfiguredForReceipt();
 }
 
@@ -829,6 +834,8 @@ export const analyzeReceiptImage = async (
 
   const { getGenerationService, isVisionAvailable } =
     require('./generationService') as typeof import('./generationService');
+
+  await useSettingsStore.getState().waitForSettingsLoaded?.();
 
   if (useSettingsStore.getState().receiptReadingMode === 'vision' && (await isVisionAvailable())) {
     onStatusChange?.('Reading receipt with AI vision…');

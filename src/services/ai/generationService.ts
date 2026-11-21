@@ -13,9 +13,21 @@ import {
   QWEN_MODEL_STOP_TOKENS,
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
-import { getActiveModelFileUri, isActiveModelInstalled, isVisionProjectorInstalled } from './modelLifecycle';
+import {
+  getActiveModelFileUri,
+  getModelLifecycleManager,
+  isActiveModelInstalled,
+  isVisionProjectorInstalled,
+} from './modelLifecycle';
 import { useAIStore, getAIRuntimeAvailability } from '../../store/useAIStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
+import {
+  isSecretsHydrationPending,
+  isSettingsLoadPending,
+  retrySecretsHydrationIfNeeded,
+  useSettingsStore,
+  waitForSecretsHydrated,
+  waitForSettingsLoaded,
+} from '../../store/useSettingsStore';
 import {
   LocalInferenceException,
   getErrorMessage,
@@ -67,17 +79,36 @@ export type StartGenerationParams = {
 };
 
 export async function isVisionAvailable(): Promise<boolean> {
-  const settings = useSettingsStore.getState();
-  const externalConfigured = isExternalAccessConfigured(settings);
+  if (isSettingsLoadPending()) {
+    await waitForSettingsLoaded();
+  }
+  let settings = useSettingsStore.getState();
   if (settings.aiInferenceMode === 'external') {
-    return externalConfigured;
+    if (isSecretsHydrationPending()) {
+      await waitForSecretsHydrated();
+    } else if (settings.secretsHydrationError) {
+      await retrySecretsHydrationIfNeeded();
+    }
+    return isExternalAccessConfigured(useSettingsStore.getState());
   }
+
   try {
+    await getModelLifecycleManager?.()?.ensureInitialized?.();
     const localInstalled = (await isActiveModelInstalled()) && (await isVisionProjectorInstalled());
-    return localInstalled || externalConfigured;
+    if (localInstalled) {
+      return true;
+    }
   } catch {
-    return externalConfigured;
+    // Fall through to external vision availability check.
   }
+
+  if (isSecretsHydrationPending()) {
+    await waitForSecretsHydrated();
+  } else if (useSettingsStore.getState().secretsHydrationError) {
+    await retrySecretsHydrationIfNeeded();
+  }
+  settings = useSettingsStore.getState();
+  return isExternalAccessConfigured(settings);
 }
 
 
@@ -360,6 +391,16 @@ class GenerationService {
       return this.runtimeInitPromise;
     }
 
+    // Wait for the shared model lifecycle initialization before loading llama.rn so
+    // deferred restorePersistedState() can never race and overwrite a live runtime.
+    const lifecycle = getModelLifecycleManager?.();
+    if (lifecycle && typeof lifecycle.ensureInitialized === 'function' && !lifecycle.isInitialized?.()) {
+      await lifecycle.ensureInitialized();
+      if (this.runtimeInitPromise) {
+        return this.runtimeInitPromise;
+      }
+    }
+
     const configuredModelPath = getConfiguredModelPath();
     const requestedContextTokens = Math.max(options?.minContextTokens ?? 0, QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS);
     const currentStore = useAIStore.getState();
@@ -469,6 +510,9 @@ class GenerationService {
 
   private async runGeneration(params: StartGenerationParams): Promise<string> {
     const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, disableThinking } = params;
+    if (isSettingsLoadPending()) {
+      await waitForSettingsLoaded();
+    }
     const settings = useSettingsStore.getState();
     if (settings.aiInferenceMode === 'external') {
       return this.startExternalGeneration(params);
@@ -478,7 +522,12 @@ class GenerationService {
     const availability = getAIRuntimeAvailability(state);
 
     if (!availability.hasUsableLocalInferenceBackend) {
-      if (isExternalAccessConfigured(settings)) {
+      if (isSecretsHydrationPending()) {
+        await waitForSecretsHydrated();
+      } else if (settings.secretsHydrationError) {
+        await retrySecretsHydrationIfNeeded();
+      }
+      if (isExternalAccessConfigured(useSettingsStore.getState())) {
         return this.startExternalGeneration(params, 'Using external API (local model unavailable)');
       }
       throw new LocalInferenceException(
@@ -697,6 +746,12 @@ class GenerationService {
     initialGenerationStatus?: string,
   ): Promise<string> {
     const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, imageUri } = params;
+    // Always await background SecureStore hydration before reading API credentials or sending a request.
+    if (isSecretsHydrationPending()) {
+      await waitForSecretsHydrated();
+    } else if (useSettingsStore.getState().secretsHydrationError) {
+      await retrySecretsHydrationIfNeeded();
+    }
     const settings = useSettingsStore.getState();
     const url = settings.externalApiUrl.trim().replace(/\/$/, '');
     const parsedUrl = parseExternalUrlParts(url);
@@ -712,6 +767,18 @@ class GenerationService {
       throw new LocalInferenceException(
         'external-api-error',
         'Insecure http:// external API URLs are only allowed for localhost or private LAN hosts. Use https:// instead.',
+        { url },
+        true,
+      );
+    }
+    if (
+      settings.secretsHydrationError &&
+      !settings.externalApiKey.trim() &&
+      !isLoopbackOrPrivateLanHost(parsedUrl.hostname)
+    ) {
+      throw new LocalInferenceException(
+        'external-api-error',
+        'Unable to read stored external API credentials from secure storage. Please re-enter your API key in Settings.',
         { url },
         true,
       );

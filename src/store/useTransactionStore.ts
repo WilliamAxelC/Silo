@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import {
   db,
@@ -10,7 +10,7 @@ import {
   type DailyTotal,
   type SearchTransactionsOptions,
 } from '../db/index';
-import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
+import { budgets, categories, transactionItems, transactions } from '../db/schema';
 import { roundCurrency, type TransactionFilterSummary } from '../features/transactions/amount';
 import { DEFAULT_WALLET_ID, TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
@@ -23,7 +23,7 @@ import {
   normalizeCategoryName,
 } from '../features/transactions/categories';
 import { normalizeTransactionInput } from '../features/transactions/factories';
-import { mapTransactionRowToModel } from '../features/transactions/mappers';
+import { mapTransactionRowToModel, type TransactionListRow } from '../features/transactions/mappers';
 import type { CategoryRecord, CategoryType, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
 export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
@@ -42,9 +42,19 @@ interface TransactionState {
   budgets: Record<string, number>;
   isSaving: boolean;
   error: string | null;
+  /** Monotonic version incremented whenever transactions, wallets, categories, or budgets change. */
+  dataVersion: number;
+  hasLoadedTransactions: boolean;
+  hasLoadedCategories: boolean;
+  hasLoadedBudgets: boolean;
+  transactionsDirty: boolean;
+  categoriesDirty: boolean;
+  budgetsDirty: boolean;
 
   initDB: () => Promise<void>;
+  invalidateData: (slices?: { transactions?: boolean; categories?: boolean; budgets?: boolean }) => void;
   fetchTransactions: () => Promise<void>;
+  fetchTransactionsIfNeeded: () => Promise<void>;
   fetchCategories: () => Promise<void>;
   fetchBudgets: () => Promise<void>;
   fetchWallets: () => void;
@@ -81,6 +91,46 @@ function normalizeBudgetMap(rows: Array<{ category: string; limitAmount: number 
 
 const WALLET_TYPES = new Set<WalletType>(['cash', 'bank', 'ewallet', 'card', 'savings']);
 
+const LIST_TRANSACTIONS_SQL = `
+  SELECT
+    t.id AS id,
+    t.merchant_name AS merchantName,
+    t.total_amount AS totalAmount,
+    t.type AS type,
+    t.date AS date,
+    t.image_uri AS imageUri,
+    t.note AS note,
+    t.line_items_text AS lineItemsText,
+    i.category AS category,
+    t.wallet_id AS walletId,
+    t.to_wallet_id AS toWalletId
+  FROM transactions t
+  LEFT JOIN transaction_items i ON t.id = i.transaction_id
+  ORDER BY t.date DESC, t.id DESC;
+`;
+
+function compareTransactionsDesc(a: Transaction, b: Transaction): number {
+  if (b.date !== a.date) return b.date - a.date;
+  return b.id - a.id;
+}
+
+function insertTransactionSorted(list: Transaction[], tx: Transaction): Transaction[] {
+  const withoutExisting = list.filter((item) => item.id !== tx.id);
+  if (withoutExisting.length === 0 || compareTransactionsDesc(tx, withoutExisting[0]) <= 0) {
+    return [tx, ...withoutExisting];
+  }
+  const insertIdx = withoutExisting.findIndex((item) => compareTransactionsDesc(tx, item) <= 0);
+  if (insertIdx === -1) {
+    return [...withoutExisting, tx];
+  }
+  return [...withoutExisting.slice(0, insertIdx), tx, ...withoutExisting.slice(insertIdx)];
+}
+
+function readTransactionsList(): Transaction[] {
+  const rows = expoDb.getAllSync<TransactionListRow>(LIST_TRANSACTIONS_SQL);
+  return rows.map(mapTransactionRowToModel);
+}
+
 function readWallets(): Wallet[] {
   const rows = expoDb.getAllSync<{
     id: number;
@@ -108,6 +158,15 @@ function readWallets(): Wallet[] {
   }));
 }
 
+function readWalletsSafe(fallback: Wallet[]): Wallet[] {
+  try {
+    return readWallets();
+  } catch (error) {
+    console.warn('Failed to read accounts:', error);
+    return fallback;
+  }
+}
+
 function resolveAccounts(tx: Pick<TransactionInput, 'type' | 'walletId' | 'toWalletId'>) {
   const walletId = tx.walletId ?? DEFAULT_WALLET_ID;
   if (tx.type !== 'transfer') return { walletId, toWalletId: null };
@@ -124,45 +183,61 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   budgets: {},
   isSaving: false,
   error: null,
+  dataVersion: 0,
+  hasLoadedTransactions: false,
+  hasLoadedCategories: false,
+  hasLoadedBudgets: false,
+  transactionsDirty: false,
+  categoriesDirty: false,
+  budgetsDirty: false,
 
   initDB: async () => {
-    get().fetchWallets();
     await get().fetchCategories();
     await get().fetchTransactions();
     await get().fetchBudgets();
   },
 
+  invalidateData: (slices) => {
+    const all = !slices;
+    set((state) => ({
+      transactionsDirty: all || slices?.transactions ? true : state.transactionsDirty,
+      categoriesDirty: all || slices?.categories ? true : state.categoriesDirty,
+      budgetsDirty: all || slices?.budgets ? true : state.budgetsDirty,
+      dataVersion: state.dataVersion + 1,
+    }));
+  },
+
   fetchTransactions: async () => {
     try {
-      const rows = await db
-        .select({
-          id: aiTransactionsView.transactionId,
-          merchantName: aiTransactionsView.merchantName,
-          totalAmount: aiTransactionsView.totalAmount,
-          type: aiTransactionsView.type,
-          date: aiTransactionsView.date,
-          imageUri: transactions.imageUri,
-          note: aiTransactionsView.note,
-          lineItemsText: aiTransactionsView.lineItemsText,
-          category: aiTransactionsView.category,
-          walletId: transactions.walletId,
-          toWalletId: transactions.toWalletId,
-        })
-        .from(aiTransactionsView)
-        .leftJoin(transactions, eq(aiTransactionsView.transactionId, transactions.id))
-        .orderBy(desc(aiTransactionsView.date));
-
-      set({ transactionsList: rows.map(mapTransactionRowToModel) });
-      get().fetchWallets();
+      const transactionsList = readTransactionsList();
+      const nextWallets = readWalletsSafe(get().wallets);
+      set((state) => ({
+        transactionsList,
+        wallets: nextWallets,
+        hasLoadedTransactions: true,
+        transactionsDirty: false,
+        dataVersion: state.dataVersion + 1,
+      }));
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
+  fetchTransactionsIfNeeded: async () => {
+    const { hasLoadedTransactions, transactionsDirty } = get();
+    if (!hasLoadedTransactions || transactionsDirty) {
+      await get().fetchTransactions();
+    }
+  },
+
   fetchWallets: () => {
     try {
-      set({ wallets: readWallets() });
+      const nextWallets = readWallets();
+      set((state) => ({
+        wallets: nextWallets,
+        dataVersion: state.dataVersion + 1,
+      }));
     } catch (error) {
       console.warn('Failed to read accounts:', error);
     }
@@ -220,7 +295,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   fetchCategories: async () => {
     try {
       const rows = await db.select().from(categories).orderBy(categories.type, categories.name);
-      set({
+      set((state) => ({
         categories: rows.map((row) => ({
           id: row.id,
           name: row.name,
@@ -228,7 +303,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           isSystem: row.isSystem,
           createdAt: row.createdAt,
         })),
-      });
+        hasLoadedCategories: true,
+        categoriesDirty: false,
+        dataVersion: state.dataVersion + 1,
+      }));
     } catch (error) {
       console.error('Failed to fetch categories:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
@@ -240,7 +318,12 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const expenseCategoryNames = new Set(get().categories.filter((category) => category.type === 'expense').map((category) => category.name));
       const allRows = await db.select().from(budgets);
       const filteredRows = allRows.filter((row) => expenseCategoryNames.has(row.category));
-      set({ budgets: normalizeBudgetMap(filteredRows) });
+      set((state) => ({
+        budgets: normalizeBudgetMap(filteredRows),
+        hasLoadedBudgets: true,
+        budgetsDirty: false,
+        dataVersion: state.dataVersion + 1,
+      }));
     } catch (error) {
       console.error('Failed to fetch budgets:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
@@ -391,7 +474,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   },
 
   addTransaction: async (tx, options) => {
-    set({ isSaving: true });
+    if (!options?.skipRefresh) {
+      set({ isSaving: true });
+    }
     try {
       const normalizedTx = normalizeTransactionInput(tx);
       const categoryType = getCategoryTypeForTransaction(normalizedTx.type);
@@ -399,7 +484,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         normalizedTx.type === 'transfer'
           ? TRANSFER_CATEGORY_LABEL
           : get().normalizeCategoryForType(normalizedTx.category, normalizedTx.type);
+      const finalCategory = normalizedCategory || getUncategorizedLabel(categoryType);
       const accounts = resolveAccounts(normalizedTx);
+      let insertedId: number | null = null;
       await db.transaction(async (txDb) => {
         const [newTx] = await txDb
           .insert(transactions)
@@ -417,23 +504,58 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           .returning({ id: transactions.id });
 
         if (newTx?.id) {
+          insertedId = newTx.id;
           await txDb.insert(transactionItems).values({
             transactionId: newTx.id,
-            category: normalizedCategory || getUncategorizedLabel(categoryType),
+            category: finalCategory,
             amount: Math.abs(normalizedTx.totalAmount),
           });
         }
       });
 
-      if (!options?.skipRefresh) {
-        await get().fetchTransactions();
+      if (options?.skipRefresh) {
+        set((state) => ({
+          transactionsDirty: true,
+          dataVersion: state.dataVersion + 1,
+        }));
+      } else if (insertedId != null) {
+        const createdTx = mapTransactionRowToModel({
+          id: insertedId,
+          merchantName: normalizedTx.merchantName,
+          totalAmount: normalizedTx.totalAmount,
+          type: normalizedTx.type,
+          date: normalizedTx.date,
+          imageUri: normalizedTx.imageUri ?? null,
+          note: normalizedTx.note ?? null,
+          lineItemsText: normalizedTx.lineItemsText ?? null,
+          category: finalCategory,
+          walletId: accounts.walletId,
+          toWalletId: accounts.toWalletId,
+        });
+        const nextWallets = readWalletsSafe(get().wallets);
+        set((state) => ({
+          transactionsList: insertTransactionSorted(state.transactionsList, createdTx),
+          wallets: nextWallets,
+          isSaving: false,
+          transactionsDirty: state.transactionsDirty,
+          dataVersion: state.dataVersion + 1,
+        }));
+      } else {
+        const transactionsList = readTransactionsList();
+        const nextWallets = readWalletsSafe(get().wallets);
+        set((state) => ({
+          transactionsList,
+          wallets: nextWallets,
+          isSaving: false,
+          hasLoadedTransactions: true,
+          transactionsDirty: false,
+          dataVersion: state.dataVersion + 1,
+        }));
       }
     } catch (error) {
       console.error('Failed to add transaction:', error);
-      set({ error: error instanceof Error ? error.message : String(error) });
+      set({ error: error instanceof Error ? error.message : String(error), isSaving: false });
       throw error;
-    } finally {
-      set({ isSaving: false });
     }
   },
 
@@ -496,14 +618,60 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
       });
 
-      await get().fetchTransactions();
-      await get().fetchBudgets();
+      const nextWallets = readWalletsSafe(get().wallets);
+      const hasInStore = get().transactionsList.some((item) => item.id === id);
+      if (hasInStore) {
+        set((state) => {
+          const latest = state.transactionsList.find((item) => item.id === id);
+          if (!latest) {
+            return {
+              wallets: nextWallets,
+              isSaving: false,
+              transactionsDirty: true,
+              dataVersion: state.dataVersion + 1,
+            };
+          }
+          const updatedTx = mapTransactionRowToModel({
+            id,
+            merchantName: tx.merchantName !== undefined ? normalizedTx.merchantName : latest.merchantName,
+            totalAmount: tx.totalAmount !== undefined ? tx.totalAmount : latest.totalAmount,
+            type: tx.type !== undefined ? nextType : latest.type,
+            date: tx.date !== undefined ? tx.date : latest.date,
+            imageUri: tx.imageUri !== undefined ? tx.imageUri : latest.imageUri ?? null,
+            note: tx.note !== undefined ? normalizedTx.note : latest.note ?? null,
+            lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : latest.lineItemsText ?? null,
+            category:
+              nextType === 'transfer'
+                ? TRANSFER_CATEGORY_LABEL
+                : tx.category !== undefined
+                  ? nextCategory ?? latest.category
+                  : latest.category,
+            walletId: accounts ? accounts.walletId : latest.walletId ?? DEFAULT_WALLET_ID,
+            toWalletId: accounts ? accounts.toWalletId : latest.toWalletId ?? null,
+          });
+          return {
+            transactionsList: insertTransactionSorted(state.transactionsList, updatedTx),
+            wallets: nextWallets,
+            isSaving: false,
+            transactionsDirty: state.transactionsDirty,
+            dataVersion: state.dataVersion + 1,
+          };
+        });
+      } else {
+        const transactionsList = readTransactionsList();
+        set((state) => ({
+          transactionsList,
+          wallets: nextWallets,
+          isSaving: false,
+          hasLoadedTransactions: true,
+          transactionsDirty: false,
+          dataVersion: state.dataVersion + 1,
+        }));
+      }
     } catch (error) {
       console.error('Failed to update transaction:', error);
-      set({ error: error instanceof Error ? error.message : String(error) });
+      set({ error: error instanceof Error ? error.message : String(error), isSaving: false });
       throw error;
-    } finally {
-      set({ isSaving: false });
     }
   },
 
@@ -513,8 +681,13 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         await tx.delete(transactionItems).where(eq(transactionItems.transactionId, id));
         await tx.delete(transactions).where(eq(transactions.id, id));
       });
-      await get().fetchTransactions();
-      await get().fetchBudgets();
+      const nextWallets = readWalletsSafe(get().wallets);
+      set((state) => ({
+        transactionsList: state.transactionsList.filter((item) => item.id !== id),
+        wallets: nextWallets,
+        transactionsDirty: state.transactionsDirty,
+        dataVersion: state.dataVersion + 1,
+      }));
     } catch (error) {
       console.error('Failed to delete transaction:', error);
       set({ error: error instanceof Error ? error.message : String(error) });

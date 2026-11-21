@@ -39,6 +39,7 @@
       "@react-native-community/datetimepicker",
       "expo-secure-store",
       "./plugins/withMlKitLatinOnly",
+      "./plugins/withAndroidReleaseOptimization",
       [
         "expo-local-authentication",
         {

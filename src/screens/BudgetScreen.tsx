@@ -14,7 +14,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useAppTheme } from '../theme/useAppTheme';
@@ -79,14 +79,13 @@ export const BudgetScreen = () => {
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
   const monthStartDay = useSettingsStore((state) => state.monthStartDay);
-  const {
-    budgets,
-    setBudget,
-    getCategoriesByType,
-    fetchTransactions,
-    fetchBudgets,
-    fetchCategories,
-  } = useTransactionStore();
+  const budgets = useTransactionStore((state) => state.budgets);
+  const categories = useTransactionStore((state) => state.categories);
+  const setBudget = useTransactionStore((state) => state.setBudget);
+  const getCategoriesByType = useTransactionStore((state) => state.getCategoriesByType);
+  const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
+  const fetchBudgets = useTransactionStore((state) => state.fetchBudgets);
+  const fetchCategories = useTransactionStore((state) => state.fetchCategories);
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [refreshing, setRefreshing] = useState(false);
   const { currentMonthExpenses, periodBounds } = useMonthlySummary(currentDate);
@@ -95,7 +94,10 @@ export const BudgetScreen = () => {
     [periodBounds, dateFormat]
   );
   const isCurrentPeriodNow = isSamePeriod(currentDate, new Date(), monthStartDay);
-  const expenseCategories = getCategoriesByType('expense');
+  const expenseCategories = useMemo(
+    () => getCategoriesByType('expense'),
+    [categories, getCategoriesByType]
+  );
 
   const changePeriod = useCallback(
     (offset: number) => {
@@ -108,21 +110,43 @@ export const BudgetScreen = () => {
     setCurrentDate(new Date());
   }, []);
 
-  const refreshMonthData = useCallback(async () => {
-    await Promise.all([fetchTransactions(), fetchCategories()]);
-    await fetchBudgets();
-  }, [fetchTransactions, fetchCategories, fetchBudgets]);
+  const refreshMonthData = useCallback(
+    async (force = false) => {
+      const state = useTransactionStore.getState();
+      const needTransactions = force || !state.hasLoadedTransactions || state.transactionsDirty;
+      const needCategories = force || !state.hasLoadedCategories || state.categoriesDirty;
+      const needBudgets = force || needCategories || !state.hasLoadedBudgets || state.budgetsDirty;
+      if (!needTransactions && !needCategories && !needBudgets) {
+        return;
+      }
+
+      const parallel: Promise<void>[] = [];
+      if (needTransactions) {
+        parallel.push(fetchTransactions());
+      }
+      if (needCategories) {
+        parallel.push(fetchCategories());
+      }
+      if (parallel.length > 0) {
+        await Promise.all(parallel);
+      }
+      if (needBudgets) {
+        await fetchBudgets();
+      }
+    },
+    [fetchTransactions, fetchCategories, fetchBudgets]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      void refreshMonthData();
+      void refreshMonthData(false);
     }, [refreshMonthData])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refreshMonthData();
+      await refreshMonthData(true);
     } finally {
       setRefreshing(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { endOfDay, startOfDay, subDays } from 'date-fns';
 
@@ -23,6 +23,7 @@ import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
 import {
+  formatCachedLocaleDate,
   formatPeriodLabel,
   getCalendarMonthBounds,
   getLocalDayBounds,
@@ -85,13 +86,92 @@ function computeDatePresetBounds(
   }
 }
 
-function formatLocaleDate(date: Date | number, locale: string, options: Intl.DateTimeFormatOptions): string {
-  try {
-    return new Date(date).toLocaleDateString(locale || 'en-GB', options);
-  } catch {
-    return new Date(date).toLocaleDateString('en-GB', options);
-  }
+const SECTION_HEADER_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+};
+
+const CALENDAR_MONTH_OPTIONS: Intl.DateTimeFormatOptions = {
+  month: 'long',
+  year: 'numeric',
+};
+
+const SHORT_DAY_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: 'numeric',
+  month: 'short',
+};
+
+const FULL_SHORT_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+};
+
+const transactionKeyExtractor = (item: Transaction) => String(item.id);
+
+interface TransactionRowProps {
+  item: Transaction;
+  accountLabel?: string;
+  currencyCode: string;
+  useThousandsSeparator: boolean;
+  theme: ReturnType<typeof useAppTheme>;
+  onPress: (transactionId: number) => void;
 }
+
+const TransactionRow = React.memo(function TransactionRow({
+  item,
+  accountLabel,
+  currencyCode,
+  useThousandsSeparator,
+  theme,
+  onPress,
+}: TransactionRowProps) {
+  const isTransfer = item.type === 'transfer';
+  const isIncome = !isTransfer && (item.type === 'income' || (item.totalAmount || 0) > 0);
+  const tint = isTransfer ? theme.primary : isIncome ? theme.income : theme.expense;
+  const subtitle = isTransfer
+    ? [accountLabel, item.note].filter(Boolean).join(' · ')
+    : [item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
+  const amountText = formatDisplayCurrency(
+    isTransfer ? Math.abs(item.totalAmount || 0) : item.totalAmount || 0,
+    currencyCode,
+    useThousandsSeparator
+  );
+
+  const handlePress = useCallback(() => {
+    onPress(item.id);
+  }, [onPress, item.id]);
+
+  return (
+    <TouchableOpacity
+      style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${amountText}, ${subtitle}`}
+    >
+      <View style={[styles.iconContainer, { backgroundColor: tint + '18' }]}>
+        <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
+      </View>
+      <View style={styles.transactionDetails}>
+        <Text style={[styles.transactionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
+          {item.merchantName || 'Unknown'}
+        </Text>
+        <Text
+          style={[styles.transactionSubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}
+          numberOfLines={1}
+        >
+          {subtitle}
+        </Text>
+      </View>
+      <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
+        {isIncome ? '+' : ''}
+        {amountText}
+      </Text>
+    </TouchableOpacity>
+  );
+});
 
 export const CashflowScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -100,6 +180,7 @@ export const CashflowScreen = () => {
   const summarizeSearchTransactions = useTransactionStore((state) => state.summarizeSearchTransactions);
   const getDailyTotals = useTransactionStore((state) => state.getDailyTotals);
   const transactionsList = useTransactionStore((state) => state.transactionsList);
+  const dataVersion = useTransactionStore((state) => state.dataVersion);
   const error = useTransactionStore((state) => state.error);
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
@@ -109,7 +190,7 @@ export const CashflowScreen = () => {
   const categories = useTransactionStore((s) => s.categories);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(() => new Date());
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -136,7 +217,7 @@ export const CashflowScreen = () => {
     typeFilter || walletFilterId != null || categoryFilter || dateFrom != null || dateTo != null
   );
 
-  const onRefresh = React.useCallback(async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchTransactions();
     setFilterRefreshTick((tick) => tick + 1);
@@ -144,9 +225,11 @@ export const CashflowScreen = () => {
   }, [fetchTransactions]);
 
   useFocusEffect(
-    React.useCallback(() => {
-      fetchTransactions();
-      setFilterRefreshTick((tick) => tick + 1);
+    useCallback(() => {
+      const state = useTransactionStore.getState();
+      if (!state.hasLoadedTransactions || state.transactionsDirty) {
+        void fetchTransactions();
+      }
     }, [fetchTransactions])
   );
 
@@ -209,6 +292,7 @@ export const CashflowScreen = () => {
     categoryFilter,
     dateFrom,
     dateTo,
+    dataVersion,
     filterRefreshTick,
     searchTransactions,
     summarizeSearchTransactions,
@@ -273,29 +357,40 @@ export const CashflowScreen = () => {
   };
 
   const sectionListData = useMemo(() => {
-    const groupedData = currentMonthData.reduce((acc, curr) => {
-      const dateString = formatLocaleDate(curr.date, locale, {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-      if (!acc[dateString]) acc[dateString] = [];
-      acc[dateString].push(curr);
-      return acc;
-    }, {} as Record<string, Transaction[]>);
+    const groups = new Map<string, { timestamp: number; data: Transaction[] }>();
+    for (let i = 0; i < currentMonthData.length; i += 1) {
+      const curr = currentMonthData[i];
+      const dayKey = toLocalDayKey(curr.date);
+      const existing = groups.get(dayKey);
+      if (existing) {
+        existing.data.push(curr);
+      } else {
+        groups.set(dayKey, { timestamp: curr.date, data: [curr] });
+      }
+    }
 
-    return Object.keys(groupedData).map((key) => ({ title: key, data: groupedData[key] }));
+    const sections: Array<{ key: string; title: string; data: Transaction[] }> = [];
+    groups.forEach((group, dayKey) => {
+      sections.push({
+        key: dayKey,
+        title: formatCachedLocaleDate(group.timestamp, locale, SECTION_HEADER_DATE_OPTIONS),
+        data: group.data,
+      });
+    });
+    return sections;
   }, [currentMonthData, locale]);
 
   const isCurrentMonthNow = isSamePeriod(currentDate, new Date(), monthStartDay);
-  const periodLabel = formatPeriodLabel(periodBounds, locale);
+  const periodLabel = useMemo(() => formatPeriodLabel(periodBounds, locale), [periodBounds, locale]);
 
   const nowForCalendar = new Date();
   const isCalendarCurrentMonth =
     calendarMonth.getFullYear() === nowForCalendar.getFullYear() &&
     calendarMonth.getMonth() === nowForCalendar.getMonth();
-  const calendarMonthLabel = formatLocaleDate(calendarMonth, locale, { month: 'long', year: 'numeric' });
+  const calendarMonthLabel = useMemo(
+    () => formatCachedLocaleDate(calendarMonth, locale, CALENDAR_MONTH_OPTIONS),
+    [calendarMonth, locale]
+  );
 
   const calendarBounds = useMemo(
     () => getCalendarMonthBounds(calendarMonth.getFullYear(), calendarMonth.getMonth()),
@@ -305,7 +400,7 @@ export const CashflowScreen = () => {
   const calendarDailyTotals = useMemo(() => {
     if (viewMode !== 'calendar') return [] as DailyTotal[];
     return getDailyTotals(calendarBounds.startMs, calendarBounds.endMs);
-  }, [viewMode, calendarBounds.startMs, calendarBounds.endMs, getDailyTotals, filterRefreshTick, transactionsList]);
+  }, [viewMode, calendarBounds.startMs, calendarBounds.endMs, getDailyTotals, dataVersion, filterRefreshTick, transactionsList]);
 
   const dailyTotalsMap = useMemo(() => {
     const map: Record<string, DailyTotal> = {};
@@ -407,10 +502,8 @@ export const CashflowScreen = () => {
     </View>
   );
 
-  const renderHeader = () => renderSummaryCard(totalIncome, totalExpense, balance);
-
   const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
-  const showAccountNames = wallets.filter((w) => w.isActive).length > 1;
+  const showAccountNames = useMemo(() => wallets.filter((w) => w.isActive).length > 1, [wallets]);
 
   const filterableCategories = useMemo(() => {
     const filtered =
@@ -440,7 +533,7 @@ export const CashflowScreen = () => {
     if (datePreset && datePreset !== 'custom') {
       return DATE_PRESETS.find((p) => p.key === datePreset)?.label ?? 'Date range';
     }
-    const fmt = (ms: number) => formatLocaleDate(ms, locale, { day: 'numeric', month: 'short' });
+    const fmt = (ms: number) => formatCachedLocaleDate(ms, locale, SHORT_DAY_OPTIONS);
     if (dateFrom != null && dateTo != null) return `${fmt(dateFrom)} – ${fmt(dateTo)}`;
     if (dateFrom != null) return `From ${fmt(dateFrom)}`;
     return `Until ${fmt(dateTo!)}`;
@@ -567,61 +660,64 @@ export const CashflowScreen = () => {
     </View>
   );
 
-  const renderTransactionItem = (item: Transaction) => {
-    const isTransfer = item.type === 'transfer';
-    const isIncome = !isTransfer && (item.type === 'income' || (item.totalAmount || 0) > 0);
-    const tint = isTransfer ? theme.primary : isIncome ? theme.income : theme.expense;
-    const accountLabel = isTransfer
-      ? `${walletNames.get(item.walletId ?? -1) ?? 'Account'} → ${walletNames.get(item.toWalletId ?? -1) ?? 'Account'}`
-      : showAccountNames && item.walletId
-        ? walletNames.get(item.walletId)
-        : undefined;
-    const subtitle = isTransfer
-      ? [accountLabel, item.note].filter(Boolean).join(' · ')
-      : [item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
-    const amountText = formatDisplayCurrency(isTransfer ? Math.abs(item.totalAmount || 0) : item.totalAmount || 0, currencyCode, useThousandsSeparator);
-    return (
-      <TouchableOpacity
-        key={item.id}
-        style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}
-        onPress={() => navigation.navigate('AddTransactionStack', { transactionId: item.id })}
-        accessibilityRole="button"
-        accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${amountText}, ${subtitle}`}
-      >
-        <View style={[styles.iconContainer, { backgroundColor: tint + '18' }]}>
-          <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
-        </View>
-        <View style={styles.transactionDetails}>
-          <Text style={[styles.transactionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
-            {item.merchantName || 'Unknown'}
-          </Text>
-          <Text
-            style={[styles.transactionSubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}
-            numberOfLines={1}
-          >
-            {subtitle}
-          </Text>
-        </View>
-        <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
-          {isIncome ? '+' : ''}{amountText}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
+  const handleOpenTransaction = useCallback(
+    (transactionId: number) => {
+      navigation.navigate('AddTransactionStack', { transactionId });
+    },
+    [navigation]
+  );
+
+  const getAccountLabel = useCallback(
+    (item: Transaction): string | undefined => {
+      if (item.type === 'transfer') {
+        return `${walletNames.get(item.walletId ?? -1) ?? 'Account'} → ${walletNames.get(item.toWalletId ?? -1) ?? 'Account'}`;
+      }
+      return showAccountNames && item.walletId ? walletNames.get(item.walletId) : undefined;
+    },
+    [walletNames, showAccountNames]
+  );
+
+  const renderTransactionRow = useCallback(
+    ({ item }: { item: Transaction }) => (
+      <TransactionRow
+        item={item}
+        accountLabel={getAccountLabel(item)}
+        currencyCode={currencyCode}
+        useThousandsSeparator={useThousandsSeparator}
+        theme={theme}
+        onPress={handleOpenTransaction}
+      />
+    ),
+    [getAccountLabel, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section: { title } }: { section: { title: string } }) => (
+      <Text style={[styles.sectionHeader, { color: theme.text, fontSize: theme.scaleFont(12) }]}>{title}</Text>
+    ),
+    [theme]
+  );
+
+  const monthlyHeaderElement = useMemo(
+    () => renderSummaryCard(totalIncome, totalExpense, balance),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [totalIncome, totalExpense, balance, currencyCode, useThousandsSeparator, theme]
+  );
+
+  const searchSummaryHeaderElement = useMemo(
+    () => renderSearchSummaryHeader(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchSummary, isSearching, isListTruncated, searchResults?.length, currencyCode, useThousandsSeparator, theme]
+  );
 
   const queueReady = queueItems.filter((item) => item.status === 'done').length;
   const queueWaiting = queueItems.filter((item) => item.status === 'pending' || item.status === 'processing').length;
 
   const selectedDayShortLabel = selectedCalendarDate
-    ? formatLocaleDate(selectedCalendarDate, locale, { day: 'numeric', month: 'short' })
+    ? formatCachedLocaleDate(selectedCalendarDate, locale, SHORT_DAY_OPTIONS)
     : '';
   const selectedDayFullLabel = selectedCalendarDate
-    ? formatLocaleDate(selectedCalendarDate, locale, {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
+    ? formatCachedLocaleDate(selectedCalendarDate, locale, SECTION_HEADER_DATE_OPTIONS)
     : '';
 
   return (
@@ -951,7 +1047,17 @@ export const CashflowScreen = () => {
 
                 {selectedDayTransactions.length > 0 ? (
                   <View style={[styles.selectedDayListCard, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-                    {selectedDayTransactions.map((tx) => renderTransactionItem(tx))}
+                    {selectedDayTransactions.map((tx) => (
+                      <TransactionRow
+                        key={tx.id}
+                        item={tx}
+                        accountLabel={getAccountLabel(tx)}
+                        currencyCode={currencyCode}
+                        useThousandsSeparator={useThousandsSeparator}
+                        theme={theme}
+                        onPress={handleOpenTransaction}
+                      />
+                    ))}
                   </View>
                 ) : (
                   <View style={[styles.emptyDayCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -975,8 +1081,8 @@ export const CashflowScreen = () => {
         <FlatList
           data={searchResults}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
-          keyExtractor={(item) => item.id.toString()}
-          ListHeaderComponent={renderSearchSummaryHeader}
+          keyExtractor={transactionKeyExtractor}
+          ListHeaderComponent={searchSummaryHeaderElement}
           ListFooterComponent={
             isListTruncated ? (
               <View style={[styles.truncationFooter, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -986,7 +1092,13 @@ export const CashflowScreen = () => {
               </View>
             ) : null
           }
-          renderItem={({ item }) => renderTransactionItem(item)}
+          renderItem={renderTransactionRow}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={50}
+          windowSize={11}
+          removeClippedSubviews={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -1038,8 +1150,8 @@ export const CashflowScreen = () => {
           <SectionList
             sections={sectionListData}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
-            keyExtractor={(item) => item.id.toString()}
-            ListHeaderComponent={renderHeader}
+            keyExtractor={transactionKeyExtractor}
+            ListHeaderComponent={monthlyHeaderElement}
             ListEmptyComponent={
               <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                 <Ionicons name="wallet-outline" size={32} color={theme.textMuted} style={styles.emptyIcon} />
@@ -1052,10 +1164,14 @@ export const CashflowScreen = () => {
               </View>
             }
             contentContainerStyle={styles.listContent}
-            renderSectionHeader={({ section: { title } }) => (
-              <Text style={[styles.sectionHeader, { color: theme.text, fontSize: theme.scaleFont(12) }]}>{title}</Text>
-            )}
-            renderItem={({ item }) => renderTransactionItem(item)}
+            renderSectionHeader={renderSectionHeader}
+            renderItem={renderTransactionRow}
+            stickySectionHeadersEnabled={false}
+            initialNumToRender={12}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            windowSize={11}
+            removeClippedSubviews={false}
           />
         </>
       )}
@@ -1341,7 +1457,7 @@ export const CashflowScreen = () => {
                     </Text>
                     <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
                       {dateFrom != null
-                        ? formatLocaleDate(dateFrom, locale, { day: 'numeric', month: 'short', year: 'numeric' })
+                        ? formatCachedLocaleDate(dateFrom, locale, FULL_SHORT_DATE_OPTIONS)
                         : 'Any'}
                     </Text>
                   </TouchableOpacity>
@@ -1356,7 +1472,7 @@ export const CashflowScreen = () => {
                     </Text>
                     <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
                       {dateTo != null
-                        ? formatLocaleDate(dateTo, locale, { day: 'numeric', month: 'short', year: 'numeric' })
+                        ? formatCachedLocaleDate(dateTo, locale, FULL_SHORT_DATE_OPTIONS)
                         : 'Any'}
                     </Text>
                   </TouchableOpacity>

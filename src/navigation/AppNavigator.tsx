@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
-import { AppState, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { AppState, InteractionManager, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationProps } from './types';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { RootTabParamList, RootStackParamList } from './types';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -157,6 +157,7 @@ export const AppNavigator = () => {
       // Ignore notification handler setup errors on builds without native notifications.
     }
     loadSettings();
+    void getModelLifecycleManager().hydratePersistedState?.();
     const runRecurring = async () => {
       const store = useTransactionStore.getState();
       try {
@@ -170,9 +171,12 @@ export const AppNavigator = () => {
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') void runRecurring();
     });
-    void getModelLifecycleManager().initialize();
+    const modelInitHandle = InteractionManager.runAfterInteractions(() => {
+      void getModelLifecycleManager().initialize();
+    });
 
     return () => {
+      modelInitHandle?.cancel?.();
       appStateSub.remove();
       void getGenerationService().dispose();
       getModelLifecycleManager().dispose();

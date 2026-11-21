@@ -104,12 +104,48 @@ export function shiftPeriod(date: Date | number, offset: number, monthStartDay: 
   return new Date(start.getFullYear(), start.getMonth() + offset, start.getDate(), 0, 0, 0, 0);
 }
 
-function formatLocaleDateSafe(date: Date, locale: string, options: Intl.DateTimeFormatOptions): string {
-  try {
-    return date.toLocaleDateString(locale || 'en-GB', options);
-  } catch {
-    return date.toLocaleDateString('en-GB', options);
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getCachedDateFormatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const resolvedLocale = locale || 'en-GB';
+  const cacheKey = `${resolvedLocale}|${options.weekday ?? ''}|${options.year ?? ''}|${options.month ?? ''}|${options.day ?? ''}`;
+  const existing = dateFormatterCache.get(cacheKey);
+  if (existing) {
+    return existing;
   }
+
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat(resolvedLocale, options);
+  } catch {
+    formatter = new Intl.DateTimeFormat('en-GB', options);
+  }
+  if (dateFormatterCache.size >= 64) {
+    dateFormatterCache.clear();
+  }
+  dateFormatterCache.set(cacheKey, formatter);
+  return formatter;
+}
+
+/**
+ * Formats a Date or epoch ms using a cached Intl.DateTimeFormat instance so hot paths
+ * (like grouping and rendering transaction lists) do not reconstruct ICU formatters per row.
+ */
+export function formatCachedLocaleDate(
+  date: Date | number,
+  locale: string,
+  options: Intl.DateTimeFormatOptions
+): string {
+  const target = date instanceof Date ? date : new Date(date);
+  try {
+    return getCachedDateFormatter(locale, options).format(target);
+  } catch {
+    return getCachedDateFormatter('en-GB', options).format(target);
+  }
+}
+
+function formatLocaleDateSafe(date: Date, locale: string, options: Intl.DateTimeFormatOptions): string {
+  return formatCachedLocaleDate(date, locale, options);
 }
 
 /**

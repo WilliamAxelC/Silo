@@ -97,6 +97,7 @@ jest.mock('@expo/vector-icons', () => ({
   FontAwesome: 'FontAwesome',
   Feather: 'Feather',
 }));
+jest.mock('@expo/vector-icons/Ionicons', () => 'Ionicons');
 
 // Mock expo-secure-store
 const mockSecureStoreMap = new Map();

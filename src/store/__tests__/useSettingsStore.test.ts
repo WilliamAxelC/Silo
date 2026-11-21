@@ -72,6 +72,119 @@ describe('useSettingsStore', () => {
       const aiStore = useAIStore.getState();
       expect(aiStore.setLocalModelTarget).toHaveBeenCalledWith('qwen3.5-2b', 'Qwen 3.5 2B (Offline)');
     });
+
+    it('marks isLoaded immediately after SQLite read while SecureStore is still pending, for both App Lock ON and OFF', async () => {
+      for (const lockFlag of [false, true]) {
+        useSettingsStore.setState({
+          isLoaded: false,
+          appLockEnabled: false,
+          externalApiKey: '',
+          externalApiCustomHeaders: '',
+        });
+
+        let resolveKey!: (v: string | null) => void;
+        let resolveHeaders!: (v: string | null) => void;
+        (SecureStore.getItemAsync as jest.Mock)
+          .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveKey = r; }))
+          .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveHeaders = r; }));
+
+        (db.select as jest.Mock).mockReturnValueOnce({
+          from: jest.fn(() => Promise.resolve([
+            { key: 'appLockEnabled', value: String(lockFlag) },
+            { key: 'currencyCode', value: 'SGD' },
+          ])),
+        });
+
+        const loadPromise = useSettingsStore.getState().loadSettings();
+        // Flush microtasks for db.select() ONLY — SecureStore is still pending!
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(useSettingsStore.getState().isLoaded).toBe(true);
+        expect(useSettingsStore.getState().appLockEnabled).toBe(lockFlag);
+        expect(useSettingsStore.getState().currencyCode).toBe('SGD');
+
+        // Now resolve SecureStore in the background
+        resolveKey('sk-bg-loaded');
+        resolveHeaders('{"X-Test": "1"}');
+        await loadPromise;
+
+        expect(useSettingsStore.getState().externalApiKey).toBe('sk-bg-loaded');
+        expect(useSettingsStore.getState().externalApiCustomHeaders).toBe('{"X-Test": "1"}');
+      }
+    });
+
+    it('does not overwrite a user API key edit made while background SecureStore read is still in flight', async () => {
+      useSettingsStore.setState({ isLoaded: false, externalApiKey: '' });
+
+      let resolveKey!: (v: string | null) => void;
+      let resolveHeaders!: (v: string | null) => void;
+      (SecureStore.getItemAsync as jest.Mock)
+        .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveKey = r; }))
+        .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveHeaders = r; }));
+
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => Promise.resolve([{ key: 'themeMode', value: 'light' }])),
+      });
+
+      const loadPromise = useSettingsStore.getState().loadSettings();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(useSettingsStore.getState().isLoaded).toBe(true);
+
+      await useSettingsStore.getState().setExternalApiKey('sk-user-edited');
+      resolveKey('sk-stale-keystore');
+      resolveHeaders('');
+      await loadPromise;
+
+      expect(useSettingsStore.getState().externalApiKey).toBe('sk-user-edited');
+    });
+
+    it('exposes one shared waitForSecretsHydrated promise that stays pending until SecureStore finishes (R4-02)', async () => {
+      useSettingsStore.setState({
+        isLoaded: false,
+        secretsLoaded: false,
+        externalApiKey: '',
+        externalApiCustomHeaders: '{}',
+      });
+
+      let resolveKey!: (v: string | null) => void;
+      let resolveHeaders!: (v: string | null) => void;
+      (SecureStore.getItemAsync as jest.Mock)
+        .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveKey = r; }))
+        .mockImplementationOnce(() => new Promise<string | null>((r) => { resolveHeaders = r; }));
+
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => Promise.resolve([
+          { key: 'aiInferenceMode', value: 'external' },
+          { key: 'externalApiUrl', value: 'https://api.openai.com/v1' },
+          { key: 'externalApiModel', value: 'gpt-4o-mini' },
+        ])),
+      });
+
+      const loadPromise = useSettingsStore.getState().loadSettings();
+      let waiter1Done = false;
+      let waiter2Done = false;
+      const waiter1 = useSettingsStore.getState().waitForSecretsHydrated().then(() => { waiter1Done = true; });
+      const waiter2 = useSettingsStore.getState().waitForSecretsHydrated().then(() => { waiter2Done = true; });
+
+      await useSettingsStore.getState().waitForSettingsLoaded();
+      expect(useSettingsStore.getState().isLoaded).toBe(true);
+      expect(useSettingsStore.getState().aiInferenceMode).toBe('external');
+      expect(useSettingsStore.getState().secretsLoaded).toBe(false);
+      expect(waiter1Done).toBe(false);
+      expect(waiter2Done).toBe(false);
+
+      resolveKey('sk-secret-from-keystore');
+      resolveHeaders('{"X-Auth":"token-42"}');
+      await Promise.all([loadPromise, waiter1, waiter2]);
+
+      expect(waiter1Done).toBe(true);
+      expect(waiter2Done).toBe(true);
+      expect(useSettingsStore.getState().secretsLoaded).toBe(true);
+      expect(useSettingsStore.getState().externalApiKey).toBe('sk-secret-from-keystore');
+      expect(useSettingsStore.getState().externalApiCustomHeaders).toBe('{"X-Auth":"token-42"}');
+    });
   });
 
   describe('Theme resolution', () => {

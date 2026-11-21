@@ -8,7 +8,7 @@ import {
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../generationService';
 import { getLlamaRnAdapter } from '../llamaRnAdapter';
 import { LocalInferenceException } from '../localInferenceTypes';
-import { getActiveModelFileUri } from '../modelLifecycle';
+import { getActiveModelFileUri, getModelLifecycleManager } from '../modelLifecycle';
 import {
   useAIStore,
   createInitialProvisioningSnapshot,
@@ -374,5 +374,59 @@ describe('ChatRuntimePreloadService regression', () => {
     await flushMicrotasks(10);
     expect(preloadService.getSnapshot().error).toBeNull();
     expect(useAIStore.getState().runtimeReady).toBe(true);
+  });
+
+  it('awaits shared modelLifecycle.ensureInitialized() before preloading a restored model (R4-01 & R4-03)', async () => {
+    const modelPath = getActiveModelFileUri();
+    const manager = getModelLifecycleManager();
+    manager.dispose();
+
+    useAIStore.setState({
+      provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
+      provisioningHydrated: false,
+      runtime: createInitialRuntimeSnapshot(),
+      runtimeReady: false,
+      warmupPending: false,
+    });
+
+    let resolveLifecycle!: () => void;
+    const isInitSpy = jest.spyOn(manager, 'isInitialized').mockReturnValue(false);
+    const ensureSpy = jest.spyOn(manager, 'ensureInitialized').mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLifecycle = () => {
+            useAIStore.setState({
+              provisioning: {
+                ...createInitialProvisioningSnapshot(),
+                status: 'ready',
+                modelPath,
+                progress: 1,
+              },
+              provisioningHydrated: true,
+            });
+            isInitSpy.mockReturnValue(true);
+            resolve();
+          };
+        }),
+    );
+
+    try {
+      const preloadService = getChatRuntimePreloadService();
+      const preloadPromise = preloadService.requestPreload();
+      await flushMicrotasks(10);
+
+      expect(ensureSpy).toHaveBeenCalledTimes(1);
+      expect(adapter.initContext).not.toHaveBeenCalled();
+
+      resolveLifecycle();
+      await preloadPromise;
+      await flushMicrotasks(20);
+
+      expect(adapter.initContext).toHaveBeenCalledTimes(1);
+      expect(useAIStore.getState().runtimeReady).toBe(true);
+    } finally {
+      isInitSpy.mockRestore();
+      ensureSpy.mockRestore();
+    }
   });
 });

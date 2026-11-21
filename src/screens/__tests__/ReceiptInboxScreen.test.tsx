@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Linking, StyleSheet, Text } from 'react-native';
+import { Alert, Image, InteractionManager, Linking, StyleSheet, Text } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 
@@ -35,6 +35,7 @@ jest.mock('expo-image-picker', () => ({
 
 describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
   const mockEnqueue = jest.fn();
+  const mockEnsureThumbnail = jest.fn().mockResolvedValue(null);
   const mockRemove = jest.fn();
   const mockRemoveMany = jest.fn();
   const mockClearByStatus = jest.fn();
@@ -51,6 +52,7 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
           id: 10,
           imageUri: 'file:///docs/receipts/r1.jpg',
           imageHash: 'md5:aaa',
+          thumbnailUri: 'file:///cache/thumbs/t1.jpg',
           status: 'done',
           result: { merchantName: 'Kopi Tuku', totalAmount: 35000, confidence: 'high' },
           error: null,
@@ -60,6 +62,7 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
           id: 11,
           imageUri: 'file:///docs/receipts/r2.jpg',
           imageHash: 'md5:bbb',
+          thumbnailUri: 'file:///cache/thumbs/t2.jpg',
           status: 'done',
           result: { merchantName: 'Warung Makan', totalAmount: 48000, confidence: 'medium' },
           error: null,
@@ -68,6 +71,7 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
       ],
       isProcessing: false,
       enqueue: mockEnqueue,
+      ensureThumbnail: mockEnsureThumbnail,
       remove: mockRemove,
       removeMany: mockRemoveMany,
       clearByStatus: mockClearByStatus,
@@ -233,6 +237,68 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
     const importBtn = actionRow.findByProps({ accessibilityLabel: 'Import receipt photos' });
     expect(StyleSheet.flatten(scanBtn.props.style).minHeight).toBeGreaterThanOrEqual(44);
     expect(StyleSheet.flatten(importBtn.props.style).minHeight).toBeGreaterThanOrEqual(44);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('uses stored thumbnails, falls back to original and lazily generates missing thumbnails, and recovers on thumbnail load error', () => {
+    const scheduledCallbacks: Array<() => void> = [];
+    jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((cb: any) => {
+      scheduledCallbacks.push(cb);
+      return { cancel: jest.fn(), then: jest.fn(), done: jest.fn() } as any;
+    });
+
+    useReceiptQueueStore.setState({
+      items: [
+        {
+          id: 10,
+          imageUri: 'file:///docs/receipts/r1.jpg',
+          imageHash: 'md5:aaa',
+          thumbnailUri: 'file:///cache/thumbs/t1.jpg',
+          status: 'done',
+          result: { merchantName: 'Has Thumb', totalAmount: 35000, confidence: 'high' },
+          error: null,
+          createdAt: 1000,
+        },
+        {
+          id: 11,
+          imageUri: 'file:///docs/receipts/legacy.jpg',
+          imageHash: 'md5:bbb',
+          thumbnailUri: null,
+          status: 'done',
+          result: { merchantName: 'Legacy Item', totalAmount: 48000, confidence: 'medium' },
+          error: null,
+          createdAt: 2000,
+        },
+      ],
+      ensureThumbnail: mockEnsureThumbnail,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReceiptInboxScreen />);
+    });
+
+    const images = renderer.root.findAllByType(Image);
+    expect(images).toHaveLength(2);
+    // Row 1 uses its thumbnail; Row 2 falls back to original imageUri
+    expect(images[0].props.source).toEqual({ uri: 'file:///cache/thumbs/t1.jpg' });
+    expect(images[1].props.source).toEqual({ uri: 'file:///docs/receipts/legacy.jpg' });
+
+    // Only legacy item (without thumbnailUri) schedules lazy thumbnail creation
+    expect(scheduledCallbacks).toHaveLength(1);
+    ReactTestRenderer.act(() => {
+      scheduledCallbacks[0]();
+    });
+    expect(mockEnsureThumbnail).toHaveBeenCalledWith(11);
+
+    // If thumbnail 1 fails to load (e.g. OS cache eviction), falls back to original and forces regeneration
+    ReactTestRenderer.act(() => {
+      images[0].props.onError();
+    });
+    const updatedImages = renderer.root.findAllByType(Image);
+    expect(updatedImages[0].props.source).toEqual({ uri: 'file:///docs/receipts/r1.jpg' });
+    expect(mockEnsureThumbnail).toHaveBeenCalledWith(10, { force: true });
 
     ReactTestRenderer.act(() => renderer.unmount());
   });

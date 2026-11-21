@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, TextInput, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';

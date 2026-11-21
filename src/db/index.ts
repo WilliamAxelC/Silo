@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 13;
+const DB_SCHEMA_VERSION = 14;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -28,9 +28,6 @@ export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
     PRAGMA foreign_keys = ON;
   `);
 }
-
-// Ensure PRAGMAs are executed immediately on load
-initDatabasePragmas(expoDb);
 
 export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -163,6 +160,7 @@ export function createReceiptQueueTable(sqliteDb: typeof expoDb = expoDb) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       image_uri TEXT NOT NULL,
       image_hash TEXT,
+      thumbnail_uri TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       result_json TEXT,
       error TEXT,
@@ -402,6 +400,12 @@ function migrateToVersion13(sqliteDb: typeof expoDb = expoDb) {
   const existingTxCount = sqliteDb.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM transactions;');
   if ((existingTxCount?.n ?? 0) > 0) {
     sqliteDb.runSync(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('hasCompletedOnboarding', 'true');`);
+  }
+}
+
+function migrateToVersion14(sqliteDb: typeof expoDb = expoDb) {
+  if (!hasColumn('receipt_queue', 'thumbnail_uri', sqliteDb)) {
+    sqliteDb.execSync('ALTER TABLE receipt_queue ADD COLUMN thumbnail_uri TEXT;');
   }
 }
 
@@ -807,6 +811,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 13) {
     migrateToVersion13(sqliteDb);
+  }
+
+  if (currentVersion < 14) {
+    migrateToVersion14(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

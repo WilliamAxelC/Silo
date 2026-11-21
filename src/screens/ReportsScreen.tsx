@@ -2,25 +2,17 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PieChart } from 'react-native-gifted-charts';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { formatDisplayCurrency } from '../features/transactions/amount';
-import { formatPeriodLabel, isSamePeriod, shiftPeriod } from '../features/transactions/periods';
+import { formatCachedLocaleDate, formatPeriodLabel, isSamePeriod, shiftPeriod } from '../features/transactions/periods';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NavigationProps } from '../navigation/types';
-
-function formatLocaleDate(date: Date | number, locale: string, options: Intl.DateTimeFormatOptions): string {
-  try {
-    return new Date(date).toLocaleDateString(locale || 'en-GB', options);
-  } catch {
-    return new Date(date).toLocaleDateString('en-GB', options);
-  }
-}
 
 const EXPENSE_PALETTE = [
   '#e11d48',
@@ -65,7 +57,7 @@ export const ReportsScreen = () => {
   const monthStartDay = useSettingsStore((state) => state.monthStartDay);
   const locale = dateFormat || 'en-GB';
 
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(() => new Date());
   const [reportType, setReportType] = useState<'expense' | 'income'>(showIncomeInReportsFirst ? 'income' : 'expense');
   const hasUserToggledReportTypeRef = useRef(false);
   const hasSyncedInitialReportTypeRef = useRef(false);
@@ -81,7 +73,10 @@ export const ReportsScreen = () => {
 
   useFocusEffect(
     React.useCallback(() => {
-      fetchTransactions();
+      const state = useTransactionStore.getState();
+      if (!state.hasLoadedTransactions || state.transactionsDirty) {
+        void fetchTransactions();
+      }
     }, [fetchTransactions])
   );
 
@@ -425,7 +420,7 @@ export const ReportsScreen = () => {
                             {tx.merchantName || 'Unnamed'}
                           </Text>
                           <Text style={[styles.txDate, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                            {formatLocaleDate(tx.date, locale, {
+                            {formatCachedLocaleDate(tx.date, locale, {
                               day: 'numeric',
                               month: 'short',
                               year: 'numeric',

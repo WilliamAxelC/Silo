@@ -5,6 +5,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { formatCompactAmount } from '../features/transactions/amount';
 import {
   buildCalendarMonthGrid,
+  formatCachedLocaleDate,
   getWeekdayHeaders,
   type CalendarDayCell,
 } from '../features/transactions/periods';
@@ -23,20 +24,14 @@ export interface MonthlyCalendarViewProps {
   today?: Date;
 }
 
+const DAY_A11Y_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+};
+
 function formatDayA11yDate(date: Date, locale: string): string {
-  try {
-    return date.toLocaleDateString(locale || 'en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return date.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  }
+  return formatCachedLocaleDate(date, locale, DAY_A11Y_DATE_OPTIONS);
 }
 
 export const MonthlyCalendarView: React.FC<MonthlyCalendarViewProps> = ({

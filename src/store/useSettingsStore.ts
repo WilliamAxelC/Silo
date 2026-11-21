@@ -13,8 +13,12 @@ import { useAIStore } from './useAIStore';
 
 interface SettingsState extends AppSettings {
   isLoaded: boolean;
+  secretsLoaded: boolean;
+  secretsHydrationError: string | null;
   isDarkMode: boolean;
   loadSettings: () => Promise<void>;
+  waitForSettingsLoaded: () => Promise<void>;
+  waitForSecretsHydrated: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setCurrencyCode: (currencyCode: string) => Promise<void>;
   setUseThousandsSeparator: (enabled: boolean) => Promise<void>;
@@ -69,47 +73,213 @@ async function saveSetting(key: keyof AppSettings, value: string | boolean | num
 
 const initialSettings = getInitialAppSettings();
 
+let secureHydrationToken = 0;
+let apiKeyWriteSeq = 0;
+let customHeadersWriteSeq = 0;
+let activeSettingsLoadPromise: Promise<void> | null = null;
+let activeSecretsHydrationPromise: Promise<void> | null = null;
+
+export function isSettingsLoadPending(): boolean {
+  return activeSettingsLoadPromise !== null;
+}
+
+export function isSecretsHydrationPending(): boolean {
+  return activeSecretsHydrationPromise !== null;
+}
+
+export async function waitForSettingsLoaded(): Promise<void> {
+  while (activeSettingsLoadPromise) {
+    const pending = activeSettingsLoadPromise;
+    await pending;
+  }
+}
+
+export async function waitForSecretsHydrated(): Promise<void> {
+  while (activeSecretsHydrationPromise) {
+    const pending = activeSecretsHydrationPromise;
+    await pending;
+  }
+}
+
+export async function retrySecretsHydrationIfNeeded(): Promise<void> {
+  if (activeSecretsHydrationPromise) {
+    await waitForSecretsHydrated();
+    return;
+  }
+  const current = useSettingsStore.getState();
+  if (!current.secretsHydrationError) {
+    return;
+  }
+
+  const hydrationToken = ++secureHydrationToken;
+  const initialApiKeyWriteSeq = apiKeyWriteSeq;
+  const initialHeadersWriteSeq = customHeadersWriteSeq;
+
+  let retryPromise!: Promise<void>;
+  retryPromise = (async () => {
+    try {
+      const [storedApiKey, storedCustomHeaders] = await Promise.all([
+        SecureStore.getItemAsync('externalApiKey'),
+        SecureStore.getItemAsync('externalApiCustomHeaders'),
+      ]);
+
+      if (hydrationToken !== secureHydrationToken) {
+        return;
+      }
+
+      useSettingsStore.setState((state) => ({
+        externalApiKey:
+          apiKeyWriteSeq === initialApiKeyWriteSeq ? (storedApiKey ?? state.externalApiKey) : state.externalApiKey,
+        externalApiCustomHeaders:
+          customHeadersWriteSeq === initialHeadersWriteSeq
+            ? (storedCustomHeaders ?? state.externalApiCustomHeaders)
+            : state.externalApiCustomHeaders,
+        secretsLoaded: true,
+        secretsHydrationError: null,
+      }));
+    } catch (error) {
+      console.warn('Failed to retry secure settings hydration:', error);
+      if (hydrationToken === secureHydrationToken) {
+        useSettingsStore.setState({
+          secretsLoaded: false,
+          secretsHydrationError: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      if (activeSecretsHydrationPromise === retryPromise) {
+        activeSecretsHydrationPromise = null;
+      }
+    }
+  })();
+
+  activeSecretsHydrationPromise = retryPromise;
+  await retryPromise;
+}
+
 export const useSettingsStore = create<SettingsState>((set) => ({
   ...initialSettings,
   isLoaded: false,
+  secretsLoaded: false,
+  secretsHydrationError: null,
   isDarkMode: deriveIsDarkMode(initialSettings.themeMode),
 
-  loadSettings: async () => {
-    const rows = await db.select().from(appSettings);
-    const parsed = parseSettingsRows(rows);
+  waitForSettingsLoaded,
+  waitForSecretsHydrated,
 
-    let externalApiKey = await SecureStore.getItemAsync('externalApiKey');
-    const legacyApiKeyRow = rows.find((r) => r.key === 'externalApiKey');
-    if (legacyApiKeyRow) {
-      if (externalApiKey === null) {
-        externalApiKey = legacyApiKeyRow.value;
-        await SecureStore.setItemAsync('externalApiKey', externalApiKey);
-      }
-      await db.delete(appSettings).where(eq(appSettings.key, 'externalApiKey'));
-    }
+  loadSettings: () => {
+    const hydrationToken = ++secureHydrationToken;
+    const initialApiKeyWriteSeq = apiKeyWriteSeq;
+    const initialHeadersWriteSeq = customHeadersWriteSeq;
 
-    let externalApiCustomHeaders = await SecureStore.getItemAsync('externalApiCustomHeaders');
-    const legacyHeadersRow = rows.find((r) => r.key === 'externalApiCustomHeaders');
-    if (legacyHeadersRow) {
-      if (externalApiCustomHeaders === null) {
-        externalApiCustomHeaders = legacyHeadersRow.value;
-        await SecureStore.setItemAsync('externalApiCustomHeaders', externalApiCustomHeaders);
-      }
-      await db.delete(appSettings).where(eq(appSettings.key, 'externalApiCustomHeaders'));
-    }
-
-    const resolvedApiKey = externalApiKey ?? parsed.externalApiKey;
-    const resolvedCustomHeaders = externalApiCustomHeaders ?? parsed.externalApiCustomHeaders;
-
-    set({
-      ...parsed,
-      externalApiKey: resolvedApiKey,
-      externalApiCustomHeaders: resolvedCustomHeaders,
-      isDarkMode: deriveIsDarkMode(parsed.themeMode),
-      isLoaded: true,
+    let resolveSettingsLoaded!: () => void;
+    const settingsLoadedPromise = new Promise<void>((resolve) => {
+      resolveSettingsLoaded = resolve;
     });
-    const preset = MODEL_CATALOG[parsed.activeModelId] || MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
-    useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
+    activeSettingsLoadPromise = settingsLoadedPromise;
+
+    let hydrationPromise!: Promise<void>;
+    hydrationPromise = (async () => {
+      try {
+        let parsed: AppSettings;
+        let legacyApiKeyRow: { key: string; value: string } | undefined;
+        let legacyHeadersRow: { key: string; value: string } | undefined;
+
+        try {
+          const rows = await db.select().from(appSettings);
+          parsed = parseSettingsRows(rows);
+          legacyApiKeyRow = rows.find((r) => r.key === 'externalApiKey');
+          legacyHeadersRow = rows.find((r) => r.key === 'externalApiCustomHeaders');
+
+          // Commit SQLite settings (including appLockEnabled) immediately so startup & AppLockGate
+          // never block on Android Keystore IPC (~900 ms) from SecureStore.
+          set((state) => ({
+            ...parsed,
+            externalApiKey: state.externalApiKey || parsed.externalApiKey,
+            externalApiCustomHeaders: state.externalApiCustomHeaders || parsed.externalApiCustomHeaders,
+            isDarkMode: deriveIsDarkMode(parsed.themeMode),
+            isLoaded: true,
+            secretsLoaded: false,
+            secretsHydrationError: null,
+          }));
+          const preset = MODEL_CATALOG[parsed.activeModelId] || MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
+          useAIStore.getState().setLocalModelTarget(preset.id, preset.displayName);
+        } finally {
+          if (activeSettingsLoadPromise === settingsLoadedPromise) {
+            activeSettingsLoadPromise = null;
+          }
+          resolveSettingsLoaded();
+        }
+
+        try {
+          const [storedApiKey, storedCustomHeaders] = await Promise.all([
+            SecureStore.getItemAsync('externalApiKey'),
+            SecureStore.getItemAsync('externalApiCustomHeaders'),
+          ]);
+
+          let externalApiKey = storedApiKey;
+          if (legacyApiKeyRow) {
+            if (externalApiKey === null) {
+              externalApiKey = legacyApiKeyRow.value;
+              await SecureStore.setItemAsync('externalApiKey', externalApiKey);
+            }
+            await db.delete(appSettings).where(eq(appSettings.key, 'externalApiKey'));
+          }
+
+          let externalApiCustomHeaders = storedCustomHeaders;
+          if (legacyHeadersRow) {
+            if (externalApiCustomHeaders === null) {
+              externalApiCustomHeaders = legacyHeadersRow.value;
+              await SecureStore.setItemAsync('externalApiCustomHeaders', externalApiCustomHeaders);
+            }
+            await db.delete(appSettings).where(eq(appSettings.key, 'externalApiCustomHeaders'));
+          }
+
+          if (hydrationToken !== secureHydrationToken) {
+            return;
+          }
+
+          const resolvedApiKey = externalApiKey ?? parsed.externalApiKey;
+          const resolvedCustomHeaders = externalApiCustomHeaders ?? parsed.externalApiCustomHeaders;
+
+          set((state) => {
+            const nextApiKey = apiKeyWriteSeq === initialApiKeyWriteSeq ? resolvedApiKey : state.externalApiKey;
+            const nextCustomHeaders =
+              customHeadersWriteSeq === initialHeadersWriteSeq
+                ? resolvedCustomHeaders
+                : state.externalApiCustomHeaders;
+            if (
+              state.secretsLoaded &&
+              state.secretsHydrationError === null &&
+              nextApiKey === state.externalApiKey &&
+              nextCustomHeaders === state.externalApiCustomHeaders
+            ) {
+              return state;
+            }
+            return {
+              externalApiKey: nextApiKey,
+              externalApiCustomHeaders: nextCustomHeaders,
+              secretsLoaded: true,
+              secretsHydrationError: null,
+            };
+          });
+        } catch (error) {
+          console.warn('Failed to hydrate secure settings:', error);
+          if (hydrationToken === secureHydrationToken) {
+            set({
+              secretsLoaded: false,
+              secretsHydrationError: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      } finally {
+        if (activeSecretsHydrationPromise === hydrationPromise) {
+          activeSecretsHydrationPromise = null;
+        }
+      }
+    })();
+
+    activeSecretsHydrationPromise = hydrationPromise;
+    return hydrationPromise;
   },
 
   setThemeMode: async (themeMode) => {
@@ -182,13 +352,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   setExternalApiKey: async (externalApiKey) => {
+    apiKeyWriteSeq += 1;
     await saveSetting('externalApiKey', externalApiKey);
-    set({ externalApiKey });
+    set({ externalApiKey, secretsHydrationError: null });
   },
 
   setExternalApiCustomHeaders: async (externalApiCustomHeaders) => {
+    customHeadersWriteSeq += 1;
     await saveSetting('externalApiCustomHeaders', externalApiCustomHeaders);
-    set({ externalApiCustomHeaders });
+    set({ externalApiCustomHeaders, secretsHydrationError: null });
   },
 
   setLocalSystemPrompt: async (localSystemPrompt) => {

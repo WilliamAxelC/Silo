@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { backupDatabaseAsync, openDatabaseAsync } from 'expo-sqlite';
 
 import { expoDb, rebuildFtsIndex, runMigrations } from '../db/index';
+import { useTransactionStore } from '../store/useTransactionStore';
 
 /**
  * MIME types accepted when picking a Silo SQLite backup file (.db / .sqlite / .silo).
@@ -136,6 +137,7 @@ export async function restoreBackupFile(sourceUri: string): Promise<{ transactio
   expoDb.execSync('PRAGMA user_version = 0;');
   runMigrations(expoDb);
   rebuildFtsIndex(expoDb);
+  useTransactionStore.getState().invalidateData?.();
 
   const count = expoDb.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM transactions;');
   return { transactions: count?.n ?? 0 };

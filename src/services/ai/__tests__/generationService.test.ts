@@ -1,9 +1,16 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
+import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import { db } from '../../../db/index';
 import { getGenerationService, isVisionAvailable, type GenerationServiceRuntimeSnapshot } from '../generationService';
 import { getLlamaRnAdapter } from '../llamaRnAdapter';
-import { getActiveModelFileUri, isActiveModelInstalled, isVisionProjectorInstalled } from '../modelLifecycle';
+import {
+  getActiveModelFileUri,
+  getModelLifecycleManager,
+  isActiveModelInstalled,
+  isVisionProjectorInstalled,
+} from '../modelLifecycle';
 import {
   getAIRuntimeAvailability,
   useAIStore,
@@ -652,6 +659,188 @@ Kopiko 15000
       const secondReply = await service.startGeneration({ prompt: 'Second question', mode: 'chat' });
       expect(secondReply).toBe('Local response');
       expect(adapter.initContext).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('R4-01 & R4-02 startup races: modelLifecycle readiness & SecureStore secret hydration', () => {
+    it('awaits shared modelLifecycle.ensureInitialized() before loading llama.rn in ensureChatRuntimeReady (R4-01)', async () => {
+      const manager = getModelLifecycleManager();
+      manager.dispose();
+
+      let resolveInit!: () => void;
+      const isInitSpy = jest.spyOn(manager, 'isInitialized').mockReturnValue(false);
+      const ensureSpy = jest.spyOn(manager, 'ensureInitialized').mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInit = resolve;
+          }),
+      );
+
+      try {
+        const service = getGenerationService();
+        const readyPromise = service.ensureChatRuntimeReady();
+
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+        expect(ensureSpy).toHaveBeenCalledTimes(1);
+        expect(adapter.initContext).not.toHaveBeenCalled();
+
+        resolveInit();
+        await readyPromise;
+
+        expect(adapter.initContext).toHaveBeenCalledTimes(1);
+        expect(useAIStore.getState().runtimeReady).toBe(true);
+      } finally {
+        isInitSpy.mockRestore();
+        ensureSpy.mockRestore();
+      }
+    });
+
+    it('awaits pending SecureStore secret hydration before sending external API requests (R4-02)', async () => {
+      let resolveKey!: (v: string | null) => void;
+      let resolveHeaders!: (v: string | null) => void;
+      const secureSpy = jest
+        .spyOn(SecureStore, 'getItemAsync')
+        .mockImplementationOnce(() => new Promise<string | null>((resolve) => { resolveKey = resolve; }))
+        .mockImplementationOnce(() => new Promise<string | null>((resolve) => { resolveHeaders = resolve; }));
+      const dbSelectSpy = jest.spyOn(db, 'select').mockReturnValueOnce({
+        from: jest.fn(() =>
+          Promise.resolve([
+            { key: 'aiInferenceMode', value: 'external' },
+            { key: 'externalApiUrl', value: 'https://api.openai.com/v1' },
+            { key: 'externalApiModel', value: 'gpt-4o-mini' },
+          ]),
+        ),
+      } as any);
+
+      try {
+        useSettingsStore.setState({
+          isLoaded: false,
+          secretsLoaded: false,
+          secretsHydrationError: null,
+          aiInferenceMode: 'local',
+          externalApiKey: '',
+          externalApiCustomHeaders: '{}',
+        });
+
+        const loadPromise = useSettingsStore.getState().loadSettings();
+        await useSettingsStore.getState().waitForSettingsLoaded();
+
+        // SQLite committed external mode immediately, while SecureStore is still pending!
+        expect(useSettingsStore.getState().isLoaded).toBe(true);
+        expect(useSettingsStore.getState().aiInferenceMode).toBe('external');
+        expect(useSettingsStore.getState().externalApiKey).toBe('');
+
+        const service = getGenerationService();
+        const genPromise = service.startGeneration({ prompt: 'Summarize spending', mode: 'chat' });
+
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+        // MUST NOT send an unauthenticated XHR while SecureStore hydration is still in flight!
+        expect(xhrInstances).toHaveLength(0);
+
+        resolveKey('sk-hydrated-live-key');
+        resolveHeaders('{"X-Tenant-Auth":"tenant-secret"}');
+        await loadPromise;
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+
+        expect(xhrInstances).toHaveLength(1);
+        expect(xhrInstances[0].setRequestHeader).toHaveBeenCalledWith('Authorization', 'Bearer sk-hydrated-live-key');
+        expect(xhrInstances[0].setRequestHeader).toHaveBeenCalledWith('X-Tenant-Auth', 'tenant-secret');
+
+        xhrInstances[0].responseText = JSON.stringify({
+          choices: [{ message: { content: 'Authenticated reply' } }],
+        });
+        xhrInstances[0].onload?.();
+        await expect(genPromise).resolves.toBe('Authenticated reply');
+      } finally {
+        secureSpy.mockRestore();
+        dbSelectSpy.mockRestore();
+      }
+    });
+
+    it('isVisionAvailable awaits pending SecureStore hydration for external cloud endpoints (R4-02)', async () => {
+      let resolveKey!: (v: string | null) => void;
+      let resolveHeaders!: (v: string | null) => void;
+      const secureSpy = jest
+        .spyOn(SecureStore, 'getItemAsync')
+        .mockImplementationOnce(() => new Promise<string | null>((resolve) => { resolveKey = resolve; }))
+        .mockImplementationOnce(() => new Promise<string | null>((resolve) => { resolveHeaders = resolve; }));
+      const dbSelectSpy = jest.spyOn(db, 'select').mockReturnValueOnce({
+        from: jest.fn(() =>
+          Promise.resolve([
+            { key: 'aiInferenceMode', value: 'external' },
+            { key: 'externalApiUrl', value: 'https://api.openai.com/v1' },
+            { key: 'externalApiModel', value: 'gpt-4o-mini' },
+          ]),
+        ),
+      } as any);
+
+      try {
+        useSettingsStore.setState({
+          isLoaded: false,
+          secretsLoaded: false,
+          secretsHydrationError: null,
+          externalApiKey: '',
+          externalApiCustomHeaders: '{}',
+        });
+
+        const loadPromise = useSettingsStore.getState().loadSettings();
+        await useSettingsStore.getState().waitForSettingsLoaded();
+
+        let visionResult: boolean | null = null;
+        const visionPromise = isVisionAvailable().then((res) => {
+          visionResult = res;
+          return res;
+        });
+
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+        expect(visionResult).toBeNull();
+
+        resolveKey('sk-vision-secret');
+        resolveHeaders('{}');
+        await loadPromise;
+
+        await expect(visionPromise).resolves.toBe(true);
+      } finally {
+        secureSpy.mockRestore();
+        dbSelectSpy.mockRestore();
+      }
+    });
+
+    it('fails closed without sending an unauthenticated XHR when SecureStore fails to hydrate credentials (R4-02)', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const secureSpy = jest.spyOn(SecureStore, 'getItemAsync').mockRejectedValue(new Error('Keystore locked'));
+      const dbSelectSpy = jest.spyOn(db, 'select').mockReturnValueOnce({
+        from: jest.fn(() =>
+          Promise.resolve([
+            { key: 'aiInferenceMode', value: 'external' },
+            { key: 'externalApiUrl', value: 'https://api.openai.com/v1' },
+            { key: 'externalApiModel', value: 'gpt-4o-mini' },
+          ]),
+        ),
+      } as any);
+
+      try {
+        useSettingsStore.setState({
+          isLoaded: false,
+          secretsLoaded: false,
+          secretsHydrationError: null,
+          externalApiKey: '',
+          externalApiCustomHeaders: '{}',
+        });
+
+        await useSettingsStore.getState().loadSettings();
+        const service = getGenerationService();
+
+        await expect(service.startGeneration({ prompt: 'Hello', mode: 'chat' })).rejects.toThrow(
+          /secure storage/i,
+        );
+        expect(xhrInstances).toHaveLength(0);
+      } finally {
+        secureSpy.mockRestore();
+        dbSelectSpy.mockRestore();
+        warnSpy.mockRestore();
+        useSettingsStore.setState({ secretsHydrationError: null, secretsLoaded: false });
+      }
     });
   });
 });

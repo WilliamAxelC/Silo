@@ -161,7 +161,9 @@ export function createInitialRuntimeSnapshot(): AIRuntimeSnapshot {
 }
 
 export function getAIRuntimeAvailability(
-  state: Pick<AIStoreState, 'provisioning' | 'runtimeReady' | 'warmupPending' | 'runtime'>,
+  state: Pick<AIStoreState, 'provisioning' | 'runtimeReady' | 'warmupPending' | 'runtime'> & {
+    provisioningHydrated?: boolean;
+  },
 ): AIRuntimeAvailability {
   const { useSettingsStore } = require('./useSettingsStore');
   const settings = useSettingsStore.getState();
@@ -207,6 +209,8 @@ export function getAIRuntimeAvailability(
     localInferenceStatusMessage = isMemoryCriticallyLow
       ? 'This device does not have enough memory (3 GB minimum) to run the local AI model.'
       : availability.message;
+  } else if (state.provisioning.status === 'not-installed' && state.provisioningHydrated === false) {
+    localInferenceStatusMessage = 'Checking local AI model status...';
   } else if (state.provisioning.status === 'not-installed') {
     localInferenceStatusMessage = 'Local AI model is not downloaded yet. Set it up in Settings for offline chat.';
   } else if (state.provisioning.status === 'failed') {
@@ -256,6 +260,7 @@ export interface AIStoreState {
   runtime: AIRuntimeSnapshot;
   runtimeReady: boolean;
   warmupPending: boolean;
+  provisioningHydrated: boolean;
   setLocalModelTarget: (localModelId: string, localModelDisplayName: string) => void;
   setSelectedMode: (mode: 'rag' | 'chat') => void;
   updateStorageHealth: (health: Partial<AIStorageHealthSnapshot>) => void;
@@ -272,6 +277,7 @@ export interface AIStoreState {
   appendLog: (entry: Omit<AIEventLog, 'id' | 'timestamp'> & { timestamp?: string }) => void;
   markRuntimeReady: (ready: boolean) => void;
   setWarmupPending: (pending: boolean) => void;
+  setProvisioningHydrated: (hydrated: boolean) => void;
   refreshRuntimeAvailability: () => LocalInferenceAvailability;
   setRuntimeState: (runtimeState: LocalInferenceRuntimeState) => void;
   setRuntimeModelLoaded: (loaded: boolean, runtimeInfo?: LocalRuntimeInfo | null) => void;
@@ -357,6 +363,7 @@ export const useAIStore = create<AIStoreState>((set) => ({
   runtime: createInitialRuntimeSnapshot(),
   runtimeReady: false,
   warmupPending: false,
+  provisioningHydrated: false,
   setLocalModelTarget: (localModelId, localModelDisplayName) =>
     set((state) => ({
       localModelId,
@@ -449,6 +456,7 @@ export const useAIStore = create<AIStoreState>((set) => ({
     })),
   markRuntimeReady: (runtimeReady) => set({ runtimeReady }),
   setWarmupPending: (warmupPending) => set({ warmupPending }),
+  setProvisioningHydrated: (provisioningHydrated) => set({ provisioningHydrated }),
   refreshRuntimeAvailability: () => {
     const availability = buildInitialAvailability();
     set((state) => ({

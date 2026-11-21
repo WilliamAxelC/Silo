@@ -16,7 +16,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -129,9 +129,21 @@ export const SettingsScreen = () => {
   const setMonthStartDay = useSettingsStore((s) => s.setMonthStartDay);
   const setWeekStartDay = useSettingsStore((s) => s.setWeekStartDay);
 
-  const { provisioning, localModelDisplayName, runtime, runtimeReady, warmupPending, logs } = useAIStore();
-  const { transactionsList, wallets, categories, addCategory, renameCategory, deleteCategory, getCategoriesByType } =
-    useTransactionStore();
+  const provisioning = useAIStore((s) => s.provisioning);
+  const provisioningHydrated = useAIStore((s) => s.provisioningHydrated);
+  const localModelDisplayName = useAIStore((s) => s.localModelDisplayName);
+  const runtime = useAIStore((s) => s.runtime);
+  const runtimeReady = useAIStore((s) => s.runtimeReady);
+  const warmupPending = useAIStore((s) => s.warmupPending);
+  const logs = useAIStore((s) => s.logs);
+
+  const transactionsList = useTransactionStore((s) => s.transactionsList);
+  const wallets = useTransactionStore((s) => s.wallets);
+  const categories = useTransactionStore((s) => s.categories);
+  const addCategory = useTransactionStore((s) => s.addCategory);
+  const renameCategory = useTransactionStore((s) => s.renameCategory);
+  const deleteCategory = useTransactionStore((s) => s.deleteCategory);
+  const getCategoriesByType = useTransactionStore((s) => s.getCategoriesByType);
 
   const [isExporting, setIsExporting] = useState(false);
   const activeModelId = useSettingsStore((s) => s.activeModelId);
@@ -157,12 +169,14 @@ export const SettingsScreen = () => {
   React.useEffect(() => {
     let isMounted = true;
     const checkInstalled = async () => {
+      const manager = getModelLifecycleManager();
+      await manager.ensureInitialized?.();
       const installed = await isActiveModelInstalled();
       if (isMounted) {
         setIsModelInstalled(installed);
       }
     };
-    checkInstalled();
+    void checkInstalled();
     return () => {
       isMounted = false;
     };
@@ -210,9 +224,16 @@ export const SettingsScreen = () => {
   }, [provisioning.transfer.bytesPerSecond]);
 
   const { runtimePhaseActive, canRunNativeChat, hasUsableLocalInferenceBackend, localInferenceStatusMessage } =
-    getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime });
+    getAIRuntimeAvailability({ provisioning, runtimeReady, warmupPending, runtime, provisioningHydrated });
+  const isCheckingModelStatus =
+    aiInferenceMode === 'local' &&
+    !provisioningHydrated &&
+    provisioning.status === 'not-installed' &&
+    !isModelInstalled;
   const canStartOrRetryProvisioning =
-    hasUsableLocalInferenceBackend && ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
+    hasUsableLocalInferenceBackend &&
+    !isCheckingModelStatus &&
+    ['failed', 'not-installed', 'update-available'].includes(provisioning.status);
   const isQwenDownloaded = isModelInstalled || provisioning.status === 'ready';
   const isDownloading = provisioning.status === 'downloading';
   const isInProgress = [
@@ -226,6 +247,9 @@ export const SettingsScreen = () => {
   ].includes(provisioning.status);
 
   const modelStatusLabel = useMemo(() => {
+    if (isCheckingModelStatus) {
+      return 'Checking…';
+    }
     if (isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress) {
       return 'Ready';
     }
@@ -233,7 +257,7 @@ export const SettingsScreen = () => {
       return `Downloading (${progressPercent}%)`;
     }
     return getProvisioningStatusLabel(provisioning.status) || 'Not installed';
-  }, [isQwenDownloaded, provisioning.status, isInProgress, progressPercent]);
+  }, [isCheckingModelStatus, isQwenDownloaded, provisioning.status, isInProgress, progressPercent]);
 
   const closeModal = () => {
     setModalVisible(false);
@@ -506,6 +530,7 @@ export const SettingsScreen = () => {
       const { transactions } = await restoreBackupFile(uri);
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
+      store.invalidateData?.();
       await Promise.all([store.fetchTransactions(), store.fetchCategories()]);
       await store.fetchBudgets();
 
@@ -676,8 +701,12 @@ export const SettingsScreen = () => {
     setIsAiActionLoading(true);
     try {
       const manager = getModelLifecycleManager();
-      if (provisioning.status === 'paused' || provisioning.canResume) {
+      await manager.ensureInitialized?.();
+      const latestProvisioning = useAIStore.getState().provisioning;
+      if (latestProvisioning.status === 'paused' || latestProvisioning.canResume) {
         await manager.resumeDownload();
+      } else if (latestProvisioning.status === 'ready' && !latestProvisioning.updateAvailable) {
+        return;
       } else {
         await manager.retryProvisioning();
       }
@@ -1392,7 +1421,22 @@ export const SettingsScreen = () => {
                     </TouchableOpacity>
                   )}
 
-                  {!isInProgress && provisioning.status !== 'failed' && !isQwenDownloaded && (
+                  {isCheckingModelStatus && (
+                    <View
+                      style={[
+                        styles.modelActionButton,
+                        { backgroundColor: theme.background, borderColor: theme.border, borderWidth: 1 },
+                      ]}
+                      accessibilityLabel="Checking local AI model status"
+                    >
+                      <ActivityIndicator color={theme.primary} size="small" style={{ marginRight: 8 }} />
+                      <Text style={[styles.modelActionText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+                        Checking model status…
+                      </Text>
+                    </View>
+                  )}
+
+                  {!isCheckingModelStatus && !isInProgress && provisioning.status !== 'failed' && !isQwenDownloaded && (
                     <TouchableOpacity
                       style={[styles.modelActionButton, { backgroundColor: theme.primary }]}
                       onPress={provisioning.status === 'paused' ? handleAiResume : handleAiInstallOrRetry}

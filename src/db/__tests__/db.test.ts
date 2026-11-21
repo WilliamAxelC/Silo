@@ -142,15 +142,18 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(13);
+      expect(versionRow?.user_version).toBe(14);
 
       const templatesTable = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
       );
       expect(templatesTable?.name).toBe('transaction_templates');
+
+      const queueCols = testDb.getAllSync<{ name: string }>('PRAGMA table_info(receipt_queue);');
+      expect(queueCols.some((c) => c.name === 'thumbnail_uri')).toBe(true);
     });
 
-    it('migrates an existing v11 database to v12 by adding transaction_templates without losing data', () => {
+    it('migrates an existing v11 database to v14 by adding transaction_templates, image_hash, and thumbnail_uri without losing data', () => {
       // Simulate a v11 database that predates transaction_templates & onboarding flag
       testDb.execSync('DROP TABLE IF EXISTS transaction_templates;');
       testDb.execSync(`DELETE FROM app_settings WHERE key = 'hasCompletedOnboarding';`);
@@ -162,7 +165,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(13);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(14);
       const tbl = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
       );
@@ -178,9 +181,38 @@ describe('Database Layer and SQLite Operations', () => {
       );
       expect(onboardingRow?.value).toBe('true');
 
-      // v13 adds image_hash column on receipt_queue
+      // v13 adds image_hash and v14 adds thumbnail_uri column on receipt_queue
       const queueCols = testDb.getAllSync<{ name: string }>('PRAGMA table_info(receipt_queue);');
       expect(queueCols.some((c) => c.name === 'image_hash')).toBe(true);
+      expect(queueCols.some((c) => c.name === 'thumbnail_uri')).toBe(true);
+    });
+
+    it('migrates an existing v13 receipt_queue table to v14 by adding thumbnail_uri while preserving rows', () => {
+      testDb.execSync('DROP TABLE IF EXISTS receipt_queue;');
+      testDb.execSync(`
+        CREATE TABLE receipt_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          image_uri TEXT NOT NULL,
+          image_hash TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          result_json TEXT,
+          error TEXT,
+          created_at INTEGER NOT NULL
+        );
+      `);
+      testDb.runSync(
+        `INSERT INTO receipt_queue (image_uri, image_hash, status, created_at) VALUES (?, ?, 'done', ?);`,
+        ['file:///docs/receipts/legacy.jpg', 'md5:legacy', 1710000000000]
+      );
+      testDb.execSync('PRAGMA user_version = 13;');
+
+      runMigrations(testDb as any);
+
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(14);
+      const row = testDb.getFirstSync<{ image_uri: string; thumbnail_uri: string | null }>(
+        'SELECT image_uri, thumbnail_uri FROM receipt_queue;'
+      );
+      expect(row).toEqual({ image_uri: 'file:///docs/receipts/legacy.jpg', thumbnail_uri: null });
     });
 
     it('skips migrations, seeding, and view recreation on steady-state launch when user_version is current', () => {

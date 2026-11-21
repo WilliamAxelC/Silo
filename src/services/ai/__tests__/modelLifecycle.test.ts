@@ -12,7 +12,7 @@ import {
   type LocalInferenceAdapter,
 } from '../modelLifecycle';
 import { MODEL_CATALOG } from '../../../features/transactions/constants';
-import { useAIStore, createInitialProvisioningSnapshot } from '../../../store/useAIStore';
+import { useAIStore, createInitialProvisioningSnapshot, createInitialRuntimeSnapshot } from '../../../store/useAIStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 
 jest.mock('expo-network', () => ({
@@ -874,6 +874,234 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
       await deleteVisionProjector();
       expect(fsMock.deleteAsync).toHaveBeenCalledWith(projectorUri, { idempotent: true });
       expect(fsMock.deleteAsync).toHaveBeenCalledWith(tempProjectorUri, { idempotent: true });
+    });
+  });
+
+  describe('R4-01 & R4-03 startup lifecycle readiness & non-clobbering restore', () => {
+    it('restorePersistedState never clobbers an already-loaded healthy llama.rn runtime (R4-01)', async () => {
+      const activeUri = getActiveModelFileUri();
+      fsMock.getInfoAsync.mockImplementation(async (path: string) => {
+        if (path === activeUri) {
+          return { exists: true, size: EXPECTED_SIZE, uri: activeUri };
+        }
+        return { exists: false, uri: path };
+      });
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('model-manifest.json')) {
+          return JSON.stringify({
+            version: 'qwen3.5-2b',
+            modelPath: activeUri,
+            checksumVerified: true,
+            initializedAt: '2026-11-21T00:00:00.000Z',
+            lastVerifiedAt: '2026-11-21T00:00:00.000Z',
+          });
+        }
+        throw new Error('not found');
+      });
+
+      const liveRuntime = createInitialRuntimeSnapshot();
+      liveRuntime.modelLoaded = true;
+      liveRuntime.generationHealthy = true;
+      liveRuntime.runtimeState = 'healthy';
+      liveRuntime.runtimeInfo = {
+        backend: 'llama.rn-cpu',
+        version: null,
+        supportsStreaming: true,
+        isModelLoaded: true,
+        loadedModelPath: activeUri,
+        loadedModelFamily: 'qwen',
+      };
+
+      useAIStore.setState({
+        runtimeReady: true,
+        warmupPending: false,
+        runtime: liveRuntime,
+        provisioning: createInitialProvisioningSnapshot(),
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.initialize();
+
+      const after = useAIStore.getState();
+      expect(after.provisioning.status).toBe('ready');
+      expect(after.provisioning.modelPath).toBe(activeUri);
+      expect(after.provisioningHydrated).toBe(true);
+      expect(after.runtimeReady).toBe(true);
+      expect(after.runtime.modelLoaded).toBe(true);
+      expect(after.runtime.generationHealthy).toBe(true);
+      expect(after.runtime.runtimeState).toBe('healthy');
+    });
+
+    it('shares one lifecycle-ready promise across concurrent initialize/ensureInitialized callers (R4-01)', async () => {
+      const activeUri = getActiveModelFileUri();
+      let resolveManifestRead!: (val: string) => void;
+      let notifyManifestReadStarted!: () => void;
+      const manifestReadStarted = new Promise<void>((resolve) => {
+        notifyManifestReadStarted = resolve;
+      });
+      let manifestReads = 0;
+
+      fsMock.getInfoAsync.mockImplementation(async (path: string) => {
+        if (path === activeUri) {
+          return { exists: true, size: EXPECTED_SIZE, uri: activeUri };
+        }
+        return { exists: false, uri: path };
+      });
+      fsMock.readAsStringAsync.mockImplementation((path: string) => {
+        if (path.endsWith('model-manifest.json')) {
+          manifestReads += 1;
+          notifyManifestReadStarted();
+          return new Promise<string>((resolve) => {
+            resolveManifestRead = resolve;
+          });
+        }
+        return Promise.reject(new Error('not found'));
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      let firstDone = false;
+      let secondDone = false;
+      const p1 = manager.initialize().then(() => { firstDone = true; });
+      const p2 = manager.ensureInitialized().then(() => { secondDone = true; });
+
+      await manifestReadStarted;
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+      // Neither caller may resolve before restorePersistedState() completes
+      expect(firstDone).toBe(false);
+      expect(secondDone).toBe(false);
+      expect(manifestReads).toBe(1);
+
+      resolveManifestRead(
+        JSON.stringify({
+          version: 'qwen3.5-2b',
+          modelPath: activeUri,
+          checksumVerified: true,
+          initializedAt: '2026-11-21T00:00:00.000Z',
+          lastVerifiedAt: '2026-11-21T00:00:00.000Z',
+        }),
+      );
+      await Promise.all([p1, p2]);
+
+      expect(firstDone).toBe(true);
+      expect(secondDone).toBe(true);
+      expect(manifestReads).toBe(1);
+      expect(manager.isInitialized()).toBe(true);
+      expect(useAIStore.getState().provisioning.status).toBe('ready');
+    });
+
+    it('hydratePersistedState eagerly restores paused download without creating dirs, while initialize finishes deferred setup (R4-03)', async () => {
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
+
+      fsMock.getInfoAsync.mockImplementation(async (path: string) => {
+        if (path === tempUri) {
+          return { exists: true, size: 500000, uri: tempUri };
+        }
+        return { exists: false, uri: path };
+      });
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('download-manifest.json')) {
+          return JSON.stringify({
+            version: 'qwen3.5-2b',
+            status: 'paused',
+            downloadUrl: 'https://example.com/model.gguf',
+            targetPath: tempUri,
+            tempPath: tempUri,
+            totalBytes: EXPECTED_SIZE,
+            downloadedBytes: 500000,
+            progress: 500000 / EXPECTED_SIZE,
+            resumeData: mockResumeData,
+            startedAt: '2026-11-21T00:00:00.000Z',
+            updatedAt: '2026-11-21T00:00:01.000Z',
+            lastProgressAt: '2026-11-21T00:00:01.000Z',
+            bytesPerSecond: 100000,
+            sessionId: 'sess-eager',
+            pausedReason: 'Paused by user',
+          });
+        }
+        throw new Error('not found');
+      });
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      await manager.hydratePersistedState();
+
+      expect(useAIStore.getState().provisioningHydrated).toBe(true);
+      expect(useAIStore.getState().provisioning.status).toBe('paused');
+      expect(useAIStore.getState().provisioning.canResume).toBe(true);
+      expect(fsMock.makeDirectoryAsync).not.toHaveBeenCalled();
+      expect(manager.isInitialized()).toBe(false);
+
+      await manager.initialize();
+      expect(fsMock.makeDirectoryAsync).toHaveBeenCalled();
+      expect(manager.isInitialized()).toBe(true);
+    });
+
+    it('retryProvisioning called before initialize() preserves and resumes a persisted paused download instead of deleting it (R4-03)', async () => {
+      const activeUri = getActiveModelFileUri();
+      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":750000}';
+      let movedToActive = false;
+
+      fsMock.moveAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
+        if (to === activeUri) movedToActive = true;
+      });
+      fsMock.getInfoAsync.mockImplementation(async (path: string, opts?: { md5?: boolean }) => {
+        if (path === tempUri) {
+          return {
+            exists: !movedToActive,
+            size: EXPECTED_SIZE,
+            uri: tempUri,
+            ...(opts?.md5 ? { md5: EXPECTED_MD5 } : {}),
+          };
+        }
+        if (path === activeUri && movedToActive) {
+          return { exists: true, size: EXPECTED_SIZE, uri: activeUri };
+        }
+        return { exists: false, uri: path };
+      });
+      fsMock.readAsStringAsync.mockImplementation(async (path: string) => {
+        if (path.endsWith('download-manifest.json')) {
+          return JSON.stringify({
+            version: 'qwen3.5-2b',
+            status: 'paused',
+            downloadUrl: 'https://example.com/model.gguf',
+            targetPath: tempUri,
+            tempPath: tempUri,
+            totalBytes: EXPECTED_SIZE,
+            downloadedBytes: 750000,
+            progress: 750000 / EXPECTED_SIZE,
+            resumeData: mockResumeData,
+            startedAt: '2026-11-21T00:00:00.000Z',
+            updatedAt: '2026-11-21T00:00:01.000Z',
+            lastProgressAt: '2026-11-21T00:00:01.000Z',
+            bytesPerSecond: 100000,
+            sessionId: 'sess-r403',
+            pausedReason: 'Paused by user',
+          });
+        }
+        throw new Error('not found');
+      });
+      fsMock.createDownloadResumable!.mockImplementation(() => ({
+        downloadAsync: jest.fn(),
+        resumeAsync: jest.fn(async () => ({ uri: tempUri })),
+        pauseAsync: jest.fn(),
+        cancelAsync: jest.fn(async () => {}),
+      }));
+
+      const manager = new QModelLifecycleManager(createMockAdapter());
+      // Do NOT call manager.initialize() first — simulates tapping Download before deferred init ran
+      await manager.retryProvisioning();
+
+      // Must NOT have deleted the resumable partial download before resuming!
+      expect(fsMock.deleteAsync).not.toHaveBeenCalledWith(tempUri, { idempotent: true });
+      expect(fsMock.createDownloadResumable).toHaveBeenCalledWith(
+        expect.any(String),
+        tempUri,
+        expect.any(Object),
+        expect.any(Function),
+        mockResumeData,
+      );
+      expect(useAIStore.getState().provisioning.status).toBe('ready');
     });
   });
 });
