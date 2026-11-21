@@ -2,6 +2,7 @@ import DeviceInfo from 'react-native-device-info';
 import {
   getTotalDeviceMemoryBytes,
   getDevicePssMemoryBytes,
+  getDeviceCpuCoreCount,
   estimateRequiredRamBytes,
   buildMemoryBudget,
   canLoadModelWithinMemoryBudget,
@@ -11,6 +12,7 @@ import {
   recordMemoryTelemetry,
   QUANTIZATION_PROFILES,
   LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES,
+  DEFAULT_BIG_CORE_CPU_THREADS,
   FALLBACK_CPU_THREAD_COUNT,
   MIN_CPU_THREAD_COUNT,
   MAX_CPU_THREAD_COUNT,
@@ -90,52 +92,89 @@ describe('hardware utilities and memory budgeting', () => {
     });
   });
 
+  describe('getDeviceCpuCoreCount', () => {
+    const originalNavigator = (globalThis as { navigator?: unknown }).navigator;
+
+    afterEach(() => {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it('reads navigator.hardwareConcurrency when available and valid', () => {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { hardwareConcurrency: 8 },
+        configurable: true,
+        writable: true,
+      });
+      expect(getDeviceCpuCoreCount()).toBe(8);
+    });
+
+    it('returns null when navigator.hardwareConcurrency is unavailable or invalid', () => {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: {},
+        configurable: true,
+        writable: true,
+      });
+      expect(getDeviceCpuCoreCount()).toBeNull();
+
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { hardwareConcurrency: 0 },
+        configurable: true,
+        writable: true,
+      });
+      expect(getDeviceCpuCoreCount()).toBeNull();
+    });
+  });
+
   describe('resolveRecommendedCpuThreads', () => {
-    it('allocates 2 threads for devices with <= 4GB RAM', () => {
-      const ram4Gb = 4 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram4Gb)).toBe(2);
-
-      const ram3Gb = 3 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram3Gb)).toBe(2);
+    it('derives threads from CPU core count instead of RAM size', () => {
+      expect(resolveRecommendedCpuThreads(2)).toBe(MIN_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(3)).toBe(3);
+      expect(resolveRecommendedCpuThreads(4)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
+      expect(resolveRecommendedCpuThreads(6)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
+      expect(resolveRecommendedCpuThreads(8)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
     });
 
-    it('allocates 3 threads for devices with <= 6GB RAM', () => {
-      const ram6Gb = 6 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram6Gb)).toBe(3);
-    });
-
-    it('allocates 4 threads for devices with <= 8GB RAM', () => {
-      const ram8Gb = 8 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram8Gb)).toBe(4);
-    });
-
-    it('allocates max 6 threads for devices with > 8GB RAM', () => {
-      const ram12Gb = 12 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram12Gb)).toBe(MAX_CPU_THREAD_COUNT);
+    it('scales conservatively above 8 cores up to MAX_CPU_THREAD_COUNT', () => {
+      expect(resolveRecommendedCpuThreads(10)).toBe(5);
+      expect(resolveRecommendedCpuThreads(12)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(16)).toBe(MAX_CPU_THREAD_COUNT);
     });
 
     it('honors explicit thread count within min/max bounds', () => {
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 5)).toBe(5);
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 1)).toBe(MIN_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 16)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(8, 5)).toBe(5);
+      expect(resolveRecommendedCpuThreads(8, 1)).toBe(MIN_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(8, 16)).toBe(MAX_CPU_THREAD_COUNT);
     });
 
-    it('falls back to default thread count on invalid total RAM', () => {
+    it('falls back to 4 big-core threads when core count is unknown or invalid', () => {
+      expect(resolveRecommendedCpuThreads(undefined)).toBe(FALLBACK_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(null)).toBe(FALLBACK_CPU_THREAD_COUNT);
       expect(resolveRecommendedCpuThreads(0)).toBe(FALLBACK_CPU_THREAD_COUNT);
       expect(resolveRecommendedCpuThreads(NaN)).toBe(FALLBACK_CPU_THREAD_COUNT);
     });
   });
 
   describe('getGpuLayersForDevice', () => {
-    it('disables GPU (returns 0) for low-memory devices (<= 4GB)', () => {
-      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024)).toBe(0);
-      expect(getGpuLayersForDevice(LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES)).toBe(0);
-      expect(getGpuLayersForDevice(2 * 1024 * 1024 * 1024)).toBe(0);
+    it('disables GPU offload (returns 0) on Android regardless of RAM for safe Q4_K_M CPU execution', () => {
+      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(12 * 1024 * 1024 * 1024, 'android')).toBe(0);
     });
 
-    it('enables full GPU offloading (returns 99) for devices with > 4GB RAM', () => {
-      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024)).toBe(99);
-      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024)).toBe(99);
+    it('disables GPU (returns 0) on non-Android low-memory devices (<= 4GB)', () => {
+      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024, 'ios')).toBe(0);
+      expect(getGpuLayersForDevice(LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES, 'ios')).toBe(0);
+      expect(getGpuLayersForDevice(2 * 1024 * 1024 * 1024, 'ios')).toBe(0);
+    });
+
+    it('enables full GPU offloading (returns 99) on non-Android devices with > 4GB RAM', () => {
+      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024, 'ios')).toBe(99);
+      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024, 'ios')).toBe(99);
     });
   });
 

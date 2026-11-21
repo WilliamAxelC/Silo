@@ -78,15 +78,18 @@ function findCategorySpending(userPrompt: string): { category: string | null; da
   };
 }
 
-function getCategorySpending(category: string, days: number) {
+function getCategorySpending(category: string, days: number): { total: number; count: number } {
   const now = Date.now();
   const from = now - days * 24 * 60 * 60 * 1000;
-  const rows = expoDb.getAllSync<{ total: number | null }>(
-    "SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND type != 'transfer' AND category LIKE ? AND date >= ?",
+  const rows = expoDb.getAllSync<{ total: number | null; count?: number | null }>(
+    "SELECT SUM(ABS(total_amount)) as total, COUNT(*) as count FROM ai_transactions_view WHERE total_amount < 0 AND type != 'transfer' AND category LIKE ? AND date >= ?",
     [`%${category}%`, from],
   );
 
-  return rows[0]?.total ?? 0;
+  return {
+    total: rows[0]?.total ?? 0,
+    count: typeof rows[0]?.count === 'number' && Number.isFinite(rows[0].count) ? rows[0].count : 0,
+  };
 }
 
 function getTotalBalance() {
@@ -123,11 +126,44 @@ function scoreCandidate(userPrompt: string, haystack: string) {
 }
 
 export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[] {
-  // Use FTS5 to find matches if possible.
-  const keywords = userPrompt.replace(/[^\w\s]/g, ' ').trim().split(/\s+/).filter(w => w.length > 2);
-  const matchQuery = keywords.length > 0 ? keywords.map(w => `"${w}"*`).join(' OR ') : '';
+  const { category, days } = findCategorySpending(userPrompt);
+  const asksBalance = /balance|money left|overall|net worth|have left/i.test(userPrompt);
+  const wantsRecent = /recent|latest|last|history|list|transactions/i.test(userPrompt);
 
-  let ftsResults: any[] = [];
+  if (asksBalance) {
+    const totalBalance = getTotalBalance();
+    return [
+      {
+        id: 'balance-total',
+        kind: 'balance',
+        label: 'Total balance',
+        content: `Total balance: ${formatCurrency(totalBalance)}.`,
+        score: 200,
+      },
+    ];
+  }
+
+  const categorySummary = category ? getCategorySpending(category, days) : null;
+  if (category && categorySummary && categorySummary.total > 0) {
+    const countSuffix = categorySummary.count > 0
+      ? ` (${categorySummary.count} ${categorySummary.count === 1 ? 'transaction' : 'transactions'})`
+      : '';
+    return [
+      {
+        id: `category-${category.toLowerCase()}`,
+        kind: 'category-spending',
+        label: `${category} spending`,
+        content: `Total spent on ${category} (last ${days}d): ${formatCurrency(categorySummary.total)}${countSuffix}.`,
+        score: 200,
+      },
+    ];
+  }
+
+  const tokens = tokenizePrompt(userPrompt);
+  const ftsKeywords = tokens.filter((w) => w.length > 2);
+  const matchQuery = ftsKeywords.length > 0 ? ftsKeywords.map((w) => `"${w}"*`).join(' OR ') : '';
+
+  let ftsResults: Array<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>> = [];
   if (matchQuery) {
     try {
       ftsResults = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
@@ -136,62 +172,86 @@ export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[
          JOIN ai_transactions_view v ON fts.rowid = v.transaction_id
          WHERE transactions_fts MATCH ?
          ORDER BY rank
-         LIMIT 20`,
-        [matchQuery]
+         LIMIT 10`,
+        [matchQuery],
       );
     } catch (e) {
       console.warn('FTS query failed, falling back to manual scoring.', e);
     }
   }
 
-  if (ftsResults.length === 0) {
-    ftsResults = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
+  const usedFts = ftsResults.length > 0;
+  let candidateRows = ftsResults;
+  if (!usedFts) {
+    candidateRows = expoDb.getAllSync<Pick<AITransactionRow, 'transaction_id' | 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>>(
       `SELECT transaction_id, merchant_name, total_amount, category, date, note
        FROM ai_transactions_view
        ORDER BY date DESC
-       LIMIT 40`,
+       LIMIT 20`,
     );
   }
 
-  const contextItems: RetrievedContextItem[] = ftsResults
-    .map((row) => {
-      const content = `${row.merchant_name || 'Unknown merchant'} ${row.category || 'Uncategorized'} ${formatCurrency(row.total_amount)} ${new Date(row.date).toLocaleDateString('en-GB')} ${row.note ?? ''}`;
+  const formatTxFact = (row: Pick<AITransactionRow, 'merchant_name' | 'total_amount' | 'category' | 'date' | 'note'>) => {
+    const merchant = row.merchant_name || 'Unknown';
+    const cat = row.category ? ` (${row.category})` : '';
+    const d = new Date(row.date);
+    const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return trimCollapsedText(`${merchant}${cat}: ${formatCurrency(row.total_amount)} on ${dateStr}`, 110);
+  };
+
+  let transactionItems: RetrievedContextItem[] = candidateRows
+    .map((row, idx) => {
+      const content = formatTxFact(row);
+      const score = usedFts ? 100 - idx : scoreCandidate(userPrompt, `${row.merchant_name || ''} ${row.category || ''} ${row.note || ''}`);
       return {
         id: `tx-${row.transaction_id}`,
         kind: 'transaction' as const,
         label: row.merchant_name || 'Unknown merchant',
         content,
-        score: matchQuery ? 100 : scoreCandidate(userPrompt, content), // FTS matches get static high score
+        score,
       };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
 
-  const { category, days } = findCategorySpending(userPrompt);
-  if (category) {
-    const total = getCategorySpending(category, days);
+  if (transactionItems.length === 0 && candidateRows.length > 0 && !category) {
+    const recentLimit = wantsRecent ? QWEN_MODEL_RETRIEVAL_ITEM_LIMIT : Math.min(2, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
+    transactionItems = candidateRows.slice(0, recentLimit).map((row, idx) => ({
+      id: `tx-${row.transaction_id}`,
+      kind: 'transaction' as const,
+      label: row.merchant_name || 'Unknown merchant',
+      content: formatTxFact(row),
+      score: (wantsRecent ? 40 : 5) - idx,
+    }));
+  }
+
+  const contextItems: RetrievedContextItem[] = [...transactionItems];
+
+  if (category && transactionItems.length === 0) {
     contextItems.unshift({
       id: `category-${category.toLowerCase()}`,
       kind: 'category-spending',
       label: `${category} spending`,
-      content: `You spent ${formatCurrency(total)} on ${category} in the last ${days} days.`,
+      content: `Total spent on ${category} (last ${days}d): ${formatCurrency(0)}.`,
+      score: 200,
+    });
+  }
+
+  if (!category && !wantsRecent) {
+    const totalBalance = getTotalBalance();
+    contextItems.push({
+      id: 'balance-total',
+      kind: 'balance',
+      label: 'Total balance',
+      content: `Total balance: ${formatCurrency(totalBalance)}.`,
       score: 10,
     });
   }
 
-  const totalBalance = getTotalBalance();
-  contextItems.push({
-    id: 'balance-total',
-    kind: 'balance',
-    label: 'Total balance',
-    content: `Current total balance across local records: ${formatCurrency(totalBalance)}.`,
-    score: /balance|money left|overall/i.test(userPrompt) ? 8 : 1,
-  });
-
   return contextItems
     .sort((a, b) => b.score - a.score)
-    .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT + 1);
+    .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
 }
 
 function trimCollapsedText(value: string, maxChars: number) {
@@ -201,19 +261,6 @@ function trimCollapsedText(value: string, maxChars: number) {
   }
 
   return `${collapsed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-function trimPreservedText(value: string, maxChars: number) {
-  const normalized = value
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
 function sanitizeModelText(value: string) {
@@ -302,18 +349,91 @@ function supportsQwenChatTemplate(runtimeInfo: LocalRuntimeInfo | null | undefin
   return family.includes('qwen') || backend.includes('qwen') || loadedPath.includes('qwen');
 }
 
-function buildQwenChatPrompt(userPrompt: string, chatHistory: Message[], systemPrompt: string) {
-  const { activeTurns, summaryText } = manageContextWindow(chatHistory);
-  const effectiveSystemPrompt = summaryText ? `${systemPrompt}\n\n${summaryText}` : systemPrompt;
-  const segments = [`<|im_start|>system\n${escapeChatSegment(effectiveSystemPrompt)}<|im_end|>`];
+const MAX_LOCAL_HISTORY_TURN_CHARS = 180;
+const MAX_LOCAL_SUMMARY_CHARS = 220;
+const MAX_LOCAL_USER_PROMPT_CHARS = 450;
+const DEFAULT_LOCAL_SYSTEM_PROMPT =
+  'You are Silo AI, a concise offline personal finance assistant. Reply in 2-4 short sentences or brief bullets; never invent balances or transactions.';
+const DEFAULT_GROUNDED_SYSTEM_PROMPT =
+  'You are Silo AI, an offline finance assistant. Answer only from the grounded local finance facts below in 1-2 short sentences. If insufficient, say you do not have enough local evidence.';
 
-  activeTurns.forEach((message) => {
-    const role = message.role === 'user' ? 'user' : 'assistant';
-    segments.push(`<|im_start|>${role}\n${escapeChatSegment(message.text)}<|im_end|>`);
-  });
+function buildCompactContextBlock(retrievedContext: RetrievedContextItem[], maxChars = QWEN_MODEL_MAX_RAG_CONTEXT_CHARS): string {
+  const lines: string[] = [];
+  let usedChars = 0;
 
-  segments.push(`<|im_start|>user\n${escapeChatSegment(userPrompt)}<|im_end|>`);
-  segments.push('<|im_start|>assistant\n');
+  for (const item of retrievedContext.slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT)) {
+    const line = `- ${trimCollapsedText(item.content, 140)}`;
+    const extra = lines.length > 0 ? line.length + 1 : line.length;
+    if (lines.length > 0 && usedChars + extra > maxChars) {
+      break;
+    }
+    if (lines.length === 0 && line.length > maxChars) {
+      lines.push(trimCollapsedText(line, maxChars));
+      break;
+    }
+    lines.push(line);
+    usedChars += extra;
+  }
+
+  return lines.join('\n');
+}
+
+function getTrimmedHistoryForPrompt(userPrompt: string, state: ReturnType<typeof useAIStore.getState>): Message[] {
+  const historyForPrompt = state.chatHistory.filter((msg) => msg.status !== 'streaming');
+  if (historyForPrompt.length > 0) {
+    const lastMsg = historyForPrompt[historyForPrompt.length - 1];
+    if (lastMsg.role === 'user' && lastMsg.text === userPrompt) {
+      historyForPrompt.pop();
+    }
+  }
+  return historyForPrompt;
+}
+
+function fitMessagesWithinCharBudget(
+  systemContent: string,
+  historyMessages: ExternalChatMessage[],
+  userContent: string,
+  maxChars: number,
+): ExternalChatMessage[] {
+  const safeUser = trimCollapsedText(userContent, MAX_LOCAL_USER_PROMPT_CHARS);
+  const fixedChars = systemContent.length + safeUser.length;
+  const remainingBudget = Math.max(0, maxChars - fixedChars);
+
+  const keptHistory: ExternalChatMessage[] = [];
+  let usedHistoryChars = 0;
+  for (let i = historyMessages.length - 1; i >= 0; i -= 1) {
+    const msg = historyMessages[i];
+    const trimmedContent = trimCollapsedText(msg.content, MAX_LOCAL_HISTORY_TURN_CHARS);
+    if (usedHistoryChars + trimmedContent.length > remainingBudget) {
+      break;
+    }
+    keptHistory.unshift({ role: msg.role, content: trimmedContent });
+    usedHistoryChars += trimmedContent.length;
+  }
+
+  return [
+    { role: 'system', content: systemContent },
+    ...keptHistory,
+    { role: 'user', content: safeUser },
+  ];
+}
+
+function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], customSystemPrompt: string) {
+  const contextBlock = buildCompactContextBlock(retrievedContext, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
+  if (customSystemPrompt) {
+    return [
+      customSystemPrompt,
+      'Answer only from the grounded local finance facts below. If insufficient, say you do not have enough local evidence.',
+      `Grounded local facts:\n${contextBlock}`,
+    ].join('\n\n');
+  }
+  return `${DEFAULT_GROUNDED_SYSTEM_PROMPT}\n\nGrounded local facts:\n${contextBlock}`;
+}
+
+function buildQwenChatPromptFromMessages(messages: ExternalChatMessage[]) {
+  const segments = messages.map((message) => `<|im_start|>${message.role}\n${escapeChatSegment(message.content)}<|im_end|>`);
+  // Explicit empty think block disables Qwen3.5 thinking mode on raw-prompt paths too.
+  segments.push('<|im_start|>assistant\n<think>\n\n</think>\n\n');
   return segments.join('\n');
 }
 
@@ -329,54 +449,49 @@ function buildFallbackChatPrompt(userPrompt: string, chatHistory: Message[], sys
     .join('\n\n');
 }
 
-function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], baseSystemPrompt: string) {
-  const contextBlock = trimCollapsedText(
-    retrievedContext
-      .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT)
-      .map((item) => `- ${trimCollapsedText(item.content, 320)}`)
-      .join('\n'),
-    QWEN_MODEL_MAX_RAG_CONTEXT_CHARS,
+export function buildLocalMessagesForMode(
+  userPrompt: string,
+  mode: LocalAiMode,
+  state: ReturnType<typeof useAIStore.getState>,
+  retrievedContext?: RetrievedContextItem[],
+): ExternalChatMessage[] {
+  const customSystemPrompt = useSettingsStore.getState().localSystemPrompt;
+  let systemPrompt = customSystemPrompt || DEFAULT_LOCAL_SYSTEM_PROMPT;
+
+  if (mode === 'rag' && retrievedContext) {
+    systemPrompt = buildGroundedSystemPrompt(retrievedContext, customSystemPrompt);
+  }
+
+  const historyForPrompt = getTrimmedHistoryForPrompt(userPrompt, state);
+  const { activeTurns, summaryText } = manageContextWindow(historyForPrompt);
+  const compactSummary = mode === 'chat' && summaryText ? trimCollapsedText(summaryText, MAX_LOCAL_SUMMARY_CHARS) : null;
+  const effectiveSystemPrompt = compactSummary ? `${systemPrompt}\n\n${compactSummary}` : systemPrompt;
+
+  const historyMessages: ExternalChatMessage[] = activeTurns.map((msg) => ({
+    role: msg.role === 'user' ? 'user' : 'assistant',
+    content: msg.text,
+  }));
+
+  return fitMessagesWithinCharBudget(
+    effectiveSystemPrompt,
+    historyMessages,
+    userPrompt,
+    QWEN_MODEL_MAX_PROMPT_CHARS,
   );
-  return [
-    baseSystemPrompt,
-    'Answer only from the grounded local finance facts below.',
-    'If the facts are insufficient, say that you do not have enough local evidence.',
-    `Grounded local facts:\n${contextBlock}`,
-    'Respond in 3 short paragraphs or fewer.',
-  ].join('\n\n');
 }
 
 export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state: ReturnType<typeof useAIStore.getState>, retrievedContext?: RetrievedContextItem[]) {
   const runtimeInfo = state.runtime.runtimeInfo;
-  const customSystemPrompt = useSettingsStore.getState().localSystemPrompt;
-  const defaultSystemPrompt = [
-    'You are Silo AI, an offline finance assistant running locally on this Android device.',
-    'Be concise, practical, and honest about uncertainty.',
-    'Do not invent balances, transactions, or categories that are not present in the local app data.',
-    'For exact numeric finance queries, the app handles deterministic answers before you are called.',
-  ].join(' ');
-  
-  let systemPrompt = customSystemPrompt || defaultSystemPrompt;
-  
-  if (mode === 'rag' && retrievedContext) {
-    systemPrompt = buildGroundedSystemPrompt(retrievedContext, systemPrompt);
+  const localMessages = buildLocalMessagesForMode(userPrompt, mode, state, retrievedContext);
+
+  if (supportsQwenChatTemplate(runtimeInfo)) {
+    return buildQwenChatPromptFromMessages(localMessages);
   }
 
-  const historyForPrompt = state.chatHistory.filter(msg => msg.status !== 'streaming');
-  if (historyForPrompt.length > 0) {
-    const lastMsg = historyForPrompt[historyForPrompt.length - 1];
-    if (lastMsg.role === 'user' && lastMsg.text === userPrompt) {
-      historyForPrompt.pop();
-    }
-  }
-
-  const rawPrompt = supportsQwenChatTemplate(runtimeInfo)
-    ? buildQwenChatPrompt(trimCollapsedText(userPrompt, 500), historyForPrompt, systemPrompt)
-    : buildFallbackChatPrompt(trimCollapsedText(userPrompt, 500), historyForPrompt, systemPrompt);
-
-  return supportsQwenChatTemplate(runtimeInfo)
-    ? trimPreservedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS)
-    : trimCollapsedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS);
+  const historyForPrompt = getTrimmedHistoryForPrompt(userPrompt, state);
+  const systemMessage = localMessages[0]?.content ?? DEFAULT_LOCAL_SYSTEM_PROMPT;
+  const rawPrompt = buildFallbackChatPrompt(trimCollapsedText(userPrompt, MAX_LOCAL_USER_PROMPT_CHARS), historyForPrompt, systemMessage);
+  return trimCollapsedText(rawPrompt, QWEN_MODEL_MAX_PROMPT_CHARS);
 }
 
 export interface ExternalChatMessage {

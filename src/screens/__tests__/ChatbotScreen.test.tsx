@@ -240,13 +240,14 @@ describe('ChatbotScreen', () => {
     });
   });
 
-  it('does not schedule model unload when toggling modes and cleans up on screen leave', () => {
+  it('starts preloading on mount in Grounded mode, avoids unloading when toggling modes, and cleans up on screen leave', () => {
     let renderer: any;
     ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(<ChatbotScreen />);
     });
 
     expect(mockCancelScheduledUnload).toHaveBeenCalledTimes(1);
+    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
     expect(mockScheduleModelUnload).not.toHaveBeenCalled();
 
     const chatToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Chat mode' });
@@ -261,6 +262,7 @@ describe('ChatbotScreen', () => {
     ReactTestRenderer.act(() => {
       ragToggle.props.onPress();
     });
+    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
     expect(mockScheduleModelUnload).not.toHaveBeenCalled();
 
     ReactTestRenderer.act(() => {
@@ -268,6 +270,62 @@ describe('ChatbotScreen', () => {
     });
     expect(mockClearRequest).toHaveBeenCalled();
     expect(mockScheduleModelUnload).toHaveBeenCalledWith(30000);
+  });
+
+  it('passes disableThinking: true when sending messages in both Grounded and Chat modes', async () => {
+    const runtime = createInitialRuntimeSnapshot();
+    runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
+    runtime.modelLoaded = true;
+    runtime.generationHealthy = true;
+    runtime.runtimeState = 'healthy';
+    mockStartGeneration.mockResolvedValue('Done');
+
+    useAIStore.setState({
+      selectedMode: 'rag',
+      provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
+      runtime,
+      runtimeReady: true,
+    });
+
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      const ragSuggestion = renderer.root.findByProps({ accessibilityLabel: 'What is my total balance?' });
+      await ReactTestRenderer.act(async () => {
+        await ragSuggestion.props.onPress();
+      });
+      expect(mockStartGeneration).toHaveBeenLastCalledWith({
+        prompt: 'What is my total balance?',
+        mode: 'rag',
+        disableThinking: true,
+      });
+
+      const chatToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Chat mode' });
+      ReactTestRenderer.act(() => {
+        chatToggle.props.onPress();
+      });
+
+      const input = renderer.root.findByType(TextInput);
+      ReactTestRenderer.act(() => {
+        input.props.onChangeText('How can I save 20% of my income?');
+      });
+      const sendBtn = renderer.root.findByProps({ accessibilityLabel: 'Send message' });
+      await ReactTestRenderer.act(async () => {
+        await sendBtn.props.onPress();
+      });
+      expect(mockStartGeneration).toHaveBeenLastCalledWith({
+        prompt: 'How can I save 20% of my income?',
+        mode: 'chat',
+        disableThinking: true,
+      });
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+    }
   });
 
   it('shows Setup failed instead of Load failed when a model download fails', () => {

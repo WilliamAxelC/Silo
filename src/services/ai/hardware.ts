@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { useAIStore } from '../../store/useAIStore';
 import { getActiveModelConfig } from './config';
@@ -5,6 +6,7 @@ import { getActiveModelConfig } from './config';
 export const LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES = 4 * 1024 * 1024 * 1024;
 export const MODEL_MEMORY_MULTIPLIER = 1.5;
 export const MAX_MODEL_RAM_FRACTION = 0.6;
+export const DEFAULT_BIG_CORE_CPU_THREADS = 4;
 export const FALLBACK_CPU_THREAD_COUNT = 4;
 export const MIN_CPU_THREAD_COUNT = 2;
 export const MAX_CPU_THREAD_COUNT = 6;
@@ -142,31 +144,62 @@ export async function canLoadModelWithinMemoryBudget(modelFileSizeBytes: number)
   return buildMemoryBudget(totalMemoryBytes, modelFileSizeBytes).withinBudget;
 }
 
-export function resolveRecommendedCpuThreads(totalMemoryBytes: number, explicitThreadCount?: number | null): number {
+export function getDeviceCpuCoreCount(): number | null {
+  const hardwareConcurrency = (globalThis as { navigator?: { hardwareConcurrency?: unknown } }).navigator
+    ?.hardwareConcurrency;
+  if (typeof hardwareConcurrency === 'number' && Number.isFinite(hardwareConcurrency) && hardwareConcurrency >= 1) {
+    return Math.floor(hardwareConcurrency);
+  }
+  return null;
+}
+
+/**
+ * Selects CPU threads from CPU core topology rather than RAM size.
+ * On typical 4–8 core big.LITTLE Android phones, 4 threads targets the big/performance
+ * cores without spilling onto slow LITTLE cores (llama.rn pins threads to the highest
+ * max-frequency cores and clamps to hardware_concurrency() natively).
+ */
+export function resolveRecommendedCpuThreads(
+  cpuCoreCount?: number | null,
+  explicitThreadCount?: number | null,
+): number {
   if (Number.isFinite(explicitThreadCount) && explicitThreadCount && explicitThreadCount > 0) {
     return Math.max(MIN_CPU_THREAD_COUNT, Math.min(Math.floor(explicitThreadCount), MAX_CPU_THREAD_COUNT));
   }
 
-  if (!Number.isFinite(totalMemoryBytes) || totalMemoryBytes <= 0) {
+  if (typeof cpuCoreCount !== 'number' || !Number.isFinite(cpuCoreCount) || cpuCoreCount <= 0) {
     return FALLBACK_CPU_THREAD_COUNT;
   }
 
-  const totalMemoryGb = totalMemoryBytes / (1024 * 1024 * 1024);
-  if (totalMemoryGb <= 4) {
-    return 2;
+  const cores = Math.floor(cpuCoreCount);
+  if (cores <= MIN_CPU_THREAD_COUNT) {
+    return MIN_CPU_THREAD_COUNT;
   }
 
-  if (totalMemoryGb <= 6) {
-    return 3;
+  if (cores <= DEFAULT_BIG_CORE_CPU_THREADS) {
+    return cores;
   }
 
-  if (totalMemoryGb <= 8) {
-    return 4;
+  if (cores <= 8) {
+    return DEFAULT_BIG_CORE_CPU_THREADS;
   }
 
-  return MAX_CPU_THREAD_COUNT;
+  return Math.max(
+    DEFAULT_BIG_CORE_CPU_THREADS,
+    Math.min(MAX_CPU_THREAD_COUNT, Math.floor(cores / 2)),
+  );
 }
 
-export function getGpuLayersForDevice(totalMemoryBytes: number): number {
+/**
+ * llama.rn 0.12.1 Android GPU offload uses OpenCL, which only supports Qualcomm Adreno 700+
+ * GPUs with Q4_0/Q6_K weights (and requires libOpenCL.so in AndroidManifest.xml).
+ * Silo ships Q4_K_M models where CPU (ARMv8.2 dotprod/i8mm) avoids OpenCL init overhead,
+ * dequant/copy slowdowns on 0.8B models, and double-load GPU fallbacks.
+ */
+export function getGpuLayersForDevice(totalMemoryBytes: number, platform: string = Platform.OS): number {
+  if (platform === 'android') {
+    return 0;
+  }
+
   return totalMemoryBytes <= LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES ? 0 : 99;
 }

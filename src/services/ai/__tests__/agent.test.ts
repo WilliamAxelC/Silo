@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import {
   buildPromptForMode,
+  buildLocalMessagesForMode,
   buildExternalMessagesForMode,
   estimateTokenCount,
   manageContextWindow,
@@ -8,6 +9,7 @@ import {
   analyzeReceiptImage,
   type RetrievedContextItem,
 } from '../agent';
+import { QWEN_MODEL_MAX_PROMPT_CHARS, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT } from '../config';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAIStore } from '../../../store/useAIStore';
 import { getGenerationService } from '../generationService';
@@ -181,7 +183,7 @@ describe('AI Agent & Context Engine', () => {
       expect(prompt).toContain('<|im_start|>user\nHello<|im_end|>');
       expect(prompt).toContain('<|im_start|>assistant\nHi there<|im_end|>');
       expect(prompt).toContain('<|im_start|>user\nWhat is my balance?<|im_end|>');
-      expect(prompt).toContain('<|im_start|>assistant\n');
+      expect(prompt.endsWith('<|im_start|>assistant\n<think>\n\n</think>\n\n')).toBe(true);
     });
 
     it('strips thinking and internal tokens from prompt', () => {
@@ -218,6 +220,49 @@ describe('AI Agent & Context Engine', () => {
       expect(prompt).toContain('Grounded local facts:');
       expect(prompt).toContain('Coffee Shop Expense Rp 35.000');
       expect(prompt).toContain('Answer only from the grounded local finance facts below.');
+      expect(prompt.endsWith('<|im_start|>assistant\n<think>\n\n</think>\n\n')).toBe(true);
+    });
+  });
+
+  describe('buildLocalMessagesForMode (prompt size budgets)', () => {
+    it('keeps RAG facts compact within QWEN_MODEL_MAX_RAG_CONTEXT_CHARS and preserves the current user prompt', () => {
+      (useSettingsStore.getState as jest.Mock).mockReturnValue({
+        localSystemPrompt: '',
+        externalSystemPrompt: '',
+        aiInferenceMode: 'local',
+      });
+
+      const store = useAIStore.getState();
+      store.chatHistory = Array.from({ length: 10 }, (_, idx) => ({
+        id: `hist-${idx}`,
+        role: (idx % 2 === 0 ? 'user' : 'ai') as 'user' | 'ai',
+        text: `Long historical message number ${idx} `.repeat(20),
+        status: 'complete' as const,
+      }));
+
+      const hugeContext: RetrievedContextItem[] = Array.from({ length: 8 }, (_, idx) => ({
+        id: `tx-${idx}`,
+        kind: 'transaction',
+        label: `Merchant ${idx}`,
+        content: `Merchant ${idx} with long description ${'x'.repeat(160)}`,
+        score: 100 - idx,
+      }));
+
+      const userQuery = 'How much did I spend on food in the last 30 days?';
+      const messages = buildLocalMessagesForMode(userQuery, 'rag', store, hugeContext);
+
+      expect(messages[0].role).toBe('system');
+      expect(messages[messages.length - 1]).toEqual({ role: 'user', content: userQuery });
+
+      const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+      expect(totalChars).toBeLessThanOrEqual(QWEN_MODEL_MAX_PROMPT_CHARS);
+
+      const factsMarker = 'Grounded local facts:\n';
+      const factsIndex = messages[0].content.indexOf(factsMarker);
+      expect(factsIndex).toBeGreaterThan(-1);
+      const factsBlock = messages[0].content.slice(factsIndex + factsMarker.length);
+      expect(factsBlock.length).toBeLessThanOrEqual(QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
+      expect(factsBlock.split('\n').length).toBeLessThanOrEqual(QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
     });
   });
 
@@ -267,6 +312,57 @@ describe('AI Agent & Context Engine', () => {
       expect(items.length).toBeGreaterThan(0);
       expect(items.some((i) => i.content.includes('Supermarket Hero'))).toBe(true);
       expect(items.some((i) => i.kind === 'balance')).toBe(true);
+    });
+
+    it('returns focused category-spending aggregate without redundant rows when category matches', () => {
+      (expoDb.getAllSync as jest.Mock).mockImplementation((sql: string) => {
+        if (sql.includes('SUM(ABS(total_amount))')) {
+          return [{ total: 1_100_004, count: 2 }];
+        }
+        return [
+          { transaction_id: 1, merchant_name: 'Kopi Kenangan', total_amount: -450002, category: 'Food & Dining', date: Date.now(), note: '' },
+          { transaction_id: 2, merchant_name: 'Nasi Padang', total_amount: -650002, category: 'Food & Dining', date: Date.now(), note: '' },
+        ];
+      });
+
+      const items = buildRetrievedContext('How much did I spend on food in the last 30 days?');
+      expect(items).toHaveLength(1);
+      expect(items[0].kind).toBe('category-spending');
+      expect(items[0].content).toContain('1.100.004');
+      expect(items[0].content).toContain('2 transactions');
+    });
+
+    it('falls back to matching merchant transactions when category aggregate is 0', () => {
+      (expoDb.getAllSync as jest.Mock).mockImplementation((sql: string) => {
+        if (sql.includes('SUM(ABS(total_amount))')) {
+          return [{ total: 0, count: 0 }];
+        }
+        if (sql.includes('transactions_fts')) {
+          return [
+            { transaction_id: 3, merchant_name: 'Gojek', total_amount: -350002, category: 'Transport', date: Date.now(), note: '' },
+          ];
+        }
+        return [];
+      });
+
+      const items = buildRetrievedContext('How much did I spend on Gojek?');
+      expect(items.some((i) => i.kind === 'transaction' && i.content.includes('Gojek'))).toBe(true);
+    });
+
+    it('keeps total balance queries focused on the balance aggregate without unrelated transactions', () => {
+      (expoDb.getAllSync as jest.Mock).mockImplementation((sql: string) => {
+        if (sql.includes('FROM wallets')) {
+          return [{ total: 3_549_994 }];
+        }
+        return [
+          { transaction_id: 1, merchant_name: 'Gojek', total_amount: -350002, category: 'Transport', date: Date.now(), note: '' },
+        ];
+      });
+
+      const items = buildRetrievedContext('What is my total balance?');
+      expect(items).toHaveLength(1);
+      expect(items[0].kind).toBe('balance');
+      expect(items[0].content).toContain('3.549.994');
     });
   });
 
