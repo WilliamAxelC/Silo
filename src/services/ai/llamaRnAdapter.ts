@@ -9,10 +9,9 @@ import {
 
 import {
   QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-  QWEN_MODEL_DEFAULT_CPU_THREADS,
+  QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
   QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
   QWEN_MODEL_STOP_TOKENS,
-  QWEN_MODEL_WARMUP_PROMPT,
   isSupportedLocalModelPath,
 } from './config';
 import {
@@ -26,6 +25,7 @@ import {
   canLoadModelWithinMemoryBudget,
   getGpuLayersForDevice,
   getTotalDeviceMemoryBytes,
+  parseResolvedThreadsFromSystemInfo,
   resolveRecommendedCpuThreads,
 } from './hardware';
 import { getVisionProjectorUri } from './modelLifecycle';
@@ -48,6 +48,7 @@ export type LlamaRnInitParams = {
   modelPath: string;
   modelFileSizeBytes: number;
   contextTokens?: number;
+  onProgress?: (progress: number) => void;
 };
 
 type FileInfoResult = {
@@ -61,7 +62,6 @@ type FileSystemLegacyModule = typeof ExpoFileSystemLegacy & {
 };
 
 const FileSystemModule = ExpoFileSystemLegacy as FileSystemLegacyModule;
-const LLAMA_RN_WARMUP_TIMEOUT_MS = 8_000;
 
 function toRuntimeError(code: LocalInferenceError['code'], message: string, details?: Record<string, unknown>): LocalInferenceError {
   return new LocalInferenceException(
@@ -145,21 +145,6 @@ function logLlamaRuntimeWarning(event: string, details: Record<string, unknown>)
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  });
-}
-
 function hasImageMessagePart(messages?: RNLlamaOAICompatibleMessage[]): boolean {
   if (!messages || !Array.isArray(messages)) {
     return false;
@@ -182,7 +167,7 @@ class LlamaRnAdapter {
   private lastCompletionText = '';
   private lastRuntimeInfo: LocalRuntimeInfo | null = null;
 
-  async initContext({ modelPath, modelFileSizeBytes, contextTokens }: LlamaRnInitParams): Promise<void> {
+  async initContext({ modelPath, modelFileSizeBytes, contextTokens, onProgress }: LlamaRnInitParams): Promise<void> {
     const normalizedModelPath = normalizeModelPath(modelPath);
     const requestedContextTokens = Math.max(contextTokens ?? 0, QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS);
     if (this.context && this.initializedModelPath === normalizedModelPath && this.configuredContextTokens >= requestedContextTokens) {
@@ -227,28 +212,39 @@ class LlamaRnAdapter {
 
       await this.dispose();
 
-      const resolvedCpuThreads = resolveRecommendedCpuThreads(totalMemoryBytes);
+      const requestedCpuThreads = resolveRecommendedCpuThreads();
       const requestedGpuLayers = getGpuLayersForDevice(totalMemoryBytes);
       let resolvedGpuLayers = requestedGpuLayers;
       let gpuAttemptFailed = false;
+      const flashAttnType = QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION ? ('auto' as const) : ('off' as const);
+      const progressCallback = onProgress
+        ? (progress: number) => {
+            onProgress(Math.max(0, Math.min(100, Math.round(progress))));
+          }
+        : undefined;
 
       const baseInitParams = {
         model: normalizedModelPath,
-        use_progress_callback: false,
+        use_progress_callback: Boolean(progressCallback),
         n_ctx: requestedContextTokens,
         n_batch: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-        n_threads: resolvedCpuThreads,
+        n_ubatch: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
+        n_threads: requestedCpuThreads,
         use_mlock: false,
         use_mmap: true,
-        flash_attn_type: 'off' as const,
+        flash_attn_type: flashAttnType,
       };
 
       let context: LlamaContext;
       try {
-        context = await initLlama({
-          ...baseInitParams,
-          n_gpu_layers: requestedGpuLayers,
-        });
+        context = await initLlama(
+          {
+            ...baseInitParams,
+            n_gpu_layers: requestedGpuLayers,
+            ...(requestedGpuLayers <= 0 ? { no_gpu_devices: true } : {}),
+          },
+          progressCallback,
+        );
       } catch (error) {
         if (requestedGpuLayers <= 0) {
           throw error;
@@ -258,23 +254,29 @@ class LlamaRnAdapter {
         resolvedGpuLayers = 0;
         logLlamaRuntimeWarning('gpu-init-fallback', {
           requestedGpuLayers,
-          resolvedCpuThreads,
+          requestedCpuThreads,
           message: error instanceof Error ? error.message : String(error),
         });
-        context = await initLlama({
-          ...baseInitParams,
-          n_gpu_layers: 0,
-        });
+        context = await initLlama(
+          {
+            ...baseInitParams,
+            n_gpu_layers: 0,
+            no_gpu_devices: true,
+          },
+          progressCallback,
+        );
       }
 
+      const resolvedCpuThreads = parseResolvedThreadsFromSystemInfo(context.systemInfo) ?? requestedCpuThreads;
+      const gpuActuallyEnabled = Boolean(context.gpu) && resolvedGpuLayers > 0;
       this.context = context;
       this.initializedModelPath = normalizedModelPath;
       this.initializedModelFileSizeBytes = resolvedModelFileSizeBytes;
       this.configuredContextTokens = requestedContextTokens;
-      this.resolvedGpuLayers = resolvedGpuLayers;
+      this.resolvedGpuLayers = gpuActuallyEnabled ? resolvedGpuLayers : 0;
       this.multimodalInitialized = false;
       this.lastRuntimeInfo = {
-        backend: resolvedGpuLayers > 0 ? 'llama.rn' : 'llama.rn-cpu',
+        backend: gpuActuallyEnabled ? 'llama.rn' : 'llama.rn-cpu',
         version: null,
         supportsStreaming: true,
         maxContextTokens: requestedContextTokens,
@@ -284,62 +286,28 @@ class LlamaRnAdapter {
         isModelLoaded: true,
         abi: null,
         configuredContextTokens: requestedContextTokens,
-        configuredCpuThreads: resolvedCpuThreads,
-        configuredGpuLayers: resolvedGpuLayers,
+        configuredCpuThreads: requestedCpuThreads,
+        configuredGpuLayers: this.resolvedGpuLayers,
         configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-        configuredUseFlashAttention: false,
+        configuredUseFlashAttention: QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
         configuredUseMlock: false,
         resolvedContextTokens: requestedContextTokens,
         resolvedBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
+        resolvedMicroBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         resolvedThreads: resolvedCpuThreads,
         estimatedGpuOffloadRequested: requestedGpuLayers > 0,
-        gpuOffloadSupportedByBuild: resolvedGpuLayers > 0,
-        detectedBackendSummary: resolvedGpuLayers > 0
+        gpuOffloadSupportedByBuild: gpuActuallyEnabled,
+        detectedBackendSummary: gpuActuallyEnabled
           ? `llama.rn with ${resolvedGpuLayers} requested GPU layers and ${resolvedCpuThreads} CPU threads`
-          : `llama.rn CPU fallback with ${resolvedCpuThreads} CPU threads${gpuAttemptFailed ? ' after GPU init fallback' : ''}`,
-        likelyCpuOnlyRuntime: resolvedGpuLayers <= 0,
+          : `llama.rn CPU runtime with ${resolvedCpuThreads} CPU threads${gpuAttemptFailed ? ' after GPU init fallback' : ''}`,
+        likelyCpuOnlyRuntime: !gpuActuallyEnabled,
       };
-
-      await this.runWarmup(context, resolvedCpuThreads);
     })();
 
     try {
       await this.initPromise;
     } finally {
       this.initPromise = null;
-    }
-  }
-
-  private async runWarmup(context: LlamaContext, resolvedCpuThreads: number): Promise<void> {
-    const startedAtMs = Date.now();
-    try {
-      await withTimeout(
-        context.completion({
-          prompt: QWEN_MODEL_WARMUP_PROMPT,
-          stop: [...QWEN_MODEL_STOP_TOKENS],
-          n_predict: 1,
-          temperature: 0,
-          top_p: 0.1,
-        }),
-        LLAMA_RN_WARMUP_TIMEOUT_MS,
-        'llama.rn warmup',
-      );
-
-      this.lastRuntimeInfo = this.lastRuntimeInfo
-        ? {
-            ...this.lastRuntimeInfo,
-            lastTotalDurationMs: Date.now() - startedAtMs,
-            lastStopReason: 'warmup-complete',
-            resolvedThreads: resolvedCpuThreads,
-          }
-        : this.lastRuntimeInfo;
-    } catch (error) {
-      await context.stopCompletion().catch(() => undefined);
-      logLlamaRuntimeWarning('warmup-skipped', {
-        durationMs: Date.now() - startedAtMs,
-        resolvedCpuThreads,
-        message: error instanceof Error ? error.message : String(error),
-      });
     }
   }
 
@@ -564,12 +532,12 @@ class LlamaRnAdapter {
       supportsStreaming: true,
       maxContextTokens: contextTokens,
       configuredContextTokens: contextTokens,
-      configuredCpuThreads: resolveRecommendedCpuThreads(0, QWEN_MODEL_DEFAULT_CPU_THREADS),
+      configuredCpuThreads: resolveRecommendedCpuThreads(),
       configuredGpuLayers: 0,
       configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-      configuredUseFlashAttention: false,
+      configuredUseFlashAttention: QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
       configuredUseMlock: false,
-      resolvedThreads: resolveRecommendedCpuThreads(0, QWEN_MODEL_DEFAULT_CPU_THREADS),
+      resolvedThreads: resolveRecommendedCpuThreads(),
       likelyCpuOnlyRuntime: true,
       isModelLoaded: Boolean(this.context),
       loadedModelPath: this.initializedModelPath,

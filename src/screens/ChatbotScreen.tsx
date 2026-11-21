@@ -82,7 +82,12 @@ const MessageBubble = React.memo(function MessageBubble({
   const markdownStyles = useMemo(
     () => ({
       body: { fontSize: 15, color: theme.text, lineHeight: 22 },
+      paragraph: { marginTop: 2, marginBottom: 6, width: undefined },
       code_inline: { backgroundColor: theme.background, color: theme.primary },
+      bullet_list_icon: { marginLeft: 4, marginRight: 8 },
+      ordered_list_icon: { marginLeft: 4, marginRight: 8 },
+      bullet_list_content: { flex: undefined, flexGrow: 0, flexShrink: 1 },
+      ordered_list_content: { flex: undefined, flexGrow: 0, flexShrink: 1 },
     }),
     [theme.background, theme.primary, theme.text]
   );
@@ -332,13 +337,18 @@ export const ChatbotScreen = () => {
       return;
     }
 
-    if (selectedMode === 'chat' && aiInferenceMode === 'local') {
-      setChatRuntimeRequested(true);
+    if (aiInferenceMode === 'local') {
       void chatRuntimePreloadService.requestPreload();
     } else {
       chatRuntimePreloadService.clearRequest();
     }
-  }, [aiInferenceMode, chatRuntimePreloadService, isScreenFocused, selectedMode]);
+  }, [aiInferenceMode, chatRuntimePreloadService, isScreenFocused]);
+
+  useEffect(() => {
+    if (isScreenFocused && selectedMode === 'chat' && aiInferenceMode === 'local') {
+      setChatRuntimeRequested(true);
+    }
+  }, [aiInferenceMode, isScreenFocused, selectedMode]);
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
@@ -554,7 +564,11 @@ export const ChatbotScreen = () => {
     });
 
     try {
-      const responseText = await generationService.startGeneration({ prompt: userQuery, mode: aiMode as LocalAiMode });
+      const responseText = await generationService.startGeneration({
+        prompt: userQuery,
+        mode: aiMode as LocalAiMode,
+        disableThinking: true,
+      });
       const durationMs = Date.now() - startedAt;
       updateChatMessage(assistantMessageId, {
         text: responseText,

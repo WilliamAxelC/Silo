@@ -6,12 +6,13 @@ import {
   buildMemoryBudget,
   canLoadModelWithinMemoryBudget,
   resolveRecommendedCpuThreads,
+  parseResolvedThreadsFromSystemInfo,
   getGpuLayersForDevice,
   resolveOptimalQuantization,
   recordMemoryTelemetry,
   QUANTIZATION_PROFILES,
   LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES,
-  FALLBACK_CPU_THREAD_COUNT,
+  DEFAULT_CPU_THREAD_COUNT,
   MIN_CPU_THREAD_COUNT,
   MAX_CPU_THREAD_COUNT,
 } from '../hardware';
@@ -91,51 +92,62 @@ describe('hardware utilities and memory budgeting', () => {
   });
 
   describe('resolveRecommendedCpuThreads', () => {
-    it('allocates 2 threads for devices with <= 4GB RAM', () => {
-      const ram4Gb = 4 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram4Gb)).toBe(2);
-
-      const ram3Gb = 3 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram3Gb)).toBe(2);
+    it('returns the fixed default of 4 threads on Android and mobile when no explicit override is given', () => {
+      expect(resolveRecommendedCpuThreads()).toBe(DEFAULT_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(undefined, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(null, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(0, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(-2, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(NaN, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(undefined, 'ios')).toBe(4);
     });
 
-    it('allocates 3 threads for devices with <= 6GB RAM', () => {
-      const ram6Gb = 6 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram6Gb)).toBe(3);
+    it('clamps explicit thread count within llama.rn safe bounds', () => {
+      expect(resolveRecommendedCpuThreads(1)).toBe(MIN_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(3)).toBe(3);
+      expect(resolveRecommendedCpuThreads(6)).toBe(6);
+      expect(resolveRecommendedCpuThreads(8)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(16)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(3.8)).toBe(3);
+    });
+  });
+
+  describe('parseResolvedThreadsFromSystemInfo', () => {
+    it('extracts natively clamped n_threads from llama.rn systemInfo strings', () => {
+      expect(
+        parseResolvedThreadsFromSystemInfo('system_info: n_threads = 2 (n_threads_batch = 2) / 2 | CPU : NEON'),
+      ).toBe(2);
+      expect(
+        parseResolvedThreadsFromSystemInfo('system_info: n_threads = 4 (n_threads_batch = 4) / 6 | CPU : SSE3'),
+      ).toBe(4);
     });
 
-    it('allocates 4 threads for devices with <= 8GB RAM', () => {
-      const ram8Gb = 8 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram8Gb)).toBe(4);
-    });
-
-    it('allocates max 6 threads for devices with > 8GB RAM', () => {
-      const ram12Gb = 12 * 1024 * 1024 * 1024;
-      expect(resolveRecommendedCpuThreads(ram12Gb)).toBe(MAX_CPU_THREAD_COUNT);
-    });
-
-    it('honors explicit thread count within min/max bounds', () => {
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 5)).toBe(5);
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 1)).toBe(MIN_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(8 * 1024 * 1024 * 1024, 16)).toBe(MAX_CPU_THREAD_COUNT);
-    });
-
-    it('falls back to default thread count on invalid total RAM', () => {
-      expect(resolveRecommendedCpuThreads(0)).toBe(FALLBACK_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(NaN)).toBe(FALLBACK_CPU_THREAD_COUNT);
+    it('returns null for missing or unparseable systemInfo strings', () => {
+      expect(parseResolvedThreadsFromSystemInfo(null)).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo(undefined)).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('')).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('no threads here')).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('n_threads = 0')).toBeNull();
     });
   });
 
   describe('getGpuLayersForDevice', () => {
-    it('disables GPU (returns 0) for low-memory devices (<= 4GB)', () => {
-      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024)).toBe(0);
-      expect(getGpuLayersForDevice(LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES)).toBe(0);
-      expect(getGpuLayersForDevice(2 * 1024 * 1024 * 1024)).toBe(0);
+    it('disables GPU offload (returns 0) on Android regardless of RAM for safe Q4_K_M CPU execution', () => {
+      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024, 'android')).toBe(0);
+      expect(getGpuLayersForDevice(12 * 1024 * 1024 * 1024, 'android')).toBe(0);
     });
 
-    it('enables full GPU offloading (returns 99) for devices with > 4GB RAM', () => {
-      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024)).toBe(99);
-      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024)).toBe(99);
+    it('disables GPU (returns 0) on non-Android low-memory devices (<= 4GB)', () => {
+      expect(getGpuLayersForDevice(4 * 1024 * 1024 * 1024, 'ios')).toBe(0);
+      expect(getGpuLayersForDevice(LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES, 'ios')).toBe(0);
+      expect(getGpuLayersForDevice(2 * 1024 * 1024 * 1024, 'ios')).toBe(0);
+    });
+
+    it('enables full GPU offloading (returns 99) on non-Android devices with > 4GB RAM', () => {
+      expect(getGpuLayersForDevice(6 * 1024 * 1024 * 1024, 'ios')).toBe(99);
+      expect(getGpuLayersForDevice(8 * 1024 * 1024 * 1024, 'ios')).toBe(99);
     });
   });
 

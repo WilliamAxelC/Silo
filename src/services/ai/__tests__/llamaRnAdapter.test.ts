@@ -8,19 +8,23 @@ jest.mock('llama.rn', () => ({
   releaseAllLlama: jest.fn(async () => {}),
 }));
 
-jest.mock('../hardware', () => ({
-  buildMemoryBudget: jest.fn(() => ({
-    totalMemoryBytes: 8 * 1024 ** 3,
-    modelFileSizeBytes: 1_000_000,
-    estimatedRequiredMemoryBytes: 1_500_000,
-    allowedBudgetBytes: 4 * 1024 ** 3,
-    withinBudget: true,
-  })),
-  canLoadModelWithinMemoryBudget: jest.fn(async () => true),
-  getGpuLayersForDevice: jest.fn(() => 0),
-  getTotalDeviceMemoryBytes: jest.fn(async () => 8 * 1024 ** 3),
-  resolveRecommendedCpuThreads: jest.fn(() => 4),
-}));
+jest.mock('../hardware', () => {
+  const actual = jest.requireActual('../hardware');
+  return {
+    buildMemoryBudget: jest.fn(() => ({
+      totalMemoryBytes: 8 * 1024 ** 3,
+      modelFileSizeBytes: 1_000_000,
+      estimatedRequiredMemoryBytes: 1_500_000,
+      allowedBudgetBytes: 4 * 1024 ** 3,
+      withinBudget: true,
+    })),
+    canLoadModelWithinMemoryBudget: jest.fn(async () => true),
+    getGpuLayersForDevice: jest.fn(() => 0),
+    getTotalDeviceMemoryBytes: jest.fn(async () => 8 * 1024 ** 3),
+    parseResolvedThreadsFromSystemInfo: actual.parseResolvedThreadsFromSystemInfo,
+    resolveRecommendedCpuThreads: jest.fn(() => 4),
+  };
+});
 
 jest.mock('../modelLifecycle', () => ({
   getVisionProjectorUri: jest.fn(() => 'file:///mock/models/mmproj-F16.gguf'),
@@ -66,6 +70,93 @@ describe('LlamaRnAdapter', () => {
 
     await getLlamaRnAdapter().dispose();
     jest.clearAllMocks();
+  });
+
+  it('initializes context with fast CPU defaults, no redundant warmup completion, and forwards progress', async () => {
+    const progressValues: number[] = [];
+    (initLlama as jest.Mock).mockImplementationOnce(async (_params, onProgress?: (p: number) => void) => {
+      onProgress?.(25.4);
+      onProgress?.(100);
+      return {
+        gpu: false,
+        completion: mockCompletion,
+        stopCompletion: mockStopCompletion,
+        release: mockRelease,
+        initMultimodal: mockInitMultimodal,
+        releaseMultimodal: mockReleaseMultimodal,
+      };
+    });
+
+    const adapter = getLlamaRnAdapter();
+    await adapter.initContext({
+      modelPath: 'file:///mock/model.gguf',
+      modelFileSizeBytes: 1_000_000,
+      onProgress: (p) => progressValues.push(p),
+    });
+
+    expect(initLlama).toHaveBeenCalledTimes(1);
+    const [initParams, progressCb] = (initLlama as jest.Mock).mock.calls[0];
+    expect(initParams).toEqual(
+      expect.objectContaining({
+        n_ctx: 2048,
+        n_batch: 512,
+        n_ubatch: 512,
+        n_threads: 4,
+        n_gpu_layers: 0,
+        no_gpu_devices: true,
+        flash_attn_type: 'auto',
+        use_progress_callback: true,
+        use_mmap: true,
+        use_mlock: false,
+      }),
+    );
+    expect(typeof progressCb).toBe('function');
+    expect(progressValues).toEqual([25, 100]);
+    expect(mockCompletion).not.toHaveBeenCalled();
+    expect(mockInitMultimodal).not.toHaveBeenCalled();
+    expect(adapter.isMultimodalReady()).toBe(false);
+  });
+
+  it('aligns resolvedThreads in LocalRuntimeInfo with native clamping reported by context.systemInfo', async () => {
+    (initLlama as jest.Mock).mockResolvedValueOnce({
+      gpu: false,
+      systemInfo: 'system_info: n_threads = 2 (n_threads_batch = 2) / 2 | CPU : NEON',
+      completion: mockCompletion,
+      stopCompletion: mockStopCompletion,
+      release: mockRelease,
+      initMultimodal: mockInitMultimodal,
+      releaseMultimodal: mockReleaseMultimodal,
+    });
+
+    const adapter = getLlamaRnAdapter();
+    await adapter.initContext({
+      modelPath: 'file:///mock/model.gguf',
+      modelFileSizeBytes: 1_000_000,
+    });
+
+    const info = await adapter.getRuntimeInfo();
+    expect(info.configuredCpuThreads).toBe(4);
+    expect(info.resolvedThreads).toBe(2);
+    expect(info.detectedBackendSummary).toContain('2 CPU threads');
+  });
+
+  it('does not load the vision projector during text-only chat completions', async () => {
+    const adapter = getLlamaRnAdapter();
+    await adapter.initContext({
+      modelPath: 'file:///mock/model.gguf',
+      modelFileSizeBytes: 1_000_000,
+    });
+
+    await adapter.completion('req-text-only', {
+      messages: [
+        { role: 'system', content: 'You are Silo AI.' },
+        { role: 'user', content: 'How can I save 20%?' },
+      ],
+      disableThinking: true,
+    });
+
+    expect(mockInitMultimodal).not.toHaveBeenCalled();
+    expect(adapter.isMultimodalReady()).toBe(false);
   });
 
   it('passes response_format json_schema and enable_thinking: false with messages to llama.rn', async () => {

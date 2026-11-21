@@ -1,7 +1,12 @@
 import * as ExpoFileSystemLegacy from 'expo-file-system/legacy';
 
 import type { ExternalChatMessage, LocalAiMode } from './agent';
-import { buildPromptForMode, buildRetrievedContext, buildExternalMessagesForMode } from './agent';
+import {
+  buildLocalMessagesForMode,
+  buildPromptForMode,
+  buildRetrievedContext,
+  buildExternalMessagesForMode,
+} from './agent';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -437,14 +442,28 @@ class GenerationService {
       try {
         const modelInfo = await getConfiguredModelInfo();
         this.setState({
-          runtimeStatus: modelInfo.exists ? 'Loading local model into llama.rn...' : 'Checking local model installation...',
+          runtimeStatus: modelInfo.exists ? 'Loading local model (0%)...' : 'Checking local model installation...',
         });
 
         this.applyLlamaRuntimeLoading(await this.llamaRnAdapter.getRuntimeInfo());
+        let lastReportedBucket = -1;
         await this.llamaRnAdapter.initContext({
           modelPath: modelInfo.configuredModelPath,
           modelFileSizeBytes: modelInfo.modelFileSizeBytes,
           contextTokens: options?.minContextTokens,
+          onProgress: (percent) => {
+            const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            const bucket = clamped >= 100 ? 100 : Math.floor(clamped / 5) * 5;
+            if (bucket <= lastReportedBucket) {
+              return;
+            }
+            lastReportedBucket = bucket;
+            this.setState({
+              runtimeStatus: bucket >= 100
+                ? 'Finalizing local model...'
+                : `Loading local model (${bucket}%)...`,
+            });
+          },
         });
 
         const runtimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
@@ -509,7 +528,8 @@ class GenerationService {
   }
 
   private async runGeneration(params: StartGenerationParams): Promise<string> {
-    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema, disableThinking } = params;
+    const { prompt, mode, maxTokens, temperature, topP, stop, bypassChatTemplate, systemPrompt, jsonSchema } = params;
+    const disableThinking = params.disableThinking ?? true;
     if (isSettingsLoadPending()) {
       await waitForSettingsLoaded();
     }
@@ -602,12 +622,7 @@ class GenerationService {
           { role: 'user', content: prompt },
         ];
       } else if (disableThinking) {
-        const formattedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
-        if (formattedPrompt.includes('<|im_start|>')) {
-          preparedMessages = stripChatMlToMessages(formattedPrompt);
-        } else {
-          preparedPrompt = formattedPrompt;
-        }
+        preparedMessages = await this.prepareLocalMessages({ userPrompt: prompt, mode });
       } else {
         preparedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
       }
@@ -660,7 +675,9 @@ class GenerationService {
             });
           }
 
-          const shouldPublish = now - lastStreamUpdateAtMs >= STREAMING_UPDATE_INTERVAL_MS
+          const shouldPublish =
+            lastStreamedText.length === 0
+            || now - lastStreamUpdateAtMs >= STREAMING_UPDATE_INTERVAL_MS
             || text.length - lastRawStreamText.length >= STREAMING_UPDATE_MIN_CHAR_DELTA;
           if (!shouldPublish) {
             return;
@@ -1046,6 +1063,11 @@ class GenerationService {
 
       xhr.send(JSON.stringify(payload));
     });
+  }
+
+  private async prepareLocalMessages({ userPrompt, mode }: PreparePromptParams): Promise<ExternalChatMessage[]> {
+    const retrievedContext = mode === 'rag' ? buildRetrievedContext(userPrompt) : undefined;
+    return buildLocalMessagesForMode(userPrompt, mode, useAIStore.getState(), retrievedContext);
   }
 
   private async preparePrompt({ userPrompt, mode }: PreparePromptParams): Promise<string> {

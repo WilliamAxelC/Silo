@@ -139,14 +139,32 @@ describe('GenerationService', () => {
   });
 
   describe('A8 model path single source of truth', () => {
-    it('falls back to getActiveModelFileUri() when provisioning.modelPath is null', async () => {
-      const service = getGenerationService();
-      await service.ensureChatRuntimeReady();
-
-      expect(adapter.initContext).toHaveBeenCalledWith({
-        modelPath: getActiveModelFileUri(),
-        modelFileSizeBytes: 1024,
+    it('falls back to getActiveModelFileUri() when provisioning.modelPath is null and reports load progress', async () => {
+      const statuses: string[] = [];
+      adapter.initContext.mockImplementationOnce(async ({ onProgress }: { onProgress?: (percent: number) => void }) => {
+        onProgress?.(27);
+        onProgress?.(100);
       });
+
+      const service = getGenerationService();
+      const sub = service.subscribe((snapshot) => {
+        if (snapshot.runtimeStatus) {
+          statuses.push(snapshot.runtimeStatus);
+        }
+      });
+
+      await service.ensureChatRuntimeReady();
+      sub.unsubscribe();
+
+      expect(adapter.initContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelPath: getActiveModelFileUri(),
+          modelFileSizeBytes: 1024,
+          onProgress: expect.any(Function),
+        }),
+      );
+      expect(statuses).toContain('Loading local model (25%)...');
+      expect(statuses).toContain('Finalizing local model...');
     });
   });
 
@@ -347,6 +365,34 @@ describe('GenerationService', () => {
       expect(callArgs.disableThinking).toBe(true);
     });
 
+    it('disables Qwen thinking by default and sends structured messages in both local chat and grounded (rag) modes', async () => {
+      const service = getGenerationService();
+
+      await service.startGeneration({ prompt: 'How can I save 20%?', mode: 'chat' });
+      const chatArgs = adapter.completion.mock.calls[0][1];
+      expect(chatArgs.disableThinking).toBe(true);
+      expect(chatArgs.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'system' }),
+          expect.objectContaining({ role: 'user', content: 'How can I save 20%?' }),
+        ]),
+      );
+      expect(chatArgs.prompt).toBeUndefined();
+      expect(chatArgs.imageUri).toBeUndefined();
+
+      await service.startGeneration({ prompt: 'What is my total balance?', mode: 'rag' });
+      const ragArgs = adapter.completion.mock.calls[1][1];
+      expect(ragArgs.disableThinking).toBe(true);
+      expect(ragArgs.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'system', content: expect.stringContaining('Grounded local facts:') }),
+          expect.objectContaining({ role: 'user', content: 'What is my total balance?' }),
+        ]),
+      );
+      expect(ragArgs.prompt).toBeUndefined();
+      expect(ragArgs.imageUri).toBeUndefined();
+    });
+
     it('keeps bypassChatTemplate working locally while forwarding jsonSchema and disableThinking', async () => {
       const schema = { type: 'object' };
       const service = getGenerationService();
@@ -525,11 +571,14 @@ Kopiko 15000
         disableThinking: true,
       });
 
-      expect(adapter.initContext).toHaveBeenCalledWith({
-        modelPath: getActiveModelFileUri(),
-        modelFileSizeBytes: 1024,
-        contextTokens: 4096,
-      });
+      expect(adapter.initContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelPath: getActiveModelFileUri(),
+          modelFileSizeBytes: 1024,
+          contextTokens: 4096,
+          onProgress: expect.any(Function),
+        }),
+      );
 
       expect(adapter.completion).toHaveBeenCalledTimes(1);
       const completionCall = adapter.completion.mock.calls[0][1];
