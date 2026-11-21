@@ -3,13 +3,13 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation }
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PieChart } from 'react-native-gifted-charts';
 import { Ionicons } from '@expo/vector-icons';
-import { addMonths, isSameMonth } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { formatDisplayCurrency } from '../features/transactions/amount';
+import { formatPeriodLabel, isSamePeriod, shiftPeriod } from '../features/transactions/periods';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NavigationProps } from '../navigation/types';
@@ -62,6 +62,7 @@ export const ReportsScreen = () => {
   const showIncomeInReportsFirst = useSettingsStore((state) => state.showIncomeInReportsFirst);
   const isLoaded = useSettingsStore((state) => state.isLoaded);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
+  const monthStartDay = useSettingsStore((state) => state.monthStartDay);
   const locale = dateFormat || 'en-GB';
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -86,7 +87,7 @@ export const ReportsScreen = () => {
 
   const changeMonth = (offset: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setCurrentDate((prev) => addMonths(prev, offset));
+    setCurrentDate((prev) => shiftPeriod(prev, offset, monthStartDay));
     setExpandedCategories({});
     setSelectedCategoryName(null);
   };
@@ -104,7 +105,7 @@ export const ReportsScreen = () => {
     setSelectedCategoryName((prev) => (prev === category ? null : category));
   };
 
-  const { currentMonthData, totalIncome, totalExpense, balance } = useMonthlySummary(currentDate);
+  const { currentMonthData, totalIncome, totalExpense, balance, periodBounds } = useMonthlySummary(currentDate);
 
   const filteredTransactions = useMemo(() => {
     return currentMonthData.filter(
@@ -148,7 +149,9 @@ export const ReportsScreen = () => {
   }, [categoryData, totalForType, reportType, selectedCategoryName]);
 
   const topCategory = chartData.length > 0 ? chartData[0] : null;
-  const isCurrentMonthNow = isSameMonth(currentDate, new Date());
+  const isCurrentMonthNow = isSamePeriod(currentDate, new Date(), monthStartDay);
+  const periodLabel = formatPeriodLabel(periodBounds, locale);
+  const compactPeriodLabel = formatPeriodLabel(periodBounds, locale, { compact: true });
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -172,8 +175,8 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Jump to current month"
           >
-            <Text style={[styles.monthText, { color: theme.text }]}>
-              {formatLocaleDate(currentDate, locale, { month: 'long', year: 'numeric' })}
+            <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+              {periodLabel}
             </Text>
             {!isCurrentMonthNow && (
               <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
@@ -297,7 +300,7 @@ export const ReportsScreen = () => {
             <View style={[styles.emptyChartCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} style={{ marginBottom: 8 }} />
               <Text style={{ color: theme.textMuted, fontSize: 13, fontWeight: '600' }}>
-                No {reportType} records for {formatLocaleDate(currentDate, locale, { month: 'short', year: 'numeric' })}.
+                No {reportType} records for {compactPeriodLabel}.
               </Text>
             </View>
           )}
@@ -439,8 +442,8 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
-  monthTextWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  monthText: { fontSize: 17, fontWeight: '700' },
+  monthTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
+  monthText: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
   todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   todayBadgeText: { fontSize: 10, fontWeight: '700' },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

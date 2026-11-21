@@ -672,6 +672,78 @@ export function summarizeSearchTransactions(
   }
 }
 
+export interface DailyTotal {
+  /** Local calendar day in YYYY-MM-DD format. */
+  dayKey: string;
+  income: number;
+  expense: number;
+  count: number;
+}
+
+interface DailyTotalSqlRow {
+  dayKey: string | null;
+  income: number | null;
+  expense: number | null;
+  count: number | null;
+}
+
+/**
+ * Aggregates income and expense totals grouped by local calendar day directly in SQL
+ * for all transactions with `date` in [startMs, endMs].
+ * Transfers are excluded from both income and expense totals while still reflected in `count`.
+ */
+export function getDailyTotalsForRange(
+  startMs: number,
+  endMs: number,
+  sqliteDb: typeof expoDb = expoDb
+): DailyTotal[] {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return [];
+  }
+
+  try {
+    const rows = sqliteDb.getAllSync<DailyTotalSqlRow>(
+      `SELECT
+        strftime(
+          '%Y-%m-%d',
+          CASE WHEN t.date >= 0 THEN CAST(t.date AS INTEGER) / 1000 ELSE (CAST(t.date AS INTEGER) - 999) / 1000 END,
+          'unixepoch',
+          'localtime'
+        ) AS dayKey,
+        COALESCE(SUM(CASE
+          WHEN t.type = 'transfer' THEN 0
+          WHEN t.type = 'income' THEN ABS(t.total_amount)
+          WHEN t.type != 'expense' AND t.total_amount > 0 THEN t.total_amount
+          ELSE 0
+        END), 0) AS income,
+        COALESCE(SUM(CASE
+          WHEN t.type = 'transfer' THEN 0
+          WHEN t.type = 'expense' THEN ABS(t.total_amount)
+          WHEN t.type != 'income' AND t.total_amount < 0 THEN ABS(t.total_amount)
+          ELSE 0
+        END), 0) AS expense,
+        COUNT(*) AS count
+      FROM transactions t
+      WHERE t.date >= ? AND t.date <= ?
+      GROUP BY dayKey
+      ORDER BY dayKey ASC;`,
+      [startMs, endMs]
+    );
+
+    return rows
+      .filter((row): row is DailyTotalSqlRow & { dayKey: string } => typeof row.dayKey === 'string' && row.dayKey.length > 0)
+      .map((row) => ({
+        dayKey: row.dayKey,
+        income: roundCurrency(Number(row.income ?? 0)),
+        expense: roundCurrency(Number(row.expense ?? 0)),
+        count: Number(row.count ?? 0),
+      }));
+  } catch (error) {
+    console.error('Failed to aggregate daily totals:', error);
+    return [];
+  }
+}
+
 export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
   initDatabasePragmas(sqliteDb);
 

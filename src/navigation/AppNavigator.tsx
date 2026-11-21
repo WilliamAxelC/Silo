@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { AppState, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationProps } from './types';
@@ -13,6 +13,11 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { getGenerationService } from '../services/ai/generationService';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
+import {
+  configureNotificationHandler,
+  getInitialNotificationDeepLink,
+  subscribeToNotificationDeepLinks,
+} from '../services/notifications';
 
 import { CashflowScreen } from '../screens/CashflowScreen';
 import { AddTransactionScreen } from '../screens/AddTransactionScreen';
@@ -26,11 +31,56 @@ import { ReceiptInboxScreen } from '../screens/ReceiptInboxScreen';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
-import { AppState } from 'react-native';
 import { RecurringScreen } from '../screens/RecurringScreen';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+export const APP_LINKING = {
+  prefixes: ['silo://'],
+  config: {
+    screens: {
+      MainTabs: { screens: { Cashflow: 'cashflow', Reports: 'reports', Budget: 'budget', More: 'more' } },
+      Chatbot: 'chat',
+      AddTransactionStack: 'add/:transactionId?',
+      Settings: 'settings',
+      SystemLogs: 'logs',
+      ReceiptInbox: 'receipts',
+      Accounts: 'accounts',
+      Recurring: 'recurring',
+    },
+  },
+  async getInitialURL() {
+    const initialUrl = await Linking.getInitialURL();
+    if (initialUrl != null) {
+      return initialUrl;
+    }
+    try {
+      return await getInitialNotificationDeepLink();
+    } catch {
+      return null;
+    }
+  },
+  subscribe(listener: (url: string) => void) {
+    const linkingSub = Linking.addEventListener('url', ({ url }) => {
+      listener(url);
+    });
+    let unsubscribeNotifications = () => {};
+    try {
+      unsubscribeNotifications = subscribeToNotificationDeepLinks(listener);
+    } catch {
+      // Notifications native module unavailable; URL linking continues to work.
+    }
+    return () => {
+      linkingSub.remove();
+      try {
+        unsubscribeNotifications();
+      } catch {
+        // Ignore teardown errors when native notifications are unavailable.
+      }
+    };
+  },
+};
 
 const TabNavigator = () => {
   const theme = useAppTheme();
@@ -101,6 +151,11 @@ export const AppNavigator = () => {
   const isDarkMode = theme.isDarkMode;
 
   useEffect(() => {
+    try {
+      configureNotificationHandler();
+    } catch {
+      // Ignore notification handler setup errors on builds without native notifications.
+    }
     loadSettings();
     const runRecurring = async () => {
       const store = useTransactionStore.getState();
@@ -138,25 +193,9 @@ export const AppNavigator = () => {
     },
   };
 
-  const linking = {
-    prefixes: ['silo://'],
-    config: {
-      screens: {
-        MainTabs: { screens: { Cashflow: 'cashflow', Reports: 'reports', Budget: 'budget', More: 'more' } },
-        Chatbot: 'chat',
-        AddTransactionStack: 'add/:transactionId?',
-        Settings: 'settings',
-        SystemLogs: 'logs',
-        ReceiptInbox: 'receipts',
-        Accounts: 'accounts',
-        Recurring: 'recurring',
-      },
-    },
-  };
-
   return (
     <View style={[styles.appShell, { backgroundColor: theme.background }]}>
-      <NavigationContainer theme={navigationTheme} linking={linking as any}>
+      <NavigationContainer theme={navigationTheme} linking={APP_LINKING as any}>
         <Stack.Navigator
           initialRouteName="MainTabs"
           screenOptions={{

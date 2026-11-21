@@ -221,5 +221,36 @@ describe('categories utilities', () => {
       expect(serializeSettingValue(1.15)).toBe('1.15');
       expect(serializeSettingValue(0)).toBe('0');
     });
+
+    it('parses daily reminder, monthStartDay, and weekStartDay settings with validation and clamping', () => {
+      const defaults = getInitialAppSettings();
+      expect(defaults.dailyReminderEnabled).toBe(false);
+      expect(defaults.dailyReminderTime).toBe('20:00');
+      expect(defaults.monthStartDay).toBe(1);
+      expect(defaults.weekStartDay).toBe('monday');
+
+      const parsedValid = parseSettingsRows([
+        { key: APP_SETTING_KEYS.dailyReminderEnabled, value: 'true' },
+        { key: APP_SETTING_KEYS.dailyReminderTime, value: '08:30' },
+        { key: APP_SETTING_KEYS.monthStartDay, value: '25' },
+        { key: APP_SETTING_KEYS.weekStartDay, value: 'sunday' },
+      ]);
+      expect(parsedValid.dailyReminderEnabled).toBe(true);
+      expect(parsedValid.dailyReminderTime).toBe('08:30');
+      expect(parsedValid.monthStartDay).toBe(25);
+      expect(parsedValid.weekStartDay).toBe('sunday');
+
+      const parsedInvalid = parseSettingsRows([
+        { key: APP_SETTING_KEYS.dailyReminderTime, value: '29:99' },
+        { key: APP_SETTING_KEYS.monthStartDay, value: '31' },
+        { key: APP_SETTING_KEYS.weekStartDay, value: 'friday' },
+      ]);
+      expect(parsedInvalid.dailyReminderTime).toBe('20:00');
+      expect(parsedInvalid.monthStartDay).toBe(28);
+      expect(parsedInvalid.weekStartDay).toBe('monday');
+
+      const parsedLowDay = parseSettingsRows([{ key: APP_SETTING_KEYS.monthStartDay, value: '0' }]);
+      expect(parsedLowDay.monthStartDay).toBe(1);
+    });
   });
 });

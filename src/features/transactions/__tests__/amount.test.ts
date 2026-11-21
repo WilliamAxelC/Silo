@@ -12,6 +12,7 @@ import {
   splitAmount,
   calculatePercentage,
   formatDisplayCurrency,
+  formatCompactAmount,
   evaluateAmountExpression,
   formatCalculatorExpression,
   summarizeTransactions,
@@ -521,6 +522,37 @@ describe('amount utilities', () => {
         totalOut: 4.05,
         net: 6.25,
       });
+    });
+  });
+
+  describe('formatCompactAmount', () => {
+    it('abbreviates IDR amounts with rb, jt, M, and T using Indonesian comma decimals', () => {
+      expect(formatCompactAmount(0, 'IDR')).toBe('0');
+      expect(formatCompactAmount(500, 'IDR')).toBe('500');
+      expect(formatCompactAmount(1_200, 'IDR')).toBe('1,2rb');
+      expect(formatCompactAmount(2_000, 'IDR')).toBe('2rb');
+      expect(formatCompactAmount(45_000, 'IDR')).toBe('45rb');
+      expect(formatCompactAmount(500_000, 'IDR')).toBe('500rb');
+      expect(formatCompactAmount(999_600, 'IDR')).toBe('1jt');
+      expect(formatCompactAmount(1_200_000, 'IDR')).toBe('1,2jt');
+      expect(formatCompactAmount(-1_200_000, 'IDR')).toBe('1,2jt');
+      expect(formatCompactAmount(15_000_000, 'IDR')).toBe('15jt');
+      expect(formatCompactAmount(1_500_000_000, 'IDR')).toBe('1,5M');
+      expect(formatCompactAmount(2_000_000_000_000, 'IDR')).toBe('2T');
+    });
+
+    it('abbreviates non-IDR currencies with k, M, B, and T using dot decimals', () => {
+      expect(formatCompactAmount(0, 'USD')).toBe('0');
+      expect(formatCompactAmount(9.5, 'USD')).toBe('9.5');
+      expect(formatCompactAmount(45, 'USD')).toBe('45');
+      expect(formatCompactAmount(450, 'USD')).toBe('450');
+      expect(formatCompactAmount(999.6, 'USD')).toBe('1k');
+      expect(formatCompactAmount(1_200, 'USD')).toBe('1.2k');
+      expect(formatCompactAmount(45_000, 'EUR')).toBe('45k');
+      expect(formatCompactAmount(999_600, 'USD')).toBe('1M');
+      expect(formatCompactAmount(1_200_000, 'GBP')).toBe('1.2M');
+      expect(formatCompactAmount(1_500_000_000, 'SGD')).toBe('1.5B');
+      expect(formatCompactAmount(500, 'JPY')).toBe('500');
     });
   });
 });

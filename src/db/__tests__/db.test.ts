@@ -6,6 +6,7 @@ import {
   buildFtsSearchQuery,
   searchTransactions,
   summarizeSearchTransactions,
+  getDailyTotalsForRange,
   DEFAULT_SEARCH_LIMIT,
   rebuildFtsIndex,
 } from '../index';
@@ -615,6 +616,65 @@ describe('Database Layer and SQLite Operations', () => {
       expect(viewRows.length).toBe(1);
       expect(viewRows[0].merchant_name).toBe('Netflix');
       expect(viewRows[0].category).toBe('Entertainment');
+    });
+
+    it('aggregates daily income and expense totals in SQL grouped by local day and excludes transfers', () => {
+      testDb.runSync(`INSERT INTO wallets (id, name, type) VALUES (?, ?, ?);`, [2, 'GoPay', 'ewallet']);
+
+      // Day 1: 2026-11-10 (morning income + evening expense + transfer)
+      const nov10Morning = new Date(2026, 10, 10, 8, 30, 0, 0).getTime();
+      const nov10Late = new Date(2026, 10, 10, 23, 59, 59, 999).getTime();
+      // Day 2: 2026-11-11 (midnight boundary + transfer-only check on Nov 12)
+      const nov11Start = new Date(2026, 10, 11, 0, 0, 0, 0).getTime();
+      const nov12Noon = new Date(2026, 10, 12, 12, 0, 0, 0).getTime();
+      // Outside range: 2026-10-31
+      const oct31End = new Date(2026, 9, 31, 23, 59, 59, 999).getTime();
+
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?);`,
+        [1, 'Client Invoice', 1200000, 'income', nov10Morning]
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?);`,
+        [1, 'Late Dinner', -45000, 'expense', nov10Late]
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, to_wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?, ?);`,
+        [1, 2, 'Top up GoPay', -300000, 'transfer', nov10Late]
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?);`,
+        [1, 'Midnight Snack', -15000, 'expense', nov11Start]
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, to_wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?, ?);`,
+        [1, 2, 'Savings Transfer', -500000, 'transfer', nov12Noon]
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?);`,
+        [1, 'Previous Month Expense', -99000, 'expense', oct31End]
+      );
+
+      const novStart = new Date(2026, 10, 1, 0, 0, 0, 0).getTime();
+      const novEnd = new Date(2026, 10, 30, 23, 59, 59, 999).getTime();
+
+      // Verify index usage on date range
+      const plan = testDb.getAllSync<{ detail: string }>(
+        `EXPLAIN QUERY PLAN
+         SELECT strftime('%Y-%m-%d', CAST(t.date AS INTEGER) / 1000, 'unixepoch', 'localtime') AS dayKey
+         FROM transactions t
+         WHERE t.date >= ? AND t.date <= ?
+         GROUP BY dayKey;`,
+        [novStart, novEnd]
+      );
+      expect(plan.some((p) => /idx_transactions_date/i.test(p.detail))).toBe(true);
+
+      const totals = getDailyTotalsForRange(novStart, novEnd, testDb as any);
+      expect(totals).toEqual([
+        { dayKey: '2026-11-10', income: 1200000, expense: 45000, count: 3 },
+        { dayKey: '2026-11-11', income: 0, expense: 15000, count: 1 },
+        { dayKey: '2026-11-12', income: 0, expense: 0, count: 1 },
+      ]);
     });
   });
 });

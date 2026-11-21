@@ -103,3 +103,40 @@ jest.mock('expo-local-authentication', () => ({
 jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn(() => Promise.resolve({ canceled: true, assets: null })),
 }));
+
+jest.mock('expo-notifications', () => ({
+  SchedulableTriggerInputTypes: {
+    CALENDAR: 'calendar',
+    TIME_INTERVAL: 'timeInterval',
+    DAILY: 'daily',
+    WEEKLY: 'weekly',
+    MONTHLY: 'monthly',
+    YEARLY: 'yearly',
+    DATE: 'date',
+  },
+  AndroidImportance: {
+    UNKNOWN: 0,
+    UNSPECIFIED: 1,
+    NONE: 2,
+    MIN: 3,
+    LOW: 4,
+    DEFAULT: 5,
+    HIGH: 6,
+    MAX: 7,
+  },
+  DEFAULT_ACTION_IDENTIFIER: 'expo.modules.notifications.actions.DEFAULT',
+  setNotificationHandler: jest.fn(),
+  setNotificationChannelAsync: jest.fn(async () => null),
+  getPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true })),
+  scheduleNotificationAsync: jest.fn(async () => 'silo-daily-reminder'),
+  cancelScheduledNotificationAsync: jest.fn(async () => {}),
+  cancelAllScheduledNotificationsAsync: jest.fn(async () => {}),
+  getAllScheduledNotificationsAsync: jest.fn(async () => []),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponse: jest.fn(() => null),
+  getLastNotificationResponseAsync: jest.fn(async () => null),
+  clearLastNotificationResponse: jest.fn(),
+  clearLastNotificationResponseAsync: jest.fn(async () => {}),
+}));

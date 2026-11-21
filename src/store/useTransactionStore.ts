@@ -4,8 +4,10 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   db,
   expoDb,
+  getDailyTotalsForRange as getDailyTotalsForRangeDb,
   searchTransactions as searchTransactionsDb,
   summarizeSearchTransactions as summarizeSearchTransactionsDb,
+  type DailyTotal,
   type SearchTransactionsOptions,
 } from '../db/index';
 import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
@@ -52,6 +54,7 @@ interface TransactionState {
   removeWallet: (id: number) => { ok: boolean; archived?: boolean; message?: string };
   searchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<Transaction[]>;
   summarizeSearchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<TransactionFilterSummary>;
+  getDailyTotals: (startMs: number, endMs: number) => DailyTotal[];
   addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
   updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
@@ -261,6 +264,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       console.error('Failed to summarize search transactions:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
       return { count: 0, totalIn: 0, totalOut: 0, net: 0 };
+    }
+  },
+
+  getDailyTotals: (startMs, endMs) => {
+    try {
+      return getDailyTotalsForRangeDb(startMs, endMs);
+    } catch (error) {
+      console.error('Failed to load daily totals:', error);
+      return [];
     }
   },
 

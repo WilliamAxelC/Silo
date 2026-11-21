@@ -268,6 +268,39 @@ describe('AI Agent & Context Engine', () => {
       expect(items.some((i) => i.content.includes('Supermarket Hero'))).toBe(true);
       expect(items.some((i) => i.kind === 'balance')).toBe(true);
     });
+
+    it('uses custom monthStartDay period bounds when user asks about "this month"', () => {
+      const { getPeriodBounds, formatPeriodLabel } = require('../../../features/transactions/periods');
+      const expectedBounds = getPeriodBounds(new Date(), 25);
+      const expectedLabel = formatPeriodLabel(expectedBounds, 'en-GB');
+
+      (useSettingsStore.getState as jest.Mock).mockReturnValue({
+        localSystemPrompt: 'Custom local system prompt',
+        externalSystemPrompt: 'Custom external system prompt',
+        aiInferenceMode: 'external',
+        receiptReadingMode: 'ocr',
+        monthStartDay: 25,
+        dateFormat: 'en-GB',
+      });
+
+      (expoDb.getAllSync as jest.Mock).mockImplementation((sql: string) => {
+        if (sql.includes('SUM(ABS(total_amount))')) {
+          return [{ total: 450000 }];
+        }
+        if (sql.includes('initial_balance')) {
+          return [{ total: 1000000 }];
+        }
+        return [];
+      });
+
+      const items = buildRetrievedContext('How much did I spend on food this month?');
+      const categoryCall = (expoDb.getAllSync as jest.Mock).mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('SUM(ABS(total_amount))')
+      );
+      expect(categoryCall).toBeDefined();
+      expect(categoryCall[1]).toEqual(['%food%', expectedBounds.startMs, expectedBounds.endMs]);
+      expect(items.some((i) => i.content.includes(expectedLabel) && i.content.includes('450.000'))).toBe(true);
+    });
   });
 
   describe('analyzeReceiptImage', () => {

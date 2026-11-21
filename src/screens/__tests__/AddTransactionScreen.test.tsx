@@ -11,7 +11,7 @@ import * as templateService from '../../services/templates';
 const ReactTestRenderer = require('react-test-renderer');
 
 const mockNavigate = jest.fn();
-const mockRouteParams: { transactionId?: number; duplicateFromId?: number } = {};
+const mockRouteParams: { transactionId?: number; duplicateFromId?: number; initialDate?: number } = {};
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
@@ -51,6 +51,7 @@ describe('AddTransactionScreen', () => {
     jest.clearAllMocks();
     delete mockRouteParams.transactionId;
     delete mockRouteParams.duplicateFromId;
+    delete mockRouteParams.initialDate;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true });
 
@@ -716,5 +717,82 @@ describe('AddTransactionScreen', () => {
     expect(mockAddTransaction).not.toHaveBeenCalled();
 
     ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('prefills transaction date from route initialDate param and saves with that date', async () => {
+    const prefilled = new Date(2026, 9, 12, 14, 15, 0, 0).getTime();
+    mockRouteParams.initialDate = prefilled;
+    mockAddTransaction.mockResolvedValueOnce(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Calendar Entry');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('35000');
+    });
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantName: 'Calendar Entry',
+        date: prefilled,
+      })
+    );
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('preserves initialDate (selectedDate) when applying a quick-entry template (R2B-5)', async () => {
+    const prefilled = new Date(2026, 10, 5, 14, 15, 0, 0).getTime();
+    mockRouteParams.initialDate = prefilled;
+    mockAddTransaction.mockResolvedValueOnce(undefined);
+
+    const listSpy = jest.spyOn(templateService, 'listTransactionTemplates').mockReturnValue([
+      {
+        id: 12,
+        name: 'Morning Coffee',
+        template: {
+          merchantName: 'Morning Coffee',
+          totalAmount: -28000,
+          type: 'expense',
+          category: 'Food & Dining',
+          note: 'Oat latte',
+          lineItemsText: '',
+          walletId: 1,
+          toWalletId: null,
+        },
+        createdAt: Date.now(),
+      },
+    ]);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Use template Morning Coffee' }).props.onPress();
+    });
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantName: 'Morning Coffee',
+        totalAmount: -28000,
+        date: prefilled,
+      })
+    );
+
+    ReactTestRenderer.act(() => renderer.unmount());
+    listSpy.mockRestore();
   });
 });

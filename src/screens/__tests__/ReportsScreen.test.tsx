@@ -43,6 +43,7 @@ describe('ReportsScreen', () => {
       dateFormat: 'id-ID',
       currencyCode: 'IDR',
       useThousandsSeparator: true,
+      monthStartDay: 1,
     });
     useTransactionStore.setState({
       transactionsList: [
@@ -203,6 +204,52 @@ describe('ReportsScreen', () => {
     expect(foodSlicePrev).toBeDefined();
     expect(foodSlicePrev.color).toBe(foodSliceCurrent.color);
     expect(foodSlicePrev.color).toBe(getCategoryColor('Food & Dining', 'expense'));
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('labels and filters reports using custom monthStartDay period bounds', () => {
+    const now = new Date();
+    const { getPeriodBounds, formatPeriodLabel } = require('../../features/transactions/periods');
+    const bounds = getPeriodBounds(now, 25);
+    const expectedLabel = formatPeriodLabel(bounds, 'en-GB');
+
+    useSettingsStore.setState({ dateFormat: 'en-GB', monthStartDay: 25 });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 101,
+          merchantName: 'Inside Custom Cycle',
+          totalAmount: -120000,
+          type: 'expense',
+          category: 'Groceries',
+          date: bounds.startMs + 60_000,
+        },
+        {
+          id: 102,
+          merchantName: 'Before Custom Cycle',
+          totalAmount: -900000,
+          type: 'expense',
+          category: 'Bills',
+          date: bounds.startMs - 60_000,
+        },
+      ],
+      fetchTransactions: mockFetchTransactions,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) =>
+      Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+    );
+    expect(texts).toContain(expectedLabel);
+    expect(texts).toContain('Groceries');
+    expect(texts).not.toContain('Bills');
 
     ReactTestRenderer.act(() => {
       renderer.unmount();

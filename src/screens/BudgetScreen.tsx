@@ -28,6 +28,7 @@ import {
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
+import { formatPeriodLabel } from '../features/transactions/periods';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
@@ -74,6 +75,7 @@ export const BudgetScreen = () => {
   const fontScale = useSettingsStore((state) => state.fontScale);
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
+  const dateFormat = useSettingsStore((state) => state.dateFormat);
   const {
     budgets,
     setBudget,
@@ -84,7 +86,11 @@ export const BudgetScreen = () => {
   } = useTransactionStore();
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [refreshing, setRefreshing] = useState(false);
-  const { currentMonthExpenses } = useMonthlySummary(currentDate);
+  const { currentMonthExpenses, periodBounds } = useMonthlySummary(currentDate);
+  const periodLabel = useMemo(
+    () => formatPeriodLabel(periodBounds, dateFormat || 'en-GB'),
+    [periodBounds, dateFormat]
+  );
   const expenseCategories = getCategoriesByType('expense');
 
   const refreshMonthData = useCallback(async () => {
@@ -196,7 +202,12 @@ export const BudgetScreen = () => {
       <View style={[styles.header, { backgroundColor: theme.background }]}>
         <Text style={[styles.eyebrow, { color: theme.textMuted }, smallScale]}>Budgets</Text>
         <View style={styles.headerRow}>
-          <Text style={[styles.headerTitle, { color: theme.text }, titleScale]}>Monthly Plan</Text>
+          <View style={styles.headerTitleBlock}>
+            <Text style={[styles.headerTitle, { color: theme.text }, titleScale]}>Monthly Plan</Text>
+            <Text style={[styles.periodSubtitle, { color: theme.textMuted }, smallScale]} numberOfLines={1}>
+              {periodLabel}
+            </Text>
+          </View>
           <View style={[styles.headerPill, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text
               style={[
@@ -518,8 +529,10 @@ const styles = StyleSheet.create({
   keyboardShell: { flex: 1 },
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
   eyebrow: { fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 4 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  headerTitleBlock: { flex: 1 },
   headerTitle: { fontWeight: '800', letterSpacing: -0.5 },
+  periodSubtitle: { fontWeight: '600', marginTop: 2 },
   headerPill: { minHeight: 32, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, justifyContent: 'center' },
   headerPillText: { fontWeight: '700' },
   content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 28 },

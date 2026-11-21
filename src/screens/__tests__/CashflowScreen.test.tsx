@@ -32,6 +32,7 @@ describe('CashflowScreen', () => {
   const mockSummarizeSearchTransactions = jest
     .fn()
     .mockResolvedValue({ count: 0, totalIn: 0, totalOut: 0, net: 0 });
+  const mockGetDailyTotals = jest.fn().mockReturnValue([]);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -40,6 +41,8 @@ describe('CashflowScreen', () => {
       dateFormat: 'id-ID',
       currencyCode: 'IDR',
       useThousandsSeparator: true,
+      monthStartDay: 1,
+      weekStartDay: 'monday',
     });
     useTransactionStore.setState({
       transactionsList: [
@@ -68,6 +71,7 @@ describe('CashflowScreen', () => {
       fetchTransactions: mockFetchTransactions,
       searchTransactions: mockSearchTransactions,
       summarizeSearchTransactions: mockSummarizeSearchTransactions,
+      getDailyTotals: mockGetDailyTotals,
     } as any);
   });
 
@@ -241,5 +245,162 @@ describe('CashflowScreen', () => {
     ReactTestRenderer.act(() => {
       renderer.unmount();
     });
+  });
+
+  it('switches to Calendar view, queries SQL daily totals, lists tapped day transactions, and opens Add with initialDate', () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const day5 = new Date(year, month, 5, 11, 0, 0, 0);
+    const day5Key = `${year}-${String(month + 1).padStart(2, '0')}-05`;
+    const shortDay5 = day5.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    useSettingsStore.setState({ dateFormat: 'en-GB', currencyCode: 'IDR', weekStartDay: 'sunday' });
+    mockGetDailyTotals.mockReturnValue([
+      { dayKey: day5Key, income: 1_200_000, expense: 45_000, count: 2 },
+    ]);
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 50,
+          merchantName: 'Bakery Day 5',
+          totalAmount: -45000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: day5.getTime(),
+        },
+      ],
+      error: null,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+
+    // Switch to Calendar view
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Calendar view' }).props.onPress();
+    });
+
+    expect(mockGetDailyTotals).toHaveBeenCalledTimes(1);
+    const [startArg, endArg] = mockGetDailyTotals.mock.calls[0];
+    expect(new Date(startArg).getDate()).toBe(1);
+    expect(new Date(endArg).getMonth()).toBe(month);
+
+    // Compact totals from SQL render on day 5
+    const day5Cell = renderer.root.findByProps({ testID: `calendar-day-${day5Key}` });
+    const day5Texts = day5Cell.findAllByType(Text).map((t: any) => String(t.props.children));
+    expect(day5Texts).toContain('1,2jt');
+    expect(day5Texts).toContain('45rb');
+
+    // Tap day 5 -> lists Bakery Day 5 and shows "Add on <date>"
+    ReactTestRenderer.act(() => {
+      day5Cell.props.onPress();
+    });
+
+    const allTexts = renderer.root.findAllByType(Text).map((t: any) =>
+      Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+    );
+    expect(allTexts).toContain('Bakery Day 5');
+
+    const addOnDayBtn = renderer.root.findByProps({ accessibilityLabel: `Add on ${shortDay5}` });
+    ReactTestRenderer.act(() => {
+      addOnDayBtn.props.onPress();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      'AddTransactionStack',
+      expect.objectContaining({ initialDate: expect.any(Number) })
+    );
+    const passedDate = new Date(mockNavigate.mock.calls[0][1].initialDate);
+    expect(passedDate.getFullYear()).toBe(year);
+    expect(passedDate.getMonth()).toBe(month);
+    expect(passedDate.getDate()).toBe(5);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('labels custom billing periods clearly when monthStartDay > 1', () => {
+    const now = new Date();
+    useSettingsStore.setState({ dateFormat: 'en-GB', monthStartDay: 25 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+
+    const { getPeriodBounds, formatPeriodLabel } = require('../../features/transactions/periods');
+    const expectedLabel = formatPeriodLabel(getPeriodBounds(now, 25), 'en-GB');
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) =>
+      Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+    );
+    expect(texts).toContain(expectedLabel);
+    expect(expectedLabel).toContain(' - ');
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('anchors Calendar on the current month containing today when monthStartDay > 1, and on periodBounds.end for non-current periods (R2B-4)', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 10, 26, 12, 0, 0)); // 26 Nov 2026 -> current cycle is 25 Nov - 24 Dec
+    try {
+      useSettingsStore.setState({ dateFormat: 'en-GB', monthStartDay: 25, weekStartDay: 'monday' });
+      mockGetDailyTotals.mockReturnValue([]);
+
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<CashflowScreen />);
+      });
+
+      // Switch to Calendar while on current custom period (25 Nov - 24 Dec) -> must open November 2026 with today selected
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Calendar view' }).props.onPress();
+      });
+
+      const textsNov = renderer.root.findAllByType(Text).map((t: any) =>
+        Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+      );
+      expect(textsNov).toContain('November 2026');
+      expect(textsNov).not.toContain('December 2026');
+
+      const [startNov, endNov] = mockGetDailyTotals.mock.calls[0];
+      expect(new Date(startNov).getFullYear()).toBe(2026);
+      expect(new Date(startNov).getMonth()).toBe(10); // November
+      expect(new Date(endNov).getMonth()).toBe(10);
+
+      const todayCell = renderer.root.findByProps({ testID: 'calendar-day-2026-11-26' });
+      expect(todayCell.props.accessibilityState?.selected).toBe(true);
+
+      // Switch back to List, navigate two periods earlier (25 Sep - 24 Oct), then open Calendar -> anchors on periodBounds.end (October 2026)
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'List view' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Previous month' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Previous month' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Calendar view' }).props.onPress();
+      });
+
+      const textsOct = renderer.root.findAllByType(Text).map((t: any) =>
+        Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+      );
+      expect(textsOct).toContain('October 2026');
+
+      ReactTestRenderer.act(() => {
+        renderer.unmount();
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

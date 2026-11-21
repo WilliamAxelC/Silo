@@ -50,6 +50,13 @@
         {
           "cameraPermission": "Silo uses the camera to scan receipts."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0284C7",
+          "defaultChannel": "daily-reminder"
+        }
       ]
     ],
     "extra": {

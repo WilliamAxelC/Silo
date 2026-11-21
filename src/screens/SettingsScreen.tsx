@@ -11,18 +11,29 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { documentDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { createBackupFile, restoreBackupFile } from '../services/backup';
 import { buildTransactionsCsv } from '../services/csvExport';
+import {
+  cancelDailyReminder,
+  formatReminderTime,
+  isNotificationsAvailable,
+  reminderTimeToDate,
+  requestDailyReminderPermissionStatus,
+  scheduleDailyReminder,
+  syncDailyReminder,
+} from '../services/notifications';
 import { authenticateUser, canUseAppLock } from '../components/AppLockGate';
 
 import { NavigationProps } from '../navigation/types';
@@ -30,8 +41,9 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
-import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider } from '../features/transactions/types';
+import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider, WeekStartDay } from '../features/transactions/types';
 import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
+import { MAX_MONTH_START_DAY, MIN_MONTH_START_DAY } from '../features/transactions/periods';
 import {
   cancelVisionProjectorDownload,
   deleteVisionProjector,
@@ -55,6 +67,14 @@ const DATE_FORMAT_OPTIONS = [
   { key: 'en-US', label: 'MM/DD/YYYY (en-US)' },
 ];
 const FONT_SCALE_OPTIONS = [0.9, 1.0, 1.1, 1.2];
+const WEEK_START_OPTIONS: Array<{ key: WeekStartDay; label: string }> = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'sunday', label: 'Sunday' },
+];
+const MONTH_START_DAYS = Array.from(
+  { length: MAX_MONTH_START_DAY - MIN_MONTH_START_DAY + 1 },
+  (_, index) => MIN_MONTH_START_DAY + index
+);
 
 export const SettingsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -73,6 +93,10 @@ export const SettingsScreen = () => {
   const externalApiKey = useSettingsStore((s) => s.externalApiKey);
   const aiWifiOnlyDownload = useSettingsStore((s) => s.aiWifiOnlyDownload);
   const receiptReadingMode = useSettingsStore((s) => s.receiptReadingMode);
+  const dailyReminderEnabled = useSettingsStore((s) => s.dailyReminderEnabled);
+  const dailyReminderTime = useSettingsStore((s) => s.dailyReminderTime);
+  const monthStartDay = useSettingsStore((s) => s.monthStartDay);
+  const weekStartDay = useSettingsStore((s) => s.weekStartDay);
 
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setCurrencyCode = useSettingsStore((s) => s.setCurrencyCode);
@@ -87,6 +111,10 @@ export const SettingsScreen = () => {
   const setExternalApiKey = useSettingsStore((s) => s.setExternalApiKey);
   const setReceiptReadingMode = useSettingsStore((s) => s.setReceiptReadingMode);
   const setAiWifiOnlyDownload = useSettingsStore((s) => s.setAiWifiOnlyDownload);
+  const setDailyReminderEnabled = useSettingsStore((s) => s.setDailyReminderEnabled);
+  const setDailyReminderTime = useSettingsStore((s) => s.setDailyReminderTime);
+  const setMonthStartDay = useSettingsStore((s) => s.setMonthStartDay);
+  const setWeekStartDay = useSettingsStore((s) => s.setWeekStartDay);
 
   const { provisioning, localModelDisplayName, runtime, runtimeReady, warmupPending, logs } = useAIStore();
   const { transactionsList, wallets, categories, addCategory, renameCategory, deleteCategory, getCategoriesByType } =
@@ -108,6 +136,10 @@ export const SettingsScreen = () => {
   const [isProjectorDownloading, setIsProjectorDownloading] = useState(false);
   const [projectorProgress, setProjectorProgress] = useState(0);
   const [projectorError, setProjectorError] = useState<string | null>(null);
+  const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
+  const [isUpdatingReminder, setIsUpdatingReminder] = useState(false);
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const [monthStartModalVisible, setMonthStartModalVisible] = useState(false);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -256,6 +288,105 @@ export const SettingsScreen = () => {
     }
   };
 
+  const handleDailyReminderToggle = async (next: boolean) => {
+    if (isUpdatingReminder) return;
+    setIsUpdatingReminder(true);
+    setReminderNotice(null);
+    try {
+      if (next) {
+        if (!isNotificationsAvailable()) {
+          await setDailyReminderEnabled(false);
+          setReminderNotice('Daily reminders are not available on this device.');
+          return;
+        }
+        const permission = await requestDailyReminderPermissionStatus();
+        if (permission === 'unavailable') {
+          await setDailyReminderEnabled(false);
+          setReminderNotice('Daily reminders are not available on this device.');
+          return;
+        }
+        if (permission !== 'granted') {
+          try {
+            await cancelDailyReminder();
+          } catch {
+            // Ignore cleanup errors when notifications are disabled.
+          }
+          await setDailyReminderEnabled(false);
+          Alert.alert(
+            'Notifications are turned off',
+            'Allow notifications for Silo in your phone Settings (Apps > Silo > Notifications) to enable the daily reminder.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Open Settings',
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+            ]
+          );
+          return;
+        }
+        let scheduledId: string | null = null;
+        try {
+          scheduledId = await scheduleDailyReminder(dailyReminderTime);
+        } catch {
+          scheduledId = null;
+        }
+        if (!scheduledId) {
+          await setDailyReminderEnabled(false);
+          setReminderNotice('Could not schedule the daily reminder on this device.');
+          return;
+        }
+        await setDailyReminderEnabled(true);
+      } else {
+        await setDailyReminderEnabled(false);
+        try {
+          await cancelDailyReminder();
+        } catch {
+          setReminderNotice('Daily reminder turned off, but the existing schedule could not be cleared.');
+        }
+      }
+    } catch (error) {
+      if (next) {
+        try {
+          await setDailyReminderEnabled(false);
+        } catch {
+          // Ignore secondary persistence errors when reverting toggle.
+        }
+      }
+      setReminderNotice(getErrorMessage(error, 'Could not update the daily reminder.'));
+    } finally {
+      setIsUpdatingReminder(false);
+    }
+  };
+
+  const handleReminderTimeChange = async (event: { type?: string }, picked?: Date) => {
+    setShowReminderTimePicker(false);
+    if (event?.type === 'dismissed' || !picked) {
+      return;
+    }
+    const nextTime = formatReminderTime(picked.getHours(), picked.getMinutes());
+    setReminderNotice(null);
+    try {
+      await setDailyReminderTime(nextTime);
+    } catch (error) {
+      Alert.alert('Reminder Error', getErrorMessage(error, 'Could not save the reminder time.'));
+      return;
+    }
+
+    if (dailyReminderEnabled) {
+      try {
+        const scheduledId = await scheduleDailyReminder(nextTime);
+        if (!scheduledId) {
+          setReminderNotice('Reminder time saved, but the notification could not be rescheduled on this device.');
+        }
+      } catch {
+        setReminderNotice('Reminder time saved, but the notification could not be rescheduled on this device.');
+      }
+    }
+  };
+
   const handleBackup = async () => {
     setIsBackingUp(true);
     try {
@@ -279,7 +410,30 @@ export const SettingsScreen = () => {
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
       await Promise.all([store.fetchTransactions(), store.fetchCategories(), store.fetchBudgets()]);
-      Alert.alert('Backup restored', `${transactions} transaction${transactions === 1 ? '' : 's'} restored.`);
+
+      const restoredSettings = useSettingsStore.getState();
+      let reminderWarning: string | null = null;
+      try {
+        const syncResult = await syncDailyReminder(
+          restoredSettings.dailyReminderEnabled,
+          restoredSettings.dailyReminderTime
+        );
+        if (!syncResult.ok && restoredSettings.dailyReminderEnabled) {
+          reminderWarning =
+            syncResult.reason === 'permission-denied'
+              ? 'Daily reminder was not scheduled because notifications are turned off.'
+              : 'Daily reminder could not be rescheduled on this device.';
+        }
+      } catch {
+        reminderWarning = 'Daily reminder could not be rescheduled on this device.';
+      }
+
+      setReminderNotice(reminderWarning);
+      const restoredSummary = `${transactions} transaction${transactions === 1 ? '' : 's'} restored.`;
+      Alert.alert(
+        'Backup restored',
+        reminderWarning ? `${restoredSummary}\n\n${reminderWarning}` : restoredSummary
+      );
     } catch (error) {
       Alert.alert('Restore failed', `${getErrorMessage(error, 'Could not read the backup.')} Your current data was not changed.`);
     } finally {
@@ -642,6 +796,67 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
+          {/* Month starts on day */}
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setMonthStartModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Month starts on day"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="calendar-number-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Month starts on day</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  {monthStartDay === 1 ? 'Calendar month (1st to end)' : `Custom cycle starting on day ${monthStartDay}`}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.rowValueRight}>
+              <Text style={[styles.inlineValue, { color: theme.primary }, captionScale]}>Day {monthStartDay}</Text>
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Week starts on */}
+          <View style={styles.rowBlock}>
+            <View style={styles.rowBlockHeader}>
+              <View style={styles.rowLeft}>
+                <Ionicons name="today-outline" size={18} color={theme.primary} />
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Week starts on</Text>
+              </View>
+            </View>
+            <View style={styles.segmentedRow}>
+              {WEEK_START_OPTIONS.map((option) => {
+                const isSelected = weekStartDay === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.segmentBtn,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                    onPress={() => setWeekStartDay(option.key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Week starts on ${option.label}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text style={[styles.segmentBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
           {/* Thousands Separator Toggle */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
@@ -669,6 +884,64 @@ export const SettingsScreen = () => {
               trackColor={{ false: '#767577', true: theme.primary }}
             />
           </View>
+        </View>
+
+        {/* Reminders Section */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>REMINDERS</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="notifications-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Daily reminder</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Remind me to log today&apos;s spending
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={dailyReminderEnabled}
+              onValueChange={(next) => void handleDailyReminderToggle(next)}
+              disabled={isUpdatingReminder}
+              trackColor={{ false: '#767577', true: theme.primary }}
+              accessibilityLabel="Daily reminder"
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setShowReminderTimePicker(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Reminder time"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="time-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Reminder time</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  {dailyReminderEnabled ? 'Repeats every day' : 'Used when daily reminder is on'}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.rowValueRight}>
+              <Text style={[styles.inlineValue, { color: theme.primary }, textScale]}>{dailyReminderTime}</Text>
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
+
+          {reminderNotice ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <View style={styles.reminderNoticeRow} accessibilityRole="alert">
+                <Ionicons name="information-circle-outline" size={16} color={theme.textMuted} style={styles.reminderNoticeIcon} />
+                <Text style={[styles.reminderNoticeText, { color: theme.textMuted }, captionScale]}>
+                  {reminderNotice}
+                </Text>
+              </View>
+            </>
+          ) : null}
         </View>
 
         {/* AI & Receipt Scanning Section */}
@@ -1305,7 +1578,13 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity style={styles.row} onPress={handleRestore} disabled={isBackingUp} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.row}
+            onPress={handleRestore}
+            disabled={isBackingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Restore From Backup"
+          >
             <View style={styles.rowLeft}>
               <Ionicons name="cloud-download-outline" size={18} color={theme.primary} />
               <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
@@ -1345,6 +1624,84 @@ export const SettingsScreen = () => {
           <Text style={[styles.aboutAuthor, { color: theme.primary }]}>Made by CDev</Text>
         </View>
       </ScrollView>
+
+      {/* Month Start Day Picker Modal */}
+      <Modal
+        visible={monthStartModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMonthStartModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+          activeOpacity={1}
+          onPress={() => setMonthStartModalVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(event) => event.stopPropagation()}
+            style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+          >
+            <View style={styles.dayModalHeader}>
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.modalTitle, { color: theme.text }, headingScale]}>Month starts on day</Text>
+                <Text style={[styles.dayModalHint, { color: theme.textMuted }, captionScale]}>
+                  Choose day 1–28 (e.g. payday on day 25)
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setMonthStartModalVisible(false)}
+                style={styles.modalCloseBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Close month start day picker"
+              >
+                <Ionicons name="close" size={20} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.dayGrid}>
+              {MONTH_START_DAYS.map((day) => {
+                const isSelected = monthStartDay === day;
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    style={[
+                      styles.dayGridBtn,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                    onPress={() => {
+                      void setMonthStartDay(day);
+                      setMonthStartModalVisible(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Month start day ${day}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text style={[styles.dayGridBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {showReminderTimePicker ? (
+        <DateTimePicker
+          value={reminderTimeToDate(dailyReminderTime)}
+          mode="time"
+          is24Hour
+          display="default"
+          onChange={(event, picked) => {
+            void handleReminderTimeChange(event, picked);
+          }}
+        />
+      ) : null}
 
       {/* Add / Edit Category Modal */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
@@ -1438,8 +1795,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  rowTextBlock: { flex: 1 },
+  rowValueRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
   rowSubText: { marginTop: 2, marginLeft: 10 },
   rowText: { marginLeft: 10, fontWeight: '600' },
+  reminderNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  reminderNoticeIcon: { marginRight: 8, marginTop: 1 },
+  reminderNoticeText: { flex: 1, lineHeight: 17 },
   divider: { height: 1, marginLeft: 44 },
   rowBlock: { paddingHorizontal: 14, paddingVertical: 12 },
   rowBlockHeader: {
@@ -1551,6 +1918,20 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
   modalCard: { borderWidth: 1, borderRadius: 20, padding: 18 },
   modalTitle: { fontWeight: '800', marginBottom: 2 },
+  dayModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  dayModalHint: { marginTop: 2 },
+  modalCloseBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  dayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-start' },
+  dayGridBtn: {
+    width: '17.5%',
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayGridBtnText: { fontSize: 13, fontWeight: '700' },
   modalSubtitle: { fontWeight: '700', marginBottom: 14 },
   modalInput: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
   modalActions: { flexDirection: 'row', marginTop: 16, gap: 8 },

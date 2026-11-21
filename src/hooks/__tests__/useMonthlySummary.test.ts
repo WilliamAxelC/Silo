@@ -1,6 +1,7 @@
 import React from 'react';
 import { useMonthlySummary } from '../useMonthlySummary';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import type { Transaction } from '../../features/transactions/types';
 
 const ReactTestRenderer = require('react-test-renderer');
@@ -42,6 +43,7 @@ function renderHookHarness<TProps, TResult>(
 
 describe('useMonthlySummary', () => {
   beforeEach(() => {
+    useSettingsStore.setState({ monthStartDay: 1 });
     useTransactionStore.setState({
       transactionsList: [],
     });
@@ -385,6 +387,57 @@ describe('useMonthlySummary', () => {
     expect(hook.current.balance).toBe(10_000_000 - 38_500);
     expect(hook.current.currentMonthExpenses.map((t) => t.id)).toEqual([2]);
     expect(hook.current.currentMonthData).toHaveLength(3);
+    hook.unmount();
+  });
+
+  it('respects custom monthStartDay across year-end and February boundaries', () => {
+    useSettingsStore.setState({ monthStartDay: 25 });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 1,
+          merchantName: 'Dec 24 (Previous Period)',
+          totalAmount: -100000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: new Date(2026, 11, 24, 23, 59, 59, 999).getTime(),
+        },
+        {
+          id: 2,
+          merchantName: 'Dec 25 Salary (In Period)',
+          totalAmount: 10000000,
+          type: 'income',
+          category: 'Salary',
+          date: new Date(2026, 11, 25, 0, 0, 0, 0).getTime(),
+        },
+        {
+          id: 3,
+          merchantName: 'Jan 24 Dinner (In Period)',
+          totalAmount: -250000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: new Date(2027, 0, 24, 23, 59, 59, 999).getTime(),
+        },
+        {
+          id: 4,
+          merchantName: 'Jan 25 Coffee (Next Period)',
+          totalAmount: -40000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: new Date(2027, 0, 25, 0, 0, 0, 0).getTime(),
+        },
+      ],
+    });
+
+    const hook = renderHookHarness((d: Date) => useMonthlySummary(d), new Date(2027, 0, 10));
+    expect(hook.current.currentMonthData.map((t) => t.id)).toEqual([2, 3]);
+    expect(hook.current.totalIncome).toBe(10000000);
+    expect(hook.current.totalExpense).toBe(250000);
+    expect(hook.current.balance).toBe(9750000);
+    expect(hook.current.periodBounds.start.getMonth()).toBe(11);
+    expect(hook.current.periodBounds.start.getDate()).toBe(25);
+    expect(hook.current.periodBounds.end.getMonth()).toBe(0);
+    expect(hook.current.periodBounds.end.getDate()).toBe(24);
     hook.unmount();
   });
 });

@@ -284,4 +284,47 @@ describe('useSettingsStore', () => {
       expect(useSettingsStore.getState().receiptReadingMode).toBe('vision');
     });
   });
+
+  describe('Daily reminder and period start preferences', () => {
+    it('updates dailyReminderEnabled, dailyReminderTime, monthStartDay (clamped), and weekStartDay', async () => {
+      await useSettingsStore.getState().setDailyReminderEnabled(true);
+      expect(useSettingsStore.getState().dailyReminderEnabled).toBe(true);
+
+      await useSettingsStore.getState().setDailyReminderTime('09:15');
+      expect(useSettingsStore.getState().dailyReminderTime).toBe('09:15');
+
+      await useSettingsStore.getState().setMonthStartDay(25);
+      expect(useSettingsStore.getState().monthStartDay).toBe(25);
+
+      await useSettingsStore.getState().setMonthStartDay(35);
+      expect(useSettingsStore.getState().monthStartDay).toBe(28);
+
+      await useSettingsStore.getState().setWeekStartDay('sunday');
+      expect(useSettingsStore.getState().weekStartDay).toBe('sunday');
+
+      // Restore defaults
+      await useSettingsStore.getState().setDailyReminderEnabled(false);
+      await useSettingsStore.getState().setDailyReminderTime('20:00');
+      await useSettingsStore.getState().setMonthStartDay(1);
+      await useSettingsStore.getState().setWeekStartDay('monday');
+    });
+
+    it('loads daily reminder and period start settings from database rows', async () => {
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => [
+          { key: 'dailyReminderEnabled', value: 'true' },
+          { key: 'dailyReminderTime', value: '21:30' },
+          { key: 'monthStartDay', value: '25' },
+          { key: 'weekStartDay', value: 'sunday' },
+        ]),
+      });
+
+      await useSettingsStore.getState().loadSettings();
+      const state = useSettingsStore.getState();
+      expect(state.dailyReminderEnabled).toBe(true);
+      expect(state.dailyReminderTime).toBe('21:30');
+      expect(state.monthStartDay).toBe(25);
+      expect(state.weekStartDay).toBe('sunday');
+    });
+  });
 });

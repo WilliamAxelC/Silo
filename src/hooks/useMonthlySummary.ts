@@ -1,14 +1,18 @@
 import { useMemo } from 'react';
-import { isSameMonth } from 'date-fns';
 import { useTransactionStore } from '../store/useTransactionStore';
+import { useSettingsStore } from '../store/useSettingsStore';
+import { getPeriodBounds, isDateInPeriod } from '../features/transactions/periods';
 
-export const useMonthlySummary = (currentDate: Date) => {
+export const useMonthlySummary = (currentDate: Date, monthStartDayOverride?: number) => {
   const transactionsList = useTransactionStore((state) => state.transactionsList);
+  const configuredMonthStartDay = useSettingsStore((state) => state.monthStartDay);
+  const monthStartDay = monthStartDayOverride ?? configuredMonthStartDay ?? 1;
 
   return useMemo(() => {
+    const periodBounds = getPeriodBounds(currentDate, monthStartDay);
     const { totalIncome, totalExpense, currentMonthData, currentMonthExpenses } = transactionsList.reduce(
       (acc, tx) => {
-        if (tx.date && isSameMonth(new Date(tx.date), currentDate)) {
+        if (tx.date && isDateInPeriod(tx.date, periodBounds)) {
           acc.currentMonthData.push(tx);
           // Transfers move money between the user's own accounts: neither income nor spending.
           const amount = tx.type === 'transfer' ? 0 : tx.totalAmount || 0;
@@ -36,7 +40,8 @@ export const useMonthlySummary = (currentDate: Date) => {
       currentMonthExpenses,
       totalIncome,
       totalExpense,
-      balance
+      balance,
+      periodBounds,
     };
-  }, [transactionsList, currentDate]);
+  }, [transactionsList, currentDate, monthStartDay]);
 };

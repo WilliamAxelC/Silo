@@ -14,21 +14,33 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addMonths, endOfDay, endOfMonth, isSameMonth, startOfDay, startOfMonth, subDays, subMonths } from 'date-fns';
+import { endOfDay, startOfDay, subDays } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
-import { formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
+import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
+import {
+  formatPeriodLabel,
+  getCalendarMonthBounds,
+  getLocalDayBounds,
+  getPeriodBounds,
+  isSamePeriod,
+  shiftPeriod,
+  toLocalDayKey,
+  type CalendarDayCell,
+} from '../features/transactions/periods';
+import { MonthlyCalendarView } from '../components/MonthlyCalendarView';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import type { Transaction, TransactionType } from '../features/transactions/types';
-import type { SearchTransactionsOptions } from '../db/index';
+import type { DailyTotal, SearchTransactionsOptions } from '../db/index';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NavigationProps } from '../navigation/types';
 
+type CashflowViewMode = 'list' | 'calendar';
 type DateRangePreset = 'today' | 'last7' | 'thisMonth' | 'lastMonth' | 'last30' | 'custom';
 type FilterSheetKind = 'type' | 'account' | 'category' | 'date';
 
@@ -47,17 +59,24 @@ const DATE_PRESETS: Array<{ key: Exclude<DateRangePreset, 'custom'>; label: stri
   { key: 'last30', label: 'Last 30 days' },
 ];
 
-function computeDatePresetBounds(preset: Exclude<DateRangePreset, 'custom'>, now = new Date()): { from: number; to: number } {
+function computeDatePresetBounds(
+  preset: Exclude<DateRangePreset, 'custom'>,
+  now = new Date(),
+  monthStartDay = 1
+): { from: number; to: number } {
   switch (preset) {
     case 'today':
       return { from: startOfDay(now).getTime(), to: endOfDay(now).getTime() };
     case 'last7':
       return { from: startOfDay(subDays(now, 6)).getTime(), to: endOfDay(now).getTime() };
-    case 'thisMonth':
-      return { from: startOfMonth(now).getTime(), to: endOfMonth(now).getTime() };
+    case 'thisMonth': {
+      const bounds = getPeriodBounds(now, monthStartDay);
+      return { from: bounds.startMs, to: bounds.endMs };
+    }
     case 'lastMonth': {
-      const prev = subMonths(now, 1);
-      return { from: startOfMonth(prev).getTime(), to: endOfMonth(prev).getTime() };
+      const prev = shiftPeriod(now, -1, monthStartDay);
+      const bounds = getPeriodBounds(prev, monthStartDay);
+      return { from: bounds.startMs, to: bounds.endMs };
     }
     case 'last30':
       return { from: startOfDay(subDays(now, 29)).getTime(), to: endOfDay(now).getTime() };
@@ -77,6 +96,8 @@ export const CashflowScreen = () => {
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const searchTransactions = useTransactionStore((state) => state.searchTransactions);
   const summarizeSearchTransactions = useTransactionStore((state) => state.summarizeSearchTransactions);
+  const getDailyTotals = useTransactionStore((state) => state.getDailyTotals);
+  const transactionsList = useTransactionStore((state) => state.transactionsList);
   const error = useTransactionStore((state) => state.error);
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
@@ -84,7 +105,15 @@ export const CashflowScreen = () => {
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
 
+  const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedCalendarDayKey, setSelectedCalendarDayKey] = useState<string | null>(() =>
+    toLocalDayKey(new Date())
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TransactionType | null>(null);
@@ -182,16 +211,61 @@ export const CashflowScreen = () => {
     summarizeSearchTransactions,
   ]);
 
-  const changeMonth = (offset: number) => {
-    setCurrentDate((prev) => addMonths(prev, offset));
-  };
-
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
+  const monthStartDay = useSettingsStore((state) => state.monthStartDay);
+  const weekStartDay = useSettingsStore((state) => state.weekStartDay);
   const locale = dateFormat || 'en-GB';
 
-  const { currentMonthData, totalIncome, totalExpense, balance } = useMonthlySummary(currentDate);
+  const { currentMonthData, totalIncome, totalExpense, balance, periodBounds } = useMonthlySummary(currentDate);
+
+  const changeMonth = (offset: number) => {
+    setCurrentDate((prev) => shiftPeriod(prev, offset, monthStartDay));
+  };
+
+  const handleSwitchViewMode = (nextMode: CashflowViewMode) => {
+    if (nextMode === viewMode) return;
+    if (nextMode === 'calendar') {
+      const now = new Date();
+      const targetBase = isSamePeriod(currentDate, now, monthStartDay)
+        ? now
+        : monthStartDay === 1
+          ? currentDate
+          : periodBounds.end;
+      const nextMonth = new Date(targetBase.getFullYear(), targetBase.getMonth(), 1);
+      setCalendarMonth(nextMonth);
+      setSelectedCalendarDayKey(
+        nextMonth.getFullYear() === now.getFullYear() && nextMonth.getMonth() === now.getMonth()
+          ? toLocalDayKey(now)
+          : null
+      );
+    }
+    setViewMode(nextMode);
+  };
+
+  const changeCalendarMonth = (offset: number) => {
+    const next = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + offset, 1);
+    const now = new Date();
+    setCalendarMonth(next);
+    if (monthStartDay === 1) {
+      setCurrentDate(next);
+    }
+    setSelectedCalendarDayKey(
+      next.getFullYear() === now.getFullYear() && next.getMonth() === now.getMonth()
+        ? toLocalDayKey(now)
+        : null
+    );
+  };
+
+  const resetCalendarToToday = () => {
+    const now = new Date();
+    setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+    setSelectedCalendarDayKey(toLocalDayKey(now));
+    if (monthStartDay === 1) {
+      setCurrentDate(now);
+    }
+  };
 
   const sectionListData = useMemo(() => {
     const groupedData = currentMonthData.reduce((acc, curr) => {
@@ -209,30 +283,115 @@ export const CashflowScreen = () => {
     return Object.keys(groupedData).map((key) => ({ title: key, data: groupedData[key] }));
   }, [currentMonthData, locale]);
 
-  const isCurrentMonthNow = isSameMonth(currentDate, new Date());
+  const isCurrentMonthNow = isSamePeriod(currentDate, new Date(), monthStartDay);
+  const periodLabel = formatPeriodLabel(periodBounds, locale);
+
+  const nowForCalendar = new Date();
+  const isCalendarCurrentMonth =
+    calendarMonth.getFullYear() === nowForCalendar.getFullYear() &&
+    calendarMonth.getMonth() === nowForCalendar.getMonth();
+  const calendarMonthLabel = formatLocaleDate(calendarMonth, locale, { month: 'long', year: 'numeric' });
+
+  const calendarBounds = useMemo(
+    () => getCalendarMonthBounds(calendarMonth.getFullYear(), calendarMonth.getMonth()),
+    [calendarMonth]
+  );
+
+  const calendarDailyTotals = useMemo(() => {
+    if (viewMode !== 'calendar') return [] as DailyTotal[];
+    return getDailyTotals(calendarBounds.startMs, calendarBounds.endMs);
+  }, [viewMode, calendarBounds.startMs, calendarBounds.endMs, getDailyTotals, filterRefreshTick, transactionsList]);
+
+  const dailyTotalsMap = useMemo(() => {
+    const map: Record<string, DailyTotal> = {};
+    for (const row of calendarDailyTotals) {
+      map[row.dayKey] = row;
+    }
+    return map;
+  }, [calendarDailyTotals]);
+
+  const calendarSummary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    for (const row of calendarDailyTotals) {
+      income = addAmounts(income, row.income);
+      expense = addAmounts(expense, row.expense);
+    }
+    return {
+      income,
+      expense,
+      balance: addAmounts(income, -expense),
+    };
+  }, [calendarDailyTotals]);
+
+  const selectedCalendarDate = useMemo(() => {
+    if (!selectedCalendarDayKey) return null;
+    const parts = selectedCalendarDayKey.split('-').map(Number);
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+  }, [selectedCalendarDayKey]);
+
+  const selectedDayTransactions = useMemo(() => {
+    if (viewMode !== 'calendar' || !selectedCalendarDate) return [] as Transaction[];
+    const { startMs, endMs } = getLocalDayBounds(selectedCalendarDate);
+    return transactionsList
+      .filter((tx) => typeof tx.date === 'number' && tx.date >= startMs && tx.date <= endMs)
+      .sort((a, b) => b.date - a.date);
+  }, [viewMode, selectedCalendarDate, transactionsList]);
+
+  const handleSelectCalendarDay = (cell: CalendarDayCell) => {
+    setSelectedCalendarDayKey(cell.dayKey);
+  };
+
+  const handleAddOnSelectedDay = () => {
+    if (!selectedCalendarDate) return;
+    const now = new Date();
+    const prefillDate = new Date(
+      selectedCalendarDate.getFullYear(),
+      selectedCalendarDate.getMonth(),
+      selectedCalendarDate.getDate(),
+      now.getHours(),
+      now.getMinutes(),
+      now.getSeconds(),
+      0
+    );
+    navigation.navigate('AddTransactionStack', { initialDate: prefillDate.getTime() });
+  };
 
   const resetToCurrentMonth = () => {
     setCurrentDate(new Date());
   };
 
-  const renderHeader = () => (
-    <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+  const renderSummaryCard = (incomeVal: number, expenseVal: number, balanceVal: number) => (
+    <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Income</Text>
-        <Text style={[styles.summaryValue, { color: theme.income }]}>{formatDisplayCurrency(totalIncome || 0, currencyCode, useThousandsSeparator)}</Text>
+        <Text style={[styles.summaryValue, { color: theme.income }]} numberOfLines={1} adjustsFontSizeToFit>
+          {formatDisplayCurrency(incomeVal || 0, currencyCode, useThousandsSeparator)}
+        </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Expense</Text>
-        <Text style={[styles.summaryValue, { color: theme.expense }]}>{formatDisplayCurrency(totalExpense || 0, currencyCode, useThousandsSeparator)}</Text>
+        <Text style={[styles.summaryValue, { color: theme.expense }]} numberOfLines={1} adjustsFontSizeToFit>
+          {formatDisplayCurrency(expenseVal || 0, currencyCode, useThousandsSeparator)}
+        </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Balance</Text>
-        <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>{formatDisplayCurrency(balance || 0, currencyCode, useThousandsSeparator)}</Text>
+        <Text
+          style={[styles.summaryValue, { color: (balanceVal || 0) >= 0 ? theme.income : theme.expense }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
+          {formatDisplayCurrency(balanceVal || 0, currencyCode, useThousandsSeparator)}
+        </Text>
       </View>
     </View>
   );
+
+  const renderHeader = () => renderSummaryCard(totalIncome, totalExpense, balance);
 
   const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
   const showAccountNames = wallets.filter((w) => w.isActive).length > 1;
@@ -307,7 +466,7 @@ export const CashflowScreen = () => {
       setDateFrom(null);
       setDateTo(null);
     } else {
-      const bounds = computeDatePresetBounds(preset);
+      const bounds = computeDatePresetBounds(preset, new Date(), monthStartDay);
       setDatePreset(preset);
       setDateFrom(bounds.from);
       setDateTo(bounds.to);
@@ -419,150 +578,208 @@ export const CashflowScreen = () => {
   const queueReady = queueItems.filter((item) => item.status === 'done').length;
   const queueWaiting = queueItems.filter((item) => item.status === 'pending' || item.status === 'processing').length;
 
+  const selectedDayShortLabel = selectedCalendarDate
+    ? formatLocaleDate(selectedCalendarDate, locale, { day: 'numeric', month: 'short' })
+    : '';
+  const selectedDayFullLabel = selectedCalendarDate
+    ? formatLocaleDate(selectedCalendarDate, locale, {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : '';
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
-      {/* Search Bar */}
-      <View style={[styles.searchBarWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
-        <TextInput
-          style={[styles.searchInput, { color: theme.text }]}
-          placeholder="Search merchant, note, or items..."
-          placeholderTextColor={theme.textMuted}
-          selectionColor={theme.primary}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Search transactions"
-        />
-        {searchQuery.length > 0 ? (
-          <TouchableOpacity
-            onPress={() => setSearchQuery('')}
-            style={styles.clearSearchBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityRole="button"
-            accessibilityLabel="Clear search"
-          >
-            <Ionicons name="close-circle" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Filter Chips Row */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBarScroll}
-        contentContainerStyle={styles.filterBarContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      {/* Top List | Calendar View Toggle */}
+      <View style={[styles.viewModeWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <TouchableOpacity
           style={[
-            styles.filterChip,
-            {
-              backgroundColor: typeFilter ? theme.primaryMuted : theme.surface,
-              borderColor: typeFilter ? theme.primary : theme.border,
-            },
+            styles.viewModeBtn,
+            viewMode === 'list' ? { backgroundColor: theme.primary } : { backgroundColor: 'transparent' },
           ]}
-          onPress={() => setActiveFilterSheet('type')}
+          onPress={() => handleSwitchViewMode('list')}
           accessibilityRole="button"
-          accessibilityLabel="Filter by type"
-          accessibilityState={{ selected: Boolean(typeFilter) }}
+          accessibilityLabel="List view"
+          accessibilityState={{ selected: viewMode === 'list' }}
         >
-          <Text style={[styles.filterChipText, { color: typeFilter ? theme.primary : theme.text }]} numberOfLines={1}>
-            {typeChipLabel}
+          <Ionicons
+            name="list-outline"
+            size={16}
+            color={viewMode === 'list' ? theme.onPrimary : theme.textMuted}
+          />
+          <Text style={[styles.viewModeText, { color: viewMode === 'list' ? theme.onPrimary : theme.text }]}>
+            List
           </Text>
-          <Ionicons name="chevron-down" size={14} color={typeFilter ? theme.primary : theme.textMuted} />
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[
-            styles.filterChip,
-            {
-              backgroundColor: walletFilterId != null ? theme.primaryMuted : theme.surface,
-              borderColor: walletFilterId != null ? theme.primary : theme.border,
-            },
+            styles.viewModeBtn,
+            viewMode === 'calendar' ? { backgroundColor: theme.primary } : { backgroundColor: 'transparent' },
           ]}
-          onPress={() => setActiveFilterSheet('account')}
+          onPress={() => handleSwitchViewMode('calendar')}
           accessibilityRole="button"
-          accessibilityLabel="Filter by account"
-          accessibilityState={{ selected: walletFilterId != null }}
-        >
-          <Text
-            style={[styles.filterChipText, { color: walletFilterId != null ? theme.primary : theme.text }]}
-            numberOfLines={1}
-          >
-            {accountChipLabel}
-          </Text>
-          <Ionicons name="chevron-down" size={14} color={walletFilterId != null ? theme.primary : theme.textMuted} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.filterChip,
-            {
-              backgroundColor: categoryFilter ? theme.primaryMuted : theme.surface,
-              borderColor: categoryFilter ? theme.primary : theme.border,
-            },
-          ]}
-          onPress={() => setActiveFilterSheet('category')}
-          accessibilityRole="button"
-          accessibilityLabel="Filter by category"
-          accessibilityState={{ selected: Boolean(categoryFilter) }}
-        >
-          <Text
-            style={[styles.filterChipText, { color: categoryFilter ? theme.primary : theme.text }]}
-            numberOfLines={1}
-          >
-            {categoryFilter ?? 'Category'}
-          </Text>
-          <Ionicons name="chevron-down" size={14} color={categoryFilter ? theme.primary : theme.textMuted} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.filterChip,
-            {
-              backgroundColor: dateFrom != null || dateTo != null ? theme.primaryMuted : theme.surface,
-              borderColor: dateFrom != null || dateTo != null ? theme.primary : theme.border,
-            },
-          ]}
-          onPress={() => setActiveFilterSheet('date')}
-          accessibilityRole="button"
-          accessibilityLabel="Filter by date range"
-          accessibilityState={{ selected: dateFrom != null || dateTo != null }}
+          accessibilityLabel="Calendar view"
+          accessibilityState={{ selected: viewMode === 'calendar' }}
         >
           <Ionicons
             name="calendar-outline"
-            size={14}
-            color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
+            size={16}
+            color={viewMode === 'calendar' ? theme.onPrimary : theme.textMuted}
           />
-          <Text
-            style={[styles.filterChipText, { color: dateFrom != null || dateTo != null ? theme.primary : theme.text }]}
-            numberOfLines={1}
-          >
-            {dateRangeChipLabel}
+          <Text style={[styles.viewModeText, { color: viewMode === 'calendar' ? theme.onPrimary : theme.text }]}>
+            Calendar
           </Text>
-          <Ionicons
-            name="chevron-down"
-            size={14}
-            color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
-          />
         </TouchableOpacity>
+      </View>
 
-        {hasActiveFilters ? (
-          <TouchableOpacity
-            style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }]}
-            onPress={clearAllFilters}
-            accessibilityRole="button"
-            accessibilityLabel="Clear filters"
+      {viewMode === 'list' ? (
+        <>
+          {/* Search Bar */}
+          <View style={[styles.searchBarWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.text }]}
+              placeholder="Search merchant, note, or items..."
+              placeholderTextColor={theme.textMuted}
+              selectionColor={theme.primary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              accessibilityLabel="Search transactions"
+            />
+            {searchQuery.length > 0 ? (
+              <TouchableOpacity
+                onPress={() => setSearchQuery('')}
+                style={styles.clearSearchBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Filter Chips Row */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterBarScroll}
+            contentContainerStyle={styles.filterBarContent}
+            keyboardShouldPersistTaps="handled"
           >
-            <Ionicons name="close-circle-outline" size={15} color={theme.textMuted} />
-            <Text style={[styles.filterChipText, { color: theme.textMuted }]}>Clear</Text>
-          </TouchableOpacity>
-        ) : null}
-      </ScrollView>
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: typeFilter ? theme.primaryMuted : theme.surface,
+                  borderColor: typeFilter ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => setActiveFilterSheet('type')}
+              accessibilityRole="button"
+              accessibilityLabel="Filter by type"
+              accessibilityState={{ selected: Boolean(typeFilter) }}
+            >
+              <Text style={[styles.filterChipText, { color: typeFilter ? theme.primary : theme.text }]} numberOfLines={1}>
+                {typeChipLabel}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color={typeFilter ? theme.primary : theme.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: walletFilterId != null ? theme.primaryMuted : theme.surface,
+                  borderColor: walletFilterId != null ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => setActiveFilterSheet('account')}
+              accessibilityRole="button"
+              accessibilityLabel="Filter by account"
+              accessibilityState={{ selected: walletFilterId != null }}
+            >
+              <Text
+                style={[styles.filterChipText, { color: walletFilterId != null ? theme.primary : theme.text }]}
+                numberOfLines={1}
+              >
+                {accountChipLabel}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color={walletFilterId != null ? theme.primary : theme.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: categoryFilter ? theme.primaryMuted : theme.surface,
+                  borderColor: categoryFilter ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => setActiveFilterSheet('category')}
+              accessibilityRole="button"
+              accessibilityLabel="Filter by category"
+              accessibilityState={{ selected: Boolean(categoryFilter) }}
+            >
+              <Text
+                style={[styles.filterChipText, { color: categoryFilter ? theme.primary : theme.text }]}
+                numberOfLines={1}
+              >
+                {categoryFilter ?? 'Category'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color={categoryFilter ? theme.primary : theme.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: dateFrom != null || dateTo != null ? theme.primaryMuted : theme.surface,
+                  borderColor: dateFrom != null || dateTo != null ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => setActiveFilterSheet('date')}
+              accessibilityRole="button"
+              accessibilityLabel="Filter by date range"
+              accessibilityState={{ selected: dateFrom != null || dateTo != null }}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={14}
+                color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
+              />
+              <Text
+                style={[styles.filterChipText, { color: dateFrom != null || dateTo != null ? theme.primary : theme.text }]}
+                numberOfLines={1}
+              >
+                {dateRangeChipLabel}
+              </Text>
+              <Ionicons
+                name="chevron-down"
+                size={14}
+                color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
+              />
+            </TouchableOpacity>
+
+            {hasActiveFilters ? (
+              <TouchableOpacity
+                style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={clearAllFilters}
+                accessibilityRole="button"
+                accessibilityLabel="Clear filters"
+              >
+                <Ionicons name="close-circle-outline" size={15} color={theme.textMuted} />
+                <Text style={[styles.filterChipText, { color: theme.textMuted }]}>Clear</Text>
+              </TouchableOpacity>
+            ) : null}
+          </ScrollView>
+        </>
+      ) : null}
 
       {queueReady + queueWaiting > 0 ? (
         <TouchableOpacity
@@ -598,7 +815,104 @@ export const CashflowScreen = () => {
         </View>
       ) : null}
 
-      {searchResults !== null ? (
+      {viewMode === 'calendar' ? (
+        <>
+          {/* Calendar Month Selector */}
+          <View style={[styles.monthSelector, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+            <TouchableOpacity
+              onPress={() => changeCalendarMonth(-1)}
+              style={styles.arrowBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Previous month"
+            >
+              <Ionicons name="chevron-back" size={20} color={theme.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={resetCalendarToToday}
+              style={styles.monthTextWrap}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Jump to current month"
+            >
+              <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+                {calendarMonthLabel}
+              </Text>
+              {!isCalendarCurrentMonth && (
+                <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
+                  <Text style={[styles.todayBadgeText, { color: theme.primary }]}>Today</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => changeCalendarMonth(1)}
+              style={styles.arrowBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Next month"
+            >
+              <Ionicons name="chevron-forward" size={20} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.listContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
+            showsVerticalScrollIndicator={false}
+          >
+            {renderSummaryCard(calendarSummary.income, calendarSummary.expense, calendarSummary.balance)}
+
+            <MonthlyCalendarView
+              year={calendarMonth.getFullYear()}
+              month={calendarMonth.getMonth()}
+              weekStartDay={weekStartDay}
+              dailyTotalsMap={dailyTotalsMap}
+              selectedDayKey={selectedCalendarDayKey}
+              currencyCode={currencyCode}
+              locale={locale}
+              onSelectDay={handleSelectCalendarDay}
+            />
+
+            {selectedCalendarDate ? (
+              <View style={styles.selectedDaySection}>
+                <View style={styles.selectedDayHeader}>
+                  <Text style={[styles.selectedDayTitle, { color: theme.text }]} numberOfLines={1}>
+                    {selectedDayFullLabel}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.addOnDayBtn, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
+                    onPress={handleAddOnSelectedDay}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add on ${selectedDayShortLabel}`}
+                  >
+                    <Ionicons name="add" size={16} color={theme.primary} />
+                    <Text style={[styles.addOnDayBtnText, { color: theme.primary }]} numberOfLines={1}>
+                      Add on {selectedDayShortLabel}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {selectedDayTransactions.length > 0 ? (
+                  <View style={[styles.selectedDayListCard, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+                    {selectedDayTransactions.map((tx) => renderTransactionItem(tx))}
+                  </View>
+                ) : (
+                  <View style={[styles.emptyDayCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                    <Text style={[styles.emptyDayText, { color: theme.textMuted }]}>
+                      No transactions on {selectedDayShortLabel}.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={[styles.emptyDayCard, { marginHorizontal: 14, marginTop: 12, backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.emptyDayText, { color: theme.textMuted }]}>
+                  Tap a day to view its transactions or add one.
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </>
+      ) : searchResults !== null ? (
         /* Search & Filtered Results List */
         <FlatList
           data={searchResults}
@@ -634,7 +948,7 @@ export const CashflowScreen = () => {
         />
       ) : (
         <>
-          {/* Month Selector */}
+          {/* Month / Period Selector */}
           <View style={[styles.monthSelector, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
             <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.arrowBtn} accessibilityRole="button" accessibilityLabel="Previous month">
               <Ionicons name="chevron-back" size={20} color={theme.text} />
@@ -647,8 +961,8 @@ export const CashflowScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Jump to current month"
             >
-              <Text style={[styles.monthText, { color: theme.text }]}>
-                {formatLocaleDate(currentDate, locale, { month: 'long', year: 'numeric' })}
+              <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+                {periodLabel}
               </Text>
               {!isCurrentMonthNow && (
                 <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
@@ -669,7 +983,9 @@ export const CashflowScreen = () => {
             ListEmptyComponent={
               <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                 <Ionicons name="wallet-outline" size={32} color={theme.textMuted} style={styles.emptyIcon} />
-                <Text style={[styles.emptyTitle, { color: theme.text }]}>No transactions this month</Text>
+                <Text style={[styles.emptyTitle, { color: theme.text }]}>
+                  {monthStartDay === 1 ? 'No transactions this month' : 'No transactions in this period'}
+                </Text>
                 <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
                   Tap + at the bottom to add your first transaction.
                 </Text>
@@ -960,7 +1276,25 @@ export const CashflowScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  searchBarWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 8, marginBottom: 6, paddingHorizontal: 10, height: 42, borderRadius: 12, borderWidth: 1 },
+  viewModeWrap: {
+    flexDirection: 'row',
+    marginHorizontal: 14,
+    marginTop: 8,
+    marginBottom: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  viewModeBtn: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  viewModeText: { fontSize: 13, fontWeight: '700' },
+  searchBarWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 2, marginBottom: 6, paddingHorizontal: 10, height: 42, borderRadius: 12, borderWidth: 1 },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 14, paddingVertical: 0 },
   clearSearchBtn: { padding: 4 },
@@ -1040,8 +1374,43 @@ const styles = StyleSheet.create({
   errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
   errorDismissBtn: { minWidth: 32, minHeight: 32, alignItems: 'center', justifyContent: 'center' },
   monthSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
-  monthTextWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  monthText: { fontSize: 16, fontWeight: '600' },
+  monthTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
+  monthText: { fontSize: 16, fontWeight: '600', flexShrink: 1 },
+  selectedDaySection: { marginTop: 12 },
+  selectedDayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    marginBottom: 8,
+    gap: 8,
+  },
+  selectedDayTitle: { fontSize: 13, fontWeight: '700', flex: 1 },
+  addOnDayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  addOnDayBtnText: { fontSize: 12, fontWeight: '700' },
+  selectedDayListCard: {
+    marginHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  emptyDayCard: {
+    marginHorizontal: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  emptyDayText: { fontSize: 13, fontWeight: '500', textAlign: 'center' },
   todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   todayBadgeText: { fontSize: 10, fontWeight: '700' },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

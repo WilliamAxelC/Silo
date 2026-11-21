@@ -39,7 +39,7 @@ describe('BudgetScreen', () => {
         }) as any
     );
 
-    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true });
+    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true, dateFormat: 'en-GB', monthStartDay: 1 });
     useTransactionStore.setState({
       transactionsList: [],
       budgets: { Groceries: 1000000 },
@@ -214,6 +214,54 @@ describe('BudgetScreen', () => {
       await renderer.root.findByProps({ accessibilityLabel: 'Save budget limit' }).props.onPress();
     });
     expect(mockSetBudget).not.toHaveBeenCalled();
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('tracks budget spending and shows custom period label when monthStartDay > 1', () => {
+    const now = new Date();
+    const { getPeriodBounds, formatPeriodLabel } = require('../../features/transactions/periods');
+    const bounds = getPeriodBounds(now, 25);
+    const expectedLabel = formatPeriodLabel(bounds, 'en-GB');
+
+    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true, dateFormat: 'en-GB', monthStartDay: 25 });
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 1,
+          merchantName: 'In Cycle Grocery',
+          totalAmount: -400000,
+          type: 'expense',
+          category: 'Groceries',
+          date: bounds.startMs + 10_000,
+        },
+        {
+          id: 2,
+          merchantName: 'Prior Cycle Grocery',
+          totalAmount: -700000,
+          type: 'expense',
+          category: 'Groceries',
+          date: bounds.startMs - 10_000,
+        },
+      ],
+      budgets: { Groceries: 1000000 },
+      categories: [{ id: 1, name: 'Groceries', type: 'expense', isSystem: true, createdAt: 1000 }],
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<BudgetScreen />);
+    });
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) =>
+      Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
+    );
+    expect(texts).toContain(expectedLabel);
+    // Only the 400.000 in-cycle expense counts (40% of 1.000.000 cap, not 110%)
+    expect(texts.some((t: string) => t.includes('40% of cap used'))).toBe(true);
+    expect(texts.some((t: string) => t.includes('On Pace'))).toBe(true);
 
     ReactTestRenderer.act(() => {
       renderer.unmount();

@@ -7,7 +7,8 @@ import { db } from '../db/index';
 import { appSettings } from '../db/schema';
 import { parseSettingsRows, serializeSettingValue, getInitialAppSettings } from '../features/transactions/categories';
 import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
-import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider } from '../features/transactions/types';
+import { clampMonthStartDay } from '../features/transactions/periods';
+import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, WeekStartDay } from '../features/transactions/types';
 import { useAIStore } from './useAIStore';
 
 interface SettingsState extends AppSettings {
@@ -32,6 +33,10 @@ interface SettingsState extends AppSettings {
   setExternalSystemPrompt: (prompt: string) => Promise<void>;
   setReceiptReadingMode: (mode: 'ocr' | 'vision') => Promise<void>;
   setAppLockEnabled: (enabled: boolean) => Promise<void>;
+  setDailyReminderEnabled: (enabled: boolean) => Promise<void>;
+  setDailyReminderTime: (time: string) => Promise<void>;
+  setMonthStartDay: (day: number) => Promise<void>;
+  setWeekStartDay: (day: WeekStartDay) => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
@@ -203,6 +208,27 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAppLockEnabled: async (appLockEnabled) => {
     await saveSetting('appLockEnabled', appLockEnabled);
     set({ appLockEnabled });
+  },
+
+  setDailyReminderEnabled: async (dailyReminderEnabled) => {
+    await saveSetting('dailyReminderEnabled', dailyReminderEnabled);
+    set({ dailyReminderEnabled });
+  },
+
+  setDailyReminderTime: async (dailyReminderTime) => {
+    await saveSetting('dailyReminderTime', dailyReminderTime);
+    set({ dailyReminderTime });
+  },
+
+  setMonthStartDay: async (day) => {
+    const monthStartDay = clampMonthStartDay(day);
+    await saveSetting('monthStartDay', monthStartDay);
+    set({ monthStartDay });
+  },
+
+  setWeekStartDay: async (weekStartDay) => {
+    await saveSetting('weekStartDay', weekStartDay);
+    set({ weekStartDay });
   },
 }));
 

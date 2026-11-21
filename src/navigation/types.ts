@@ -16,7 +16,13 @@ export type RootStackParamList = {
   // FIX: Tell TypeScript that MainTabs is a navigator that accepts Tab routes!
   MainTabs: NavigatorScreenParams<RootTabParamList>;
   Chatbot: { initialMessage?: string };
-  AddTransactionStack: { transactionId?: number; receiptQueueId?: number; duplicateFromId?: number };
+  AddTransactionStack: {
+    transactionId?: number;
+    receiptQueueId?: number;
+    duplicateFromId?: number;
+    /** Optional epoch ms timestamp to prefill the transaction date (e.g. from Calendar view). */
+    initialDate?: number;
+  };
   ReceiptInbox: undefined;
   Accounts: undefined;
   Recurring: undefined;

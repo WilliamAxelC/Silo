@@ -147,6 +147,10 @@ export const DEFAULT_APP_SETTINGS = {
   localSystemPrompt: '',
   externalSystemPrompt: '',
   appLockEnabled: false,
+  dailyReminderEnabled: false,
+  dailyReminderTime: '20:00',
+  monthStartDay: 1,
+  weekStartDay: 'monday',
 } as const;
 
 export const APP_SETTING_KEYS = {
@@ -167,4 +171,8 @@ export const APP_SETTING_KEYS = {
   localSystemPrompt: 'localSystemPrompt',
   externalSystemPrompt: 'externalSystemPrompt',
   appLockEnabled: 'appLockEnabled',
+  dailyReminderEnabled: 'dailyReminderEnabled',
+  dailyReminderTime: 'dailyReminderTime',
+  monthStartDay: 'monthStartDay',
+  weekStartDay: 'weekStartDay',
 } as const;

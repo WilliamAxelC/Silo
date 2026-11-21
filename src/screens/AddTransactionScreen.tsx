@@ -107,6 +107,7 @@ export const AddTransactionScreen = () => {
   const editingId = route.params?.transactionId;
   const duplicateFromId = route.params?.duplicateFromId;
   const receiptQueueId = route.params?.receiptQueueId;
+  const initialDate = route.params?.initialDate;
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousandsSeparator = useSettingsStore((s) => s.useThousandsSeparator);
@@ -155,7 +156,9 @@ export const AddTransactionScreen = () => {
   const [lineItems, setLineItems] = useState<ReceiptLineItemDraft[]>([]);
   const [detailsMode, setDetailsMode] = useState<TransactionUIInputMode>('note');
 
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(() =>
+    typeof initialDate === 'number' && Number.isFinite(initialDate) ? new Date(initialDate) : new Date()
+  );
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
 
@@ -206,7 +209,7 @@ export const AddTransactionScreen = () => {
     []
   );
 
-  const resetForm = () => {
+  const resetForm = (dateOverride?: number) => {
     const fallbackCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
     const nextForm = createTransactionInput({ category: fallbackCategory, type });
     setTitle(nextForm.merchantName);
@@ -220,7 +223,9 @@ export const AddTransactionScreen = () => {
     setDetailsMode('note');
     setImageUri(nextForm.imageUri ?? null);
     setType(nextForm.type);
-    setSelectedDate(new Date());
+    setSelectedDate(
+      typeof dateOverride === 'number' && Number.isFinite(dateOverride) ? new Date(dateOverride) : new Date()
+    );
     setScanStatusLabel(null);
     setRawOcrText(null);
     setIsRawTextExpanded(false);
@@ -234,7 +239,7 @@ export const AddTransactionScreen = () => {
 
   const populateFormFromTransaction = (
     tx: Partial<Transaction>,
-    options: { preserveDateAndPhoto: boolean }
+    options: { preserveDateAndPhoto: boolean; dateOverride?: Date }
   ) => {
     const editableTransaction = buildEditableTransactionInput(tx);
     const editableType = deriveEditableTransactionType(editableTransaction.totalAmount, editableTransaction.type);
@@ -253,7 +258,13 @@ export const AddTransactionScreen = () => {
     setNote(editableTransaction.note || '');
     setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
     setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
-    setSelectedDate(options.preserveDateAndPhoto ? new Date(editableTransaction.date) : new Date());
+    setSelectedDate(
+      options.dateOverride
+        ? new Date(options.dateOverride.getTime())
+        : options.preserveDateAndPhoto
+          ? new Date(editableTransaction.date)
+          : new Date()
+    );
     setImageUri(options.preserveDateAndPhoto ? editableTransaction.imageUri || null : null);
     const knownWallets = useTransactionStore.getState().wallets;
     const activeDefaultWalletId = knownWallets.find((w) => w.isActive)?.id ?? null;
@@ -297,7 +308,7 @@ export const AddTransactionScreen = () => {
         resetForm();
       }
     } else {
-      resetForm();
+      resetForm(initialDate);
       const queued = receiptQueueId
         ? useReceiptQueueStore.getState().items.find((item) => item.id === receiptQueueId)
         : undefined;
@@ -306,7 +317,7 @@ export const AddTransactionScreen = () => {
         applyScanResult(queued.result);
       }
     }
-  }, [editingId, duplicateFromId, receiptQueueId]);
+  }, [editingId, duplicateFromId, receiptQueueId, initialDate]);
 
   useEffect(() => {
     const typeChanged = prevTypeRef.current !== type;
@@ -675,13 +686,18 @@ export const AddTransactionScreen = () => {
   };
 
   const handleApplyTemplate = (item: TransactionTemplate) => {
+    const preservedDate = Number.isFinite(selectedDate.getTime())
+      ? selectedDate
+      : typeof initialDate === 'number' && Number.isFinite(initialDate)
+        ? new Date(initialDate)
+        : new Date();
     populateFormFromTransaction(
       {
         ...item.template,
-        date: Date.now(),
+        date: preservedDate.getTime(),
         imageUri: null,
       },
-      { preserveDateAndPhoto: false }
+      { preserveDateAndPhoto: false, dateOverride: preservedDate }
     );
   };
 

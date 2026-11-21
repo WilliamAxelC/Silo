@@ -7,6 +7,7 @@ import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKi
 import { isGrounded, pickTotalFromRows } from '../ocr/receiptText';
 import { assessReceiptConfidence, type ReceiptConfidence } from '../ocr/receiptConfidence';
 import { parseSignedAmount } from '../../features/transactions/amount';
+import { formatPeriodLabel, getPeriodBounds, shiftPeriod } from '../../features/transactions/periods';
 import { useAIStore, type Message } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import {
@@ -68,25 +69,55 @@ function formatCurrency(amount: number | null | undefined): string {
   }).format(safeAmount);
 }
 
-function findCategorySpending(userPrompt: string): { category: string | null; days: number } {
-  const categoryMatch = userPrompt.match(/(?:spent on|spend on|for)\s+([a-zA-Z &-]+?)(?:\s+in|\s+over|\s+during|\?|$)/i);
+type SpendingPeriodSpec =
+  | { kind: 'days'; days: number }
+  | { kind: 'thisMonth' }
+  | { kind: 'lastMonth' };
+
+function findCategorySpending(userPrompt: string): { category: string | null; period: SpendingPeriodSpec } {
+  const categoryMatch = userPrompt.match(
+    /(?:spent on|spend on|for)\s+([a-zA-Z &-]+?)(?:\s+(?:in|over|during|this\s+month|current\s+month|last\s+month)|\?|$)/i
+  );
   const daysMatch = userPrompt.match(/last\s+(\d+)\s+days?/i);
+  const isLastMonth = /\blast\s+month\b/i.test(userPrompt);
+  const isThisMonth = /\b(?:this|current)\s+month\b/i.test(userPrompt);
+
+  const period: SpendingPeriodSpec = daysMatch
+    ? { kind: 'days', days: Number(daysMatch[1]) }
+    : isLastMonth
+      ? { kind: 'lastMonth' }
+      : isThisMonth
+        ? { kind: 'thisMonth' }
+        : { kind: 'days', days: 30 };
 
   return {
     category: categoryMatch?.[1]?.trim() ?? null,
-    days: daysMatch ? Number(daysMatch[1]) : 30,
+    period,
   };
 }
 
-function getCategorySpending(category: string, days: number) {
-  const now = Date.now();
-  const from = now - days * 24 * 60 * 60 * 1000;
+function getCategorySpendingInRange(category: string, fromMs: number, toMs: number) {
   const rows = expoDb.getAllSync<{ total: number | null }>(
-    "SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND type != 'transfer' AND category LIKE ? AND date >= ?",
-    [`%${category}%`, from],
+    "SELECT SUM(ABS(total_amount)) as total FROM ai_transactions_view WHERE total_amount < 0 AND type != 'transfer' AND category LIKE ? AND date >= ? AND date <= ?",
+    [`%${category}%`, fromMs, toMs],
   );
 
   return rows[0]?.total ?? 0;
+}
+
+function getPeriodSpendingSummary(fromMs: number, toMs: number): { income: number; expense: number } {
+  const rows = expoDb.getAllSync<{ income: number | null; expense: number | null }>(
+    `SELECT
+      COALESCE(SUM(CASE WHEN type = 'income' THEN ABS(total_amount) WHEN type != 'expense' AND type != 'transfer' AND total_amount > 0 THEN total_amount ELSE 0 END), 0) AS income,
+      COALESCE(SUM(CASE WHEN type = 'expense' THEN ABS(total_amount) WHEN type != 'income' AND type != 'transfer' AND total_amount < 0 THEN ABS(total_amount) ELSE 0 END), 0) AS expense
+     FROM transactions
+     WHERE type != 'transfer' AND date >= ? AND date <= ?`,
+    [fromMs, toMs],
+  );
+  return {
+    income: rows[0]?.income ?? 0,
+    expense: rows[0]?.expense ?? 0,
+  };
 }
 
 function getTotalBalance() {
@@ -168,14 +199,45 @@ export function buildRetrievedContext(userPrompt: string): RetrievedContextItem[
     .sort((a, b) => b.score - a.score)
     .slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT);
 
-  const { category, days } = findCategorySpending(userPrompt);
-  if (category) {
-    const total = getCategorySpending(category, days);
+  const { category, period } = findCategorySpending(userPrompt);
+  const settings = useSettingsStore.getState();
+  const monthStartDay = settings?.monthStartDay ?? 1;
+  const locale = settings?.dateFormat || 'en-GB';
+
+  if (period.kind === 'thisMonth' || period.kind === 'lastMonth') {
+    const now = new Date();
+    const anchor = period.kind === 'lastMonth' ? shiftPeriod(now, -1, monthStartDay) : now;
+    const bounds = getPeriodBounds(anchor, monthStartDay);
+    const periodLabel = formatPeriodLabel(bounds, locale);
+
+    if (category) {
+      const total = getCategorySpendingInRange(category, bounds.startMs, bounds.endMs);
+      contextItems.unshift({
+        id: `category-${category.toLowerCase()}-${period.kind}`,
+        kind: 'category-spending',
+        label: `${category} spending (${periodLabel})`,
+        content: `You spent ${formatCurrency(total)} on ${category} in ${periodLabel}.`,
+        score: 10,
+      });
+    } else {
+      const summary = getPeriodSpendingSummary(bounds.startMs, bounds.endMs);
+      contextItems.unshift({
+        id: `period-summary-${period.kind}`,
+        kind: 'category-spending',
+        label: `Period summary (${periodLabel})`,
+        content: `For ${periodLabel}, income is ${formatCurrency(summary.income)} and spending is ${formatCurrency(summary.expense)}.`,
+        score: 10,
+      });
+    }
+  } else if (category) {
+    const nowMs = Date.now();
+    const fromMs = nowMs - period.days * 24 * 60 * 60 * 1000;
+    const total = getCategorySpendingInRange(category, fromMs, nowMs);
     contextItems.unshift({
       id: `category-${category.toLowerCase()}`,
       kind: 'category-spending',
       label: `${category} spending`,
-      content: `You spent ${formatCurrency(total)} on ${category} in the last ${days} days.`,
+      content: `You spent ${formatCurrency(total)} on ${category} in the last ${period.days} days.`,
       score: 10,
     });
   }

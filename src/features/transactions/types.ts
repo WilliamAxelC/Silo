@@ -2,6 +2,7 @@ export type TransactionType = 'income' | 'expense' | 'transfer';
 export type TransactionUIInputMode = 'note' | 'receipt' | 'both';
 export type CategoryType = 'expense' | 'income';
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type WeekStartDay = 'monday' | 'sunday';
 
 export interface TransactionReceiptLineItem {
   name: string;
@@ -85,6 +86,14 @@ export interface AppSettings {
   externalSystemPrompt: string;
   /** Require fingerprint/face/device PIN to open Silo. */
   appLockEnabled: boolean;
+  /** Local daily logging reminder notification toggle. */
+  dailyReminderEnabled: boolean;
+  /** 24-hour local reminder time in HH:MM format (default '20:00'). */
+  dailyReminderTime: string;
+  /** Day of month (1-28) when custom monthly billing periods start. */
+  monthStartDay: number;
+  /** First day of the week shown in calendar views ('monday' | 'sunday'). */
+  weekStartDay: WeekStartDay;
 }
 
 export type TransactionInput = Omit<Transaction, 'id'>;

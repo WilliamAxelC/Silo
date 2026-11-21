@@ -295,6 +295,73 @@ export function formatDisplayCurrency(
   }
 }
 
+/**
+ * Formats an amount into a compact, cell-safe string for dense spaces like the monthly calendar grid.
+ * - IDR: uses Indonesian suffixes and comma decimal separator (e.g. 45rb, 1,2jt, 1,5M).
+ * - Other currencies: uses dot decimal separator and k/M/B/T suffixes (e.g. 1.2k, 45k, 1.2M).
+ * Always formats the absolute magnitude; callers convey direction via color or prefix.
+ */
+export function formatCompactAmount(amount: number | null | undefined, currencyCode: string = 'IDR'): string {
+  const safe = typeof amount === 'number' && Number.isFinite(amount) ? Math.abs(amount) : 0;
+  if (safe === 0) return '0';
+
+  const normalizedCode = (currencyCode || 'IDR').trim().toUpperCase();
+  const isIdr = normalizedCode === 'IDR';
+  const decimalSep = isIdr ? ',' : '.';
+
+  const tiers: ReadonlyArray<{ threshold: number; suffix: string }> = isIdr
+    ? [
+        { threshold: 1e12, suffix: 'T' },
+        { threshold: 1e9, suffix: 'M' },
+        { threshold: 1e6, suffix: 'jt' },
+        { threshold: 1e3, suffix: 'rb' },
+      ]
+    : [
+        { threshold: 1e12, suffix: 'T' },
+        { threshold: 1e9, suffix: 'B' },
+        { threshold: 1e6, suffix: 'M' },
+        { threshold: 1e3, suffix: 'k' },
+      ];
+
+  const formatScaled = (value: number, suffix: string): string => {
+    if (value < 10) {
+      const rounded = Math.round(value * 10) / 10;
+      const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace('.', decimalSep);
+      return `${text}${suffix}`;
+    }
+    return `${Math.round(value)}${suffix}`;
+  };
+
+  for (let i = 0; i < tiers.length; i += 1) {
+    const tier = tiers[i];
+    if (safe >= tier.threshold) {
+      const scaled = safe / tier.threshold;
+      const rounded = scaled < 10 ? Math.round(scaled * 10) / 10 : Math.round(scaled);
+      // Promote values like 999.6k -> 1M or 999.6rb -> 1jt so we never output "1000k" / "1000rb".
+      if (rounded >= 1000 && i > 0) {
+        return formatScaled(safe / tiers[i - 1].threshold, tiers[i - 1].suffix);
+      }
+      return formatScaled(scaled, tier.suffix);
+    }
+  }
+
+  // Values below 1,000
+  const decimals = getCurrencyDecimals(normalizedCode);
+  if (decimals === 0 || safe >= 100) {
+    const rounded = Math.round(safe);
+    if (rounded >= 1000) {
+      return `1${tiers[tiers.length - 1].suffix}`;
+    }
+    return String(rounded);
+  }
+
+  const roundedOneDecimal = Math.round(safe * 10) / 10;
+  if (Number.isInteger(roundedOneDecimal)) {
+    return String(roundedOneDecimal);
+  }
+  return roundedOneDecimal.toFixed(1).replace('.', decimalSep);
+}
+
 export type ExpressionEvalError = 'empty' | 'incomplete' | 'division_by_zero' | 'invalid' | 'overflow';
 
 export type ExpressionEvalResult =

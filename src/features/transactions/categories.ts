@@ -7,6 +7,9 @@ import {
   UNCATEGORIZED_EXPENSE_LABEL,
   UNCATEGORIZED_INCOME_LABEL,
 } from './constants';
+import { clampMonthStartDay } from './periods';
+
+const REMINDER_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 export type ReceiptReadingMode = 'ocr' | 'vision';
 
@@ -112,6 +115,10 @@ export function getInitialAppSettings(): AppSettings {
     externalSystemPrompt: DEFAULT_APP_SETTINGS.externalSystemPrompt,
     receiptReadingMode: DEFAULT_RECEIPT_READING_MODE,
     appLockEnabled: DEFAULT_APP_SETTINGS.appLockEnabled,
+    dailyReminderEnabled: DEFAULT_APP_SETTINGS.dailyReminderEnabled,
+    dailyReminderTime: DEFAULT_APP_SETTINGS.dailyReminderTime,
+    monthStartDay: DEFAULT_APP_SETTINGS.monthStartDay,
+    weekStartDay: DEFAULT_APP_SETTINGS.weekStartDay,
   };
 }
 
@@ -180,6 +187,29 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.appLockEnabled:
         base.appLockEnabled = row.value === 'true';
+        break;
+      case APP_SETTING_KEYS.dailyReminderEnabled:
+        base.dailyReminderEnabled = row.value === 'true';
+        break;
+      case APP_SETTING_KEYS.dailyReminderTime:
+        if (typeof row.value === 'string' && REMINDER_TIME_RE.test(row.value.trim())) {
+          base.dailyReminderTime = row.value.trim();
+        }
+        break;
+      case APP_SETTING_KEYS.monthStartDay: {
+        const trimmed = typeof row.value === 'string' ? row.value.trim() : '';
+        if (trimmed !== '') {
+          const parsedDay = Number(trimmed);
+          if (Number.isFinite(parsedDay)) {
+            base.monthStartDay = clampMonthStartDay(parsedDay);
+          }
+        }
+        break;
+      }
+      case APP_SETTING_KEYS.weekStartDay:
+        if (row.value === 'monday' || row.value === 'sunday') {
+          base.weekStartDay = row.value;
+        }
         break;
       case RECEIPT_READING_MODE_KEY:
         if (row.value === 'ocr' || row.value === 'vision') {
