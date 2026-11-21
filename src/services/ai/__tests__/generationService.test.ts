@@ -4,7 +4,12 @@ import { Platform } from 'react-native';
 import { getGenerationService, isVisionAvailable, type GenerationServiceRuntimeSnapshot } from '../generationService';
 import { getLlamaRnAdapter } from '../llamaRnAdapter';
 import { getActiveModelFileUri, isActiveModelInstalled, isVisionProjectorInstalled } from '../modelLifecycle';
-import { useAIStore, createInitialProvisioningSnapshot, createInitialRuntimeSnapshot } from '../../../store/useAIStore';
+import {
+  getAIRuntimeAvailability,
+  useAIStore,
+  createInitialProvisioningSnapshot,
+  createInitialRuntimeSnapshot,
+} from '../../../store/useAIStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 
 jest.mock('../modelLifecycle', () => ({
@@ -592,6 +597,61 @@ Kopiko 15000
       });
       xhrInstances[0].onload?.();
       await expect(promise).resolves.toBe('{"total": 50000}');
+    });
+  });
+
+  describe('Local generation cancellation', () => {
+    it('keeps the local model healthy and avoids reloading after cancelling a local generation', async () => {
+      const modelPath = 'file:///mock/model.gguf';
+      fsMock.getInfoAsync.mockResolvedValue({ exists: true, size: 1024, uri: modelPath });
+      useAIStore.setState({
+        provisioning: {
+          ...createInitialProvisioningSnapshot(),
+          status: 'ready',
+          modelPath,
+          progress: 1,
+        },
+      });
+
+      const service = getGenerationService();
+      await service.ensureChatRuntimeReady();
+      expect(adapter.initContext).toHaveBeenCalledTimes(1);
+
+      let rejectCancelledCompletion!: (err: Error) => void;
+      let notifyCompletionStarted!: () => void;
+      const completionStarted = new Promise<void>((resolve) => {
+        notifyCompletionStarted = resolve;
+      });
+      adapter.completion.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectCancelledCompletion = reject;
+            notifyCompletionStarted();
+          }),
+      );
+      adapter.stopCompletion.mockImplementationOnce(async () => {
+        rejectCancelledCompletion(
+          Object.assign(new Error('Generation cancelled by user.'), { code: 'generation-cancelled' }),
+        );
+      });
+
+      const firstRun = service.startGeneration({ prompt: 'First question', mode: 'chat' });
+      await completionStarted;
+
+      const cancelled = await service.cancelGeneration('Generation cancelled by user.');
+      expect(cancelled).toBe(true);
+      await expect(firstRun).rejects.toThrow('Generation cancelled by user.');
+
+      const afterCancel = useAIStore.getState();
+      expect(afterCancel.runtime.lastRuntimeError).toBeNull();
+      expect(afterCancel.runtime.generationHealthy).toBe(true);
+      expect(afterCancel.runtime.runtimeState).toBe('healthy');
+      expect(afterCancel.runtimeReady).toBe(true);
+      expect(getAIRuntimeAvailability(afterCancel).canRunNativeChat).toBe(true);
+
+      const secondReply = await service.startGeneration({ prompt: 'Second question', mode: 'chat' });
+      expect(secondReply).toBe('Local response');
+      expect(adapter.initContext).toHaveBeenCalledTimes(1);
     });
   });
 });

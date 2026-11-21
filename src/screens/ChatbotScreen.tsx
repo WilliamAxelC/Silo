@@ -12,7 +12,7 @@ import {
   Alert,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import Markdown from 'react-native-markdown-display';
@@ -26,7 +26,7 @@ import type { LocalAiMode } from '../services/ai/agent';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../services/ai/generationService';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
-import { getChatRuntimePreloadService } from '../services/ai/chatRuntimePreloadService';
+import { getChatRuntimePreloadService, type ChatRuntimePreloadSnapshot } from '../services/ai/chatRuntimePreloadService';
 import { ChatChart } from '../components/ChatChart';
 
 function parseMessageWithCharts(text: string) {
@@ -141,7 +141,6 @@ export const ChatbotScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<ChatbotScreenRouteProp>();
   const theme = useAppTheme();
-  const insets = useSafeAreaInsets();
   const aiInferenceMode = useSettingsStore((state) => state.aiInferenceMode);
   const externalApiProvider = useSettingsStore((state) => state.externalApiProvider);
   const externalApiModel = useSettingsStore((state) => state.externalApiModel);
@@ -164,28 +163,50 @@ export const ChatbotScreen = () => {
   const initialMessage = route.params?.initialMessage || '';
   const [inputText, setInputText] = useState(initialMessage);
   const [chatRuntimeRequested, setChatRuntimeRequested] = useState(selectedMode === 'chat');
+  const [isScreenFocused, setIsScreenFocused] = useState(false);
   const pendingAssistantMessageIdRef = useRef<string | null>(null);
+  const chatHistoryLengthRef = useRef(chatHistory.length);
   const assistantMessageStartedAtRef = useRef<Record<string, number>>({});
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [serviceSnapshot, setServiceSnapshot] = useState<GenerationServiceRuntimeSnapshot>(generationService.getSnapshot());
+  const [serviceSnapshot, setServiceSnapshot] = useState<GenerationServiceRuntimeSnapshot>(() => generationService.getSnapshot());
+  const [preloadSnapshot, setPreloadSnapshot] = useState<ChatRuntimePreloadSnapshot>(() => chatRuntimePreloadService.getSnapshot());
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(() =>
+    Platform.OS === 'android' && typeof Keyboard.isVisible === 'function' ? Keyboard.isVisible() : false
+  );
+
+  useEffect(() => {
+    chatHistoryLengthRef.current = chatHistory.length;
+  }, [chatHistory.length]);
+
+  const scrollToEnd = useCallback((animated: boolean) => {
+    flatListRef.current?.scrollToEnd({ animated });
+  }, []);
 
   useEffect(() => {
     const showSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => setKeyboardHeight(e.endCoordinates.height)
+      () => {
+        if (Platform.OS === 'android') {
+          setIsKeyboardVisible(true);
+        }
+        if (chatHistoryLengthRef.current > 0) {
+          requestAnimationFrame(() => scrollToEnd(true));
+        }
+      }
     );
-    const hideSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardHeight(0)
-    );
+    const hideSub =
+      Platform.OS === 'android'
+        ? Keyboard.addListener('keyboardDidHide', () => {
+            setIsKeyboardVisible(false);
+          })
+        : null;
     return () => {
       showSub.remove();
-      hideSub.remove();
+      hideSub?.remove();
     };
-  }, []);
+  }, [scrollToEnd]);
 
   useEffect(() => {
     if (initialMessage && chatHistory.length === 0) {
@@ -200,9 +221,12 @@ export const ChatbotScreen = () => {
     };
   }, [generationService]);
 
-  const scrollToEnd = useCallback((animated: boolean) => {
-    flatListRef.current?.scrollToEnd({ animated });
-  }, []);
+  useEffect(() => {
+    const subscription = chatRuntimePreloadService.subscribe(setPreloadSnapshot);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [chatRuntimePreloadService]);
 
   const handleCopyToClipboard = useCallback(async (text: string) => {
     await Clipboard.setStringAsync(text);
@@ -257,22 +281,53 @@ export const ChatbotScreen = () => {
   const chatRuntimeStatus = serviceSnapshot.runtimeStatus;
   const isLoading = serviceSnapshot.isGenerating;
   const loadingStatus = serviceSnapshot.generationStatus;
+  const activeRuntimeErrorMessage =
+    runtime.lastRuntimeError && runtime.lastRuntimeError.code !== 'generation-cancelled'
+      ? runtime.lastRuntimeError.message
+      : null;
+  const runtimeLoadError =
+    aiInferenceMode === 'local' &&
+    hasUsableLocalInferenceBackend &&
+    provisioning.status === 'ready' &&
+    !canRunNativeChat &&
+    !isPreparingChatRuntime
+      ? activeRuntimeErrorMessage ?? preloadSnapshot.error
+      : null;
+  const canRetryRuntimeLoad =
+    aiInferenceMode === 'local' &&
+    hasUsableLocalInferenceBackend &&
+    provisioning.status === 'ready' &&
+    !canRunNativeChat &&
+    !isPreparingChatRuntime &&
+    !isBusyProvisioning &&
+    Boolean(runtimeLoadError);
+  const isExternalUnconfigured = aiInferenceMode === 'external' && !canRunNativeChat;
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-
-      if (selectedMode === 'chat' && aiInferenceMode === 'local') {
-        setChatRuntimeRequested(true);
-        void chatRuntimePreloadService.requestPreload();
-      }
+      generationService.cancelScheduledUnload();
+      setIsScreenFocused(true);
 
       return () => {
-        active = false;
+        setIsScreenFocused(false);
+        chatRuntimePreloadService.clearRequest();
         generationService.scheduleModelUnload(30000);
       };
-    }, [chatRuntimePreloadService, selectedMode, aiInferenceMode, generationService])
+    }, [chatRuntimePreloadService, generationService])
   );
+
+  useEffect(() => {
+    if (!isScreenFocused) {
+      return;
+    }
+
+    if (selectedMode === 'chat' && aiInferenceMode === 'local') {
+      setChatRuntimeRequested(true);
+      void chatRuntimePreloadService.requestPreload();
+    } else {
+      chatRuntimePreloadService.clearRequest();
+    }
+  }, [aiInferenceMode, chatRuntimePreloadService, isScreenFocused, selectedMode]);
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
@@ -281,8 +336,7 @@ export const ChatbotScreen = () => {
       (isPreparingChatRuntime ||
         isLoading ||
         isBusyProvisioning ||
-        Boolean(runtime.activeGenerationRequestId) ||
-        Boolean(runtime.activeStatusLabel));
+        Boolean(runtime.activeGenerationRequestId));
 
     if (!shouldRun || !activeStartedAt) {
       if (elapsedTimerRef.current) {
@@ -317,7 +371,6 @@ export const ChatbotScreen = () => {
     isPreparingChatRuntime,
     runtime.activeGenerationRequestId,
     runtime.activePhaseStartedAt,
-    runtime.activeStatusLabel,
   ]);
 
   // Smooth scroll down when token streaming without jumping
@@ -459,6 +512,10 @@ export const ChatbotScreen = () => {
     }
   };
 
+  const handleRetryChatRuntime = useCallback(() => {
+    void chatRuntimePreloadService.retryPreload();
+  }, [chatRuntimePreloadService]);
+
   const executeSend = async (queryText: string) => {
     if (!queryText.trim() || isLoading || isPreparingChatRuntime || runtime.activeGenerationRequestId || !canSendMessage) {
       return;
@@ -562,19 +619,48 @@ export const ChatbotScreen = () => {
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
   const inlineModelStatusLabel =
     aiInferenceMode === 'external'
-      ? 'External API'
-      : hasUsableLocalInferenceBackend
-      ? `${getProvisioningStatusLabel(provisioning.status)}${progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}`
-      : 'Unavailable';
+      ? canRunNativeChat
+        ? 'External API'
+        : 'Setup needed'
+      : !hasUsableLocalInferenceBackend
+      ? 'Unavailable'
+      : isPreparingChatRuntime
+      ? 'Loading'
+      : runtimeLoadError
+      ? 'Load failed'
+      : `${getProvisioningStatusLabel(provisioning.status)}${progressPercent > 0 && provisioning.status !== 'ready' ? ` · ${progressPercent}%` : ''}`;
+  const trimmedExternalModel = externalApiModel.trim();
   const displayModelSubtitle =
-    aiInferenceMode === 'external' ? `${externalApiProvider.toUpperCase()} · ${externalApiModel}` : localModelDisplayName;
+    aiInferenceMode === 'external'
+      ? trimmedExternalModel
+        ? `${externalApiProvider.toUpperCase()} · ${trimmedExternalModel}`
+        : `${externalApiProvider.toUpperCase()} · Not configured`
+      : localModelDisplayName;
+  const showEmptyChatPrepareGate =
+    chatHistory.length === 0 &&
+    showChatRuntimeGate &&
+    isPreparingChatRuntime &&
+    !isBusyProvisioning &&
+    !isLoading &&
+    !runtime.activeGenerationRequestId;
   const showCompactLoader =
     Boolean(stageStatusMessage) &&
-    (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId) || Boolean(runtime.activeStatusLabel));
+    !showEmptyChatPrepareGate &&
+    (isBusyProvisioning || isPreparingChatRuntime || isLoading || Boolean(runtime.activeGenerationRequestId));
+  const hasStatusError =
+    !hasUsableLocalInferenceBackend ||
+    Boolean(runtimeLoadError) ||
+    provisioning.status === 'failed' ||
+    isExternalUnconfigured;
+  const isBusyChatAction = isLoading || isPreparingChatRuntime || Boolean(runtime.activeGenerationRequestId);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={styles.keyboardShell} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={styles.keyboardShell}
+        behavior="padding"
+        enabled={Platform.OS === 'ios' || isKeyboardVisible}
+      >
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <TouchableOpacity
@@ -592,10 +678,10 @@ export const ChatbotScreen = () => {
                 <View
                   style={[
                     styles.inlineStatusDot,
-                    { backgroundColor: canRunNativeChat ? theme.primary : hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense },
+                    { backgroundColor: canRunNativeChat ? theme.primary : hasStatusError ? theme.expense : theme.textMuted },
                   ]}
                 />
-                <Text style={[styles.inlineStatusChipText, { color: canRunNativeChat ? theme.primary : theme.textMuted }]}>
+                <Text style={[styles.inlineStatusChipText, { color: canRunNativeChat ? theme.primary : hasStatusError ? theme.expense : theme.textMuted }]}>
                   {inlineModelStatusLabel}
                 </Text>
               </View>
@@ -606,7 +692,8 @@ export const ChatbotScreen = () => {
           </View>
           <TouchableOpacity
             onPress={handleClearHistoryWithConfirm}
-            style={styles.headerIconButton}
+            disabled={chatHistory.length === 0}
+            style={[styles.headerIconButton, chatHistory.length === 0 && { opacity: 0.35 }]}
             accessibilityRole="button"
             accessibilityLabel="Clear chat history"
           >
@@ -621,10 +708,10 @@ export const ChatbotScreen = () => {
               style={[
                 styles.statusMessage,
                 styles.statusMessageTight,
-                { color: hasUsableLocalInferenceBackend ? theme.textMuted : theme.expense },
+                { color: hasStatusError ? theme.expense : theme.textMuted },
               ]}
             >
-              {localInferenceStatusMessage}
+              {runtimeLoadError || localInferenceStatusMessage}
             </Text>
             {showPrimaryProvisionAction ? (
               <TouchableOpacity
@@ -637,6 +724,26 @@ export const ChatbotScreen = () => {
                 <Text style={[styles.primaryMiniButtonText, { color: theme.onPrimary }]}>
                   {isNotInstalled ? 'Set up' : 'Retry'}
                 </Text>
+              </TouchableOpacity>
+            ) : canRetryRuntimeLoad ? (
+              <TouchableOpacity
+                style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]}
+                onPress={handleRetryChatRuntime}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading AI model"
+              >
+                <Text style={[styles.primaryMiniButtonText, { color: theme.onPrimary }]}>Retry</Text>
+              </TouchableOpacity>
+            ) : isExternalUnconfigured ? (
+              <TouchableOpacity
+                style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]}
+                onPress={() => navigation.navigate('Settings')}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Configure external API"
+              >
+                <Text style={[styles.primaryMiniButtonText, { color: theme.onPrimary }]}>Settings</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -738,37 +845,115 @@ export const ChatbotScreen = () => {
           contentContainerStyle={{
             paddingHorizontal: 14,
             paddingTop: 14,
-            paddingBottom: Math.max(88, insets.bottom + keyboardHeight + 72),
+            paddingBottom: 20,
           }}
           onContentSizeChange={() => {
             if (runtime.activeGenerationRequestId) {
               scrollToEnd(false);
             }
           }}
-          ListHeaderComponent={
+          ListEmptyComponent={
             showChatRuntimeGate ? (
               <View style={styles.emptyStateWrap}>
                 <View style={[styles.chatGateCard, styles.chatGateCardCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
-                  <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
-                    {stageStatusMessage ?? 'Loading the offline chatbot on device...'}
-                  </Text>
-                  {canStartOrRetryProvisioning ? (
-                    <TouchableOpacity
-                      style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
-                      onPress={handleProvisionAction}
-                      accessibilityRole="button"
-                      accessibilityLabel={chatRuntimeActionLabel}
-                    >
-                      <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>{chatRuntimeActionLabel}</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                  {isPreparingChatRuntime || isBusyProvisioning ? (
+                    <>
+                      <ActivityIndicator color={theme.primary} size="small" />
+                      <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
+                        {stageStatusMessage ?? 'Opening local chatbot...'}
+                      </Text>
+                      {statusMetaLabel ? (
+                        <Text style={[styles.compactStatusMeta, { color: theme.textMuted }]}>{statusMetaLabel}</Text>
+                      ) : null}
+                    </>
+                  ) : canRetryRuntimeLoad ? (
+                    <>
+                      <Ionicons name="alert-circle-outline" size={24} color={theme.expense} />
+                      <Text style={[styles.chatGateText, { color: theme.expense }]}>
+                        {runtimeLoadError}
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                        onPress={handleRetryChatRuntime}
+                        accessibilityRole="button"
+                        accessibilityLabel="Retry loading AI model"
+                      >
+                        <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>Retry</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : isNotInstalled ? (
+                    <>
+                      <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
+                      <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
+                        Download the local AI model in Settings to use offline Chat mode.
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                        onPress={handleProvisionAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={chatRuntimeActionLabel}
+                      >
+                        <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>{chatRuntimeActionLabel}</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : canStartOrRetryProvisioning ? (
+                    <>
+                      <Ionicons name="alert-circle-outline" size={24} color={theme.expense} />
+                      <Text style={[styles.chatGateText, { color: theme.expense }]}>
+                        {provisioning.lastError || localInferenceStatusMessage}
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                        onPress={handleProvisionAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={chatRuntimeActionLabel}
+                      >
+                        <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>{chatRuntimeActionLabel}</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : isExternalUnconfigured ? (
+                    <>
+                      <Ionicons name="settings-outline" size={22} color={theme.primary} />
+                      <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
+                        Configure an external API URL and model in Settings to use Chat mode.
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                        onPress={() => navigation.navigate('Settings')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open Settings"
+                      >
+                        <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>Open Settings</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : !hasUsableLocalInferenceBackend ? (
+                    <>
+                      <Ionicons name="alert-circle-outline" size={24} color={theme.expense} />
+                      <Text style={[styles.chatGateText, { color: theme.expense }]}>
+                        {localInferenceStatusMessage}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
+                      <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
+                        {localInferenceStatusMessage}
+                      </Text>
+                      {aiInferenceMode === 'local' && provisioning.status === 'ready' ? (
+                        <TouchableOpacity
+                          style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
+                          onPress={handleRetryChatRuntime}
+                          accessibilityRole="button"
+                          accessibilityLabel="Load AI Model"
+                        >
+                          <Text style={[styles.chatGateButtonText, { color: theme.onPrimary }]}>Load AI Model</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </>
+                  )}
                 </View>
               </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            !showChatRuntimeGate ? (
+            ) : (
               <View style={styles.emptyStateWrap}>
                 <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
                   {canSendMessage
@@ -784,11 +969,13 @@ export const ChatbotScreen = () => {
                     {QUICK_SUGGESTIONS.map((suggestion, idx) => (
                       <TouchableOpacity
                         key={idx}
+                        disabled={isBusyChatAction}
                         style={[
                           styles.suggestionPill,
                           {
                             backgroundColor: theme.surface,
                             borderColor: theme.border,
+                            opacity: isBusyChatAction ? 0.55 : 1,
                           },
                         ]}
                         onPress={() => handleSuggestionPress(suggestion.text)}
@@ -806,15 +993,8 @@ export const ChatbotScreen = () => {
                     ))}
                   </View>
                 )}
-
-                {stageStatusMessage && (
-                  <View style={[styles.inlineStatusCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                    <ActivityIndicator color={theme.primary} />
-                    <Text style={[styles.inlineStatusText, { color: theme.textMuted }]}>{stageStatusMessage}</Text>
-                  </View>
-                )}
               </View>
-            ) : null
+            )
           }
         />
 
@@ -825,7 +1005,7 @@ export const ChatbotScreen = () => {
             {
               backgroundColor: theme.surface,
               borderTopColor: theme.border,
-              paddingBottom: Math.max(insets.bottom + 10, keyboardHeight > 0 && Platform.OS === 'android' ? 12 : 16),
+              paddingBottom: 10,
             },
           ]}
         >
@@ -841,8 +1021,14 @@ export const ChatbotScreen = () => {
             ]}
             placeholderTextColor={theme.textMuted}
             placeholder={
-              showChatRuntimeGate
+              isPreparingChatRuntime || isBusyProvisioning
                 ? 'Waiting for AI chatbot to load...'
+                : canRetryRuntimeLoad
+                ? 'Model failed to load — tap Retry above'
+                : showChatRuntimeGate && isNotInstalled
+                ? 'Set up the AI model in Settings to chat'
+                : showChatRuntimeGate
+                ? 'Chat mode unavailable right now'
                 : canSendMessage
                 ? 'Ask about your finances or spending...'
                 : aiMode === 'rag'
@@ -961,8 +1147,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   suggestionText: { fontSize: 13, fontWeight: '600', flex: 1 },
-  inlineStatusCard: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  inlineStatusText: { flex: 1, fontSize: 11, lineHeight: 16 },
   compactStatusBar: {
     flexDirection: 'row',
     alignItems: 'center',

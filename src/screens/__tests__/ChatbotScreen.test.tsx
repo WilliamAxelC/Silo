@@ -1,19 +1,34 @@
 import React from 'react';
-import { FlatList, Text } from 'react-native';
+import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Text, TextInput } from 'react-native';
 import { ChatbotScreen } from '../ChatbotScreen';
-import { useAIStore, createInitialProvisioningSnapshot, createInitialRuntimeSnapshot } from '../../store/useAIStore';
+import {
+  getAIRuntimeAvailability,
+  useAIStore,
+  createInitialProvisioningSnapshot,
+  createInitialRuntimeSnapshot,
+} from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import type { ChatRuntimePreloadSnapshot } from '../../services/ai/chatRuntimePreloadService';
+import type { GenerationServiceRuntimeSnapshot } from '../../services/ai/generationService';
 
 const ReactTestRenderer = require('react-test-renderer');
 
-jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({
-    navigate: jest.fn(),
-    goBack: jest.fn(),
-  }),
-  useRoute: () => ({ params: {} }),
-  useFocusEffect: () => {},
-}));
+const mockNavigate = jest.fn();
+const mockGoBack = jest.fn();
+
+jest.mock('@react-navigation/native', () => {
+  const ReactLib = require('react');
+  return {
+    useNavigation: () => ({
+      navigate: mockNavigate,
+      goBack: mockGoBack,
+    }),
+    useRoute: () => ({ params: {} }),
+    useFocusEffect: (effect: () => void | (() => void)) => {
+      ReactLib.useEffect(() => effect(), [effect]);
+    },
+  };
+});
 
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
@@ -24,9 +39,9 @@ jest.mock('react-native-safe-area-context', () => {
 });
 
 jest.mock('react-native-markdown-display', () => {
-  const React = require('react');
-  const { Text } = require('react-native');
-  return (props: any) => React.createElement(Text, null, props.children);
+  const ReactLib = require('react');
+  const { Text: RNText } = require('react-native');
+  return (props: any) => ReactLib.createElement(RNText, null, props.children);
 });
 
 jest.mock('expo-clipboard', () => ({
@@ -34,38 +49,90 @@ jest.mock('expo-clipboard', () => ({
 }));
 
 jest.mock('react-native-gifted-charts', () => {
-  const React = require('react');
+  const ReactLib = require('react');
   return {
-    BarChart: (props: any) => React.createElement('BarChart', props),
-    LineChart: (props: any) => React.createElement('LineChart', props),
-    PieChart: (props: any) => React.createElement('PieChart', props),
+    BarChart: (props: any) => ReactLib.createElement('BarChart', props),
+    LineChart: (props: any) => ReactLib.createElement('LineChart', props),
+    PieChart: (props: any) => ReactLib.createElement('PieChart', props),
   };
 });
 
+let mockGenerationSnapshot: GenerationServiceRuntimeSnapshot = {
+  isPreparingRuntime: false,
+  runtimeStatus: '',
+  isGenerating: false,
+  generationStatus: '',
+};
+const mockScheduleModelUnload = jest.fn();
+const mockCancelScheduledUnload = jest.fn();
+const mockStartGeneration = jest.fn();
+const mockCancelGeneration = jest.fn();
+
 jest.mock('../../services/ai/generationService', () => ({
   getGenerationService: () => ({
-    getSnapshot: () => ({
-      isPreparingRuntime: false,
-      runtimeStatus: null,
-      isGenerating: false,
-      generationStatus: null,
-    }),
-    subscribe: () => ({ unsubscribe: () => {} }),
-    scheduleModelUnload: () => {},
-    startGeneration: jest.fn(),
-    cancelGeneration: jest.fn(),
+    getSnapshot: () => mockGenerationSnapshot,
+    subscribe: (listener: (s: GenerationServiceRuntimeSnapshot) => void) => {
+      listener(mockGenerationSnapshot);
+      return { unsubscribe: () => {} };
+    },
+    scheduleModelUnload: mockScheduleModelUnload,
+    cancelScheduledUnload: mockCancelScheduledUnload,
+    startGeneration: mockStartGeneration,
+    cancelGeneration: mockCancelGeneration,
   }),
 }));
 
+let mockPreloadSnapshot: ChatRuntimePreloadSnapshot = {
+  requested: false,
+  isPreloading: false,
+  status: '',
+  canPreload: false,
+  error: null,
+};
+const mockRequestPreload = jest.fn().mockResolvedValue(undefined);
+const mockRetryPreload = jest.fn().mockResolvedValue(undefined);
+const mockClearRequest = jest.fn();
+
 jest.mock('../../services/ai/chatRuntimePreloadService', () => ({
   getChatRuntimePreloadService: () => ({
-    requestPreload: jest.fn().mockResolvedValue(undefined),
+    getSnapshot: () => mockPreloadSnapshot,
+    subscribe: (listener: (s: ChatRuntimePreloadSnapshot) => void) => {
+      listener(mockPreloadSnapshot);
+      return { unsubscribe: () => {} };
+    },
+    requestPreload: mockRequestPreload,
+    retryPreload: mockRetryPreload,
+    clearRequest: mockClearRequest,
   }),
 }));
+
+function collectText(renderer: any): string {
+  return renderer.root
+    .findAllByType(Text)
+    .map((t: any) => {
+      const c = t.props.children;
+      return Array.isArray(c) ? c.join('') : String(c ?? '');
+    })
+    .join(' ');
+}
 
 describe('ChatbotScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGenerationSnapshot = {
+      isPreparingRuntime: false,
+      runtimeStatus: '',
+      isGenerating: false,
+      generationStatus: '',
+    };
+    mockPreloadSnapshot = {
+      requested: false,
+      isPreloading: false,
+      status: '',
+      canPreload: false,
+      error: null,
+    };
+
     useSettingsStore.setState({
       aiInferenceMode: 'local',
       externalApiProvider: 'openai',
@@ -103,5 +170,258 @@ describe('ChatbotScreen', () => {
     ReactTestRenderer.act(() => {
       renderer.unmount();
     });
+  });
+
+  it('shows setup guidance instead of a loading message when the model is not installed in Chat mode', () => {
+    useAIStore.setState({ selectedMode: 'chat' });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ChatbotScreen />);
+    });
+
+    const text = collectText(renderer);
+    expect(text).toContain('Download the local AI model in Settings');
+    expect(text).not.toContain('Loading the offline chatbot on device...');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Set Up AI Model' })).toBeTruthy();
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('shows one stable readable error message with a Retry action when model load fails', () => {
+    const errorMessage = 'Model load blocked because the estimated RAM requirement exceeds the safe device memory budget.';
+    const runtime = createInitialRuntimeSnapshot();
+    runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
+    runtime.runtimeState = 'failed';
+    runtime.lastRuntimeError = {
+      code: 'insufficient-memory',
+      message: errorMessage,
+      recoverable: true,
+    };
+
+    mockPreloadSnapshot = {
+      requested: true,
+      isPreloading: false,
+      status: errorMessage,
+      canPreload: false,
+      error: errorMessage,
+    };
+
+    useAIStore.setState({
+      selectedMode: 'chat',
+      provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
+      runtime,
+      runtimeReady: false,
+    });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ChatbotScreen />);
+    });
+
+    const text = collectText(renderer);
+    expect(text).toContain(errorMessage);
+    expect(text).toContain('Load failed');
+    expect(text).not.toContain('Loading the offline chatbot on device...');
+    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
+
+    const retryButtons = renderer.root.findAllByProps({ accessibilityLabel: 'Retry loading AI model' });
+    expect(retryButtons.length).toBeGreaterThanOrEqual(1);
+
+    ReactTestRenderer.act(() => {
+      retryButtons[0].props.onPress();
+    });
+    expect(mockRetryPreload).toHaveBeenCalledTimes(1);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('does not schedule model unload when toggling modes and cleans up on screen leave', () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ChatbotScreen />);
+    });
+
+    expect(mockCancelScheduledUnload).toHaveBeenCalledTimes(1);
+    expect(mockScheduleModelUnload).not.toHaveBeenCalled();
+
+    const chatToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Chat mode' });
+    const ragToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Grounded mode' });
+
+    ReactTestRenderer.act(() => {
+      chatToggle.props.onPress();
+    });
+    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
+    expect(mockScheduleModelUnload).not.toHaveBeenCalled();
+
+    ReactTestRenderer.act(() => {
+      ragToggle.props.onPress();
+    });
+    expect(mockScheduleModelUnload).not.toHaveBeenCalled();
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+    expect(mockClearRequest).toHaveBeenCalled();
+    expect(mockScheduleModelUnload).toHaveBeenCalledWith(30000);
+  });
+
+  it('shows Setup failed instead of Load failed when a model download fails', () => {
+    const runtime = createInitialRuntimeSnapshot();
+    runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
+    runtime.runtimeState = 'failed';
+    runtime.lastRuntimeError = {
+      code: 'load-failed',
+      message: 'Download interrupted.',
+      recoverable: true,
+    };
+
+    useAIStore.setState({
+      selectedMode: 'chat',
+      provisioning: {
+        ...createInitialProvisioningSnapshot(),
+        status: 'failed',
+        lastError: 'Download interrupted.',
+      },
+      runtime,
+      runtimeReady: false,
+    });
+
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      const text = collectText(renderer);
+      expect(text).toContain('Setup failed');
+      expect(text).toContain('Download interrupted.');
+      expect(text).not.toContain('Load failed');
+      expect(renderer.root.findByProps({ accessibilityLabel: 'Retry AI model setup' })).toBeTruthy();
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Retry loading AI model' })).toHaveLength(0);
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+    }
+  });
+
+  it('does not show Load failed or disable chat input on a generation-cancelled error', () => {
+    const runtime = createInitialRuntimeSnapshot();
+    runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
+    runtime.modelLoaded = true;
+    runtime.generationHealthy = true;
+    runtime.runtimeState = 'healthy';
+    runtime.lastRuntimeError = {
+      code: 'generation-cancelled',
+      message: 'Generation cancelled by user.',
+      recoverable: true,
+    };
+
+    useAIStore.setState({
+      selectedMode: 'chat',
+      provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
+      runtime,
+      runtimeReady: true,
+    });
+
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      const text = collectText(renderer);
+      expect(text).toContain('Ready');
+      expect(text).not.toContain('Load failed');
+      expect(text).not.toContain('Generation cancelled by user.');
+
+      const input = renderer.root.findByType(TextInput);
+      expect(input.props.editable).toBe(true);
+      expect(input.props.placeholder).toBe('Ask about your finances or spending...');
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+    }
+  });
+
+  it('enables KeyboardAvoidingView only while the keyboard is visible on Android', () => {
+    Object.defineProperty(Platform, 'OS', { get: () => 'android', configurable: true });
+    const listeners: Record<string, Array<() => void>> = {};
+    const addListenerSpy = jest.spyOn(Keyboard, 'addListener').mockImplementation((event: any, cb: any) => {
+      listeners[event] = listeners[event] || [];
+      listeners[event].push(cb);
+      return { remove: jest.fn() } as any;
+    });
+
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      const getEnabled = () => renderer.root.findByType(KeyboardAvoidingView).props.enabled;
+      expect(getEnabled()).toBe(false);
+
+      ReactTestRenderer.act(() => {
+        listeners.keyboardDidShow?.forEach((cb) => cb());
+      });
+      expect(getEnabled()).toBe(true);
+
+      ReactTestRenderer.act(() => {
+        listeners.keyboardDidHide?.forEach((cb) => cb());
+      });
+      expect(getEnabled()).toBe(false);
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+      addListenerSpy.mockRestore();
+    }
+  });
+
+  it('shows a clear unconfigured message in external API mode when URL or model is missing', () => {
+    useSettingsStore.setState({
+      aiInferenceMode: 'external',
+      externalApiProvider: 'openai',
+      externalApiUrl: '',
+      externalApiModel: '',
+    });
+    useAIStore.setState({
+      selectedMode: 'chat',
+      chatHistory: [
+        { id: 'u1', role: 'user', text: 'Hello' },
+        { id: 'a1', role: 'ai', text: 'Hi there!' },
+      ],
+    });
+
+    const availability = getAIRuntimeAvailability(useAIStore.getState());
+    expect(availability.canRunNativeChat).toBe(false);
+    expect(availability.localInferenceStatusMessage).toBe(
+      'External API is not configured yet. Set a URL and model in Settings.',
+    );
+
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+
+      const text = collectText(renderer);
+      expect(text).toContain('External API is not configured yet. Set a URL and model in Settings.');
+      expect(text).toContain('Setup needed');
+      expect(text).toContain('OPENAI · Not configured');
+      expect(text).not.toContain('Using external API');
+      expect(renderer.root.findByProps({ accessibilityLabel: 'Configure external API' })).toBeTruthy();
+    } finally {
+      ReactTestRenderer.act(() => {
+        renderer?.unmount();
+      });
+    }
   });
 });

@@ -166,12 +166,17 @@ export function getAIRuntimeAvailability(
   const { useSettingsStore } = require('./useSettingsStore');
   const settings = useSettingsStore.getState();
   if (settings?.aiInferenceMode === 'external') {
+    const externalUrl = (settings.externalApiUrl ?? '').trim();
+    const externalModel = (settings.externalApiModel ?? '').trim();
+    const externalConfigured = Boolean(externalUrl && externalModel);
     return {
       runtimePhaseActive: false,
       canRunGroundedQueries: true,
-      canRunNativeChat: Boolean(settings.externalApiUrl && settings.externalApiModel),
+      canRunNativeChat: externalConfigured,
       hasUsableLocalInferenceBackend: true,
-      localInferenceStatusMessage: `Using external API (${settings.externalApiProvider.toUpperCase()}): ${settings.externalApiModel} at ${settings.externalApiUrl}`,
+      localInferenceStatusMessage: externalConfigured
+        ? `Using external API (${settings.externalApiProvider.toUpperCase()}): ${externalModel} at ${externalUrl}`
+        : 'External API is not configured yet. Set a URL and model in Settings.',
       runtimeState: 'healthy',
       modelLoaded: true,
       generationHealthy: true,
@@ -191,21 +196,38 @@ export function getAIRuntimeAvailability(
     state.runtime.modelLoaded &&
     state.runtime.generationHealthy &&
     !runtimePhaseActive;
+  const activeRuntimeError =
+    state.runtime.lastRuntimeError && state.runtime.lastRuntimeError.code !== 'generation-cancelled'
+      ? state.runtime.lastRuntimeError
+      : null;
 
   let localInferenceStatusMessage = availability.message;
 
-  if (state.runtime.lastRuntimeError) {
-    localInferenceStatusMessage = state.runtime.lastRuntimeError.message;
-  } else if (!hasUsableLocalInferenceBackend) {
-    localInferenceStatusMessage = availability.message;
+  if (!hasUsableLocalInferenceBackend) {
+    localInferenceStatusMessage = isMemoryCriticallyLow
+      ? 'This device does not have enough memory (3 GB minimum) to run the local AI model.'
+      : availability.message;
+  } else if (state.provisioning.status === 'not-installed') {
+    localInferenceStatusMessage = 'Local AI model is not downloaded yet. Set it up in Settings for offline chat.';
+  } else if (state.provisioning.status === 'failed') {
+    localInferenceStatusMessage =
+      state.provisioning.lastError ||
+      activeRuntimeError?.message ||
+      'Local AI model setup failed. Tap Retry to try again.';
+  } else if (state.provisioning.status === 'paused') {
+    localInferenceStatusMessage = state.provisioning.pausedReason || 'Local AI model download is paused.';
+  } else if (['queued', 'downloading', 'verifying', 'unpacking'].includes(state.provisioning.status)) {
+    localInferenceStatusMessage = 'Local AI model setup is in progress.';
+  } else if (activeRuntimeError) {
+    localInferenceStatusMessage = activeRuntimeError.message;
   } else if (!state.runtime.modelLoaded) {
-    localInferenceStatusMessage = 'Android local inference bridge detected, but no GGUF model is loaded into the native runtime yet.';
+    localInferenceStatusMessage = 'Local AI model is installed and will load into memory when needed.';
   } else if (!state.runtime.generationHealthy) {
-    localInferenceStatusMessage = 'Model load is incomplete until the native runtime passes a real probe generation.';
+    localInferenceStatusMessage = 'Local AI model is loading into memory.';
   } else if (runtimePhaseActive) {
-    localInferenceStatusMessage = 'Local GGUF runtime is still preparing and cannot accept chat generation yet.';
+    localInferenceStatusMessage = 'Local AI runtime is finishing setup.';
   } else {
-    localInferenceStatusMessage = 'Android local GGUF inference is loaded, probed, and ready for local chat generation.';
+    localInferenceStatusMessage = 'Local AI model is loaded and ready for offline chat.';
   }
 
   return {
@@ -475,14 +497,24 @@ export const useAIStore = create<AIStoreState>((set) => ({
       },
     })),
   setRuntimeError: (lastRuntimeError) =>
-    set((state) => ({
-      runtime: {
-        ...state.runtime,
-        lastRuntimeError,
-        generationHealthy: lastRuntimeError ? false : state.runtime.generationHealthy,
-        runtimeState: lastRuntimeError ? 'failed' : state.runtime.runtimeState,
-      },
-    })),
+    set((state) => {
+      if (lastRuntimeError?.code === 'generation-cancelled') {
+        return {
+          runtime: {
+            ...state.runtime,
+            lastRuntimeError: null,
+          },
+        };
+      }
+      return {
+        runtime: {
+          ...state.runtime,
+          lastRuntimeError,
+          generationHealthy: lastRuntimeError ? false : state.runtime.generationHealthy,
+          runtimeState: lastRuntimeError ? 'failed' : state.runtime.runtimeState,
+        },
+      };
+    }),
   setRuntimeInfo: (runtimeInfo) =>
     set((state) => ({
       runtime: {
@@ -496,7 +528,17 @@ export const useAIStore = create<AIStoreState>((set) => ({
       runtime: {
         ...state.runtime,
         activeGenerationRequestId,
-        runtimeState: activeGenerationRequestId ? 'busy' : state.runtime.generationHealthy ? 'healthy' : state.runtime.runtimeState,
+        runtimeState: activeGenerationRequestId
+          ? 'busy'
+          : state.runtime.generationHealthy
+          ? 'healthy'
+          : state.runtime.runtimeState === 'busy'
+          ? state.runtime.modelLoaded
+            ? 'loaded'
+            : state.runtime.availability.available
+            ? 'detected'
+            : 'unavailable'
+          : state.runtime.runtimeState,
         activePhaseStartedAt: activeGenerationRequestId ? state.runtime.activePhaseStartedAt ?? new Date().toISOString() : null,
       },
     })),

@@ -9,6 +9,7 @@ import {
   QWEN_MODEL_MAX_OUTPUT_TOKENS,
   QWEN_MODEL_GROUNDED_TEMPERATURE,
   QWEN_MODEL_GROUNDED_TOP_P,
+  QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS,
   QWEN_MODEL_STOP_TOKENS,
 } from './config';
 import { getLlamaRnAdapter } from './llamaRnAdapter';
@@ -97,6 +98,10 @@ function createSnapshot(state: GenerationService['state']): GenerationServiceRun
 function getConfiguredModelPath() {
   const provisioningPath = useAIStore.getState().provisioning.modelPath;
   return provisioningPath || getActiveModelFileUri();
+}
+
+function normalizeModelPath(path: string): string {
+  return path.startsWith('file://') ? path : `file://${path}`;
 }
 
 function parseExternalUrlParts(rawUrl: string): { protocol: string; hostname: string } | null {
@@ -341,10 +346,40 @@ class GenerationService {
     return createSnapshot(this.state);
   }
 
-  async ensureChatRuntimeReady(options?: { minContextTokens?: number }): Promise<void> {
+  cancelScheduledUnload(): void {
     if (this.unloadTimer) {
       clearTimeout(this.unloadTimer);
       this.unloadTimer = null;
+    }
+  }
+
+  async ensureChatRuntimeReady(options?: { minContextTokens?: number }): Promise<void> {
+    this.cancelScheduledUnload();
+
+    if (this.runtimeInitPromise) {
+      return this.runtimeInitPromise;
+    }
+
+    const configuredModelPath = getConfiguredModelPath();
+    const requestedContextTokens = Math.max(options?.minContextTokens ?? 0, QWEN_MODEL_PREFERRED_MAX_CONTEXT_TOKENS);
+    const currentStore = useAIStore.getState();
+
+    // Fast path: model is already loaded, healthy, matches configured path, and satisfies context requirement.
+    if (
+      currentStore.runtimeReady &&
+      currentStore.runtime.modelLoaded &&
+      currentStore.runtime.generationHealthy &&
+      !currentStore.runtime.lastRuntimeError &&
+      this.llamaRnAdapter.getContextTokens() >= requestedContextTokens
+    ) {
+      const existingRuntimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
+      if (
+        existingRuntimeInfo.isModelLoaded &&
+        existingRuntimeInfo.loadedModelPath &&
+        normalizeModelPath(existingRuntimeInfo.loadedModelPath) === normalizeModelPath(configuredModelPath)
+      ) {
+        return;
+      }
     }
 
     if (this.runtimeInitPromise) {
@@ -356,6 +391,7 @@ class GenerationService {
         isPreparingRuntime: true,
         runtimeStatus: 'Opening local chatbot...',
       });
+      useAIStore.getState().setRuntimeError(null);
 
       try {
         const modelInfo = await getConfiguredModelInfo();
@@ -372,6 +408,15 @@ class GenerationService {
 
         const runtimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
         this.applyLlamaRuntimeReady(runtimeInfo, modelInfo.configuredModelPath);
+      } catch (error) {
+        const runtimeError = normalizeRuntimeError(error);
+        const latestStore = useAIStore.getState();
+        const latestInfo = await this.llamaRnAdapter.getRuntimeInfo().catch(() => null);
+        latestStore.markRuntimeReady(false);
+        latestStore.setRuntimeHealth(false, null);
+        latestStore.setRuntimeModelLoaded(Boolean(latestInfo?.isModelLoaded), latestInfo);
+        latestStore.setRuntimeError(runtimeError);
+        throw error;
       } finally {
         this.runtimeInitPromise = null;
         this.setState({
@@ -386,9 +431,7 @@ class GenerationService {
 
 
   async scheduleModelUnload(delayMs: number): Promise<void> {
-    if (this.unloadTimer) {
-      clearTimeout(this.unloadTimer);
-    }
+    this.cancelScheduledUnload();
 
     this.unloadTimer = setTimeout(async () => {
       this.unloadTimer = null;
@@ -401,6 +444,7 @@ class GenerationService {
         await this.llamaRnAdapter.releaseContext();
         const latestStore = useAIStore.getState();
         latestStore.setRuntimeModelLoaded(false, await this.llamaRnAdapter.getRuntimeInfo());
+        latestStore.setRuntimeHealth(false, null);
         latestStore.setRuntimeState('model-unloaded'); // or idle/unloaded
         latestStore.markRuntimeReady(false);
       } catch (err) {
@@ -626,13 +670,7 @@ class GenerationService {
     } catch (error) {
       const runtimeError = normalizeRuntimeError(error);
       if (runtimeError.code === 'generation-cancelled') {
-        const latestState = useAIStore.getState();
-        latestState.setActiveStatusLabel('Cancelled', null);
-        latestState.setRuntimeError({
-          code: 'generation-cancelled',
-          message: runtimeError.message,
-          recoverable: true,
-        });
+        useAIStore.getState().setActiveStatusLabel('Cancelled', null);
       } else {
         store.setRuntimeError(runtimeError);
       }
@@ -898,7 +936,7 @@ class GenerationService {
 
           const cleanedText = sanitizeGeneratedText(fullContent);
           store.setStreamingResponseText(cleanedText);
-          finalizeExternalRequest('Response ready', 'healthy');
+          finalizeExternalRequest(null, 'healthy');
           resolve(cleanedText.trim());
         } else {
           let errorMsg = `External API error (${xhr.status})`;
@@ -922,7 +960,7 @@ class GenerationService {
 
       xhr.onabort = () => {
         const error = new LocalInferenceException('generation-cancelled', 'Generation cancelled by user.', undefined, true);
-        finalizeExternalRequest('Cancelled', undefined, error);
+        finalizeExternalRequest(null);
         reject(error);
       };
 
@@ -973,17 +1011,14 @@ class GenerationService {
     }
 
     if (this.activeExternalXhr) {
-      this.activeExternalXhr.abort();
+      const xhr = this.activeExternalXhr;
       this.activeExternalXhr = null;
-      state.setActiveStatusLabel('Cancelled', null);
-      state.setRuntimeError({
-        code: 'generation-cancelled',
-        message: reason,
-        recoverable: true,
-      });
+      xhr.abort();
+      const latestState = useAIStore.getState();
+      latestState.setActiveStatusLabel(null, null);
       this.setState({ isGenerating: false, generationStatus: '' });
-      if (state.runtime.activeGenerationRequestId === requestId) {
-        state.setActiveGenerationRequestId(null);
+      if (latestState.runtime.activeGenerationRequestId === requestId) {
+        latestState.setActiveGenerationRequestId(null);
       }
       return true;
     }
@@ -995,23 +1030,14 @@ class GenerationService {
       details: { requestId, backend: 'llama.rn-cpu' },
     });
 
+    state.setActiveStatusLabel('Cancelling local generation...');
     this.completionStopPromise = this.llamaRnAdapter.stopCompletion();
     await this.completionStopPromise;
-    const latestState = useAIStore.getState();
-    latestState.setActiveStatusLabel('Cancelling local generation...');
-    latestState.setRuntimeError({
-      code: 'generation-cancelled',
-      message: reason,
-      recoverable: true,
-    });
     return true;
   }
 
   async dispose(): Promise<void> {
-    if (this.unloadTimer) {
-      clearTimeout(this.unloadTimer);
-      this.unloadTimer = null;
-    }
+    this.cancelScheduledUnload();
     this.runtimeInitPromise = null;
     if (this.activeExternalXhr) {
       this.activeExternalXhr.abort();
@@ -1053,10 +1079,19 @@ class GenerationService {
   }
 
   private setState(patch: Partial<GenerationService['state']>) {
-    this.state = {
+    const nextState = {
       ...this.state,
       ...patch,
     };
+    if (
+      nextState.isPreparingRuntime === this.state.isPreparingRuntime &&
+      nextState.runtimeStatus === this.state.runtimeStatus &&
+      nextState.isGenerating === this.state.isGenerating &&
+      nextState.generationStatus === this.state.generationStatus
+    ) {
+      return;
+    }
+    this.state = nextState;
     this.emit();
   }
 

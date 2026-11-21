@@ -1,11 +1,14 @@
 import { getAIRuntimeAvailability, useAIStore } from '../../store/useAIStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from './generationService';
+import { getErrorMessage } from './localInferenceTypes';
 
 export type ChatRuntimePreloadSnapshot = {
   requested: boolean;
   isPreloading: boolean;
   status: string;
   canPreload: boolean;
+  error: string | null;
 };
 
 export type ChatRuntimePreloadListener = (snapshot: ChatRuntimePreloadSnapshot) => void;
@@ -20,6 +23,7 @@ function createSnapshot(state: ChatRuntimePreloadService['state']): ChatRuntimeP
     isPreloading: state.isPreloading,
     status: state.status,
     canPreload: state.canPreload,
+    error: state.error,
   };
 }
 
@@ -29,6 +33,7 @@ class ChatRuntimePreloadService {
     isPreloading: false,
     status: '',
     canPreload: false,
+    error: null as string | null,
   };
 
   private readonly listeners = new Set<ChatRuntimePreloadListener>();
@@ -36,6 +41,9 @@ class ChatRuntimePreloadService {
   private generationSubscription: { unsubscribe: () => void } | null = null;
   private storeSubscription: (() => void) | null = null;
   private preloadPromise: Promise<void> | null = null;
+  private attemptedForCurrentRequest = false;
+  private isPreloadInFlight = false;
+  private isSyncing = false;
 
   constructor() {
     this.syncFromStoreAndRuntime(this.generationService.getSnapshot());
@@ -62,38 +70,100 @@ class ChatRuntimePreloadService {
   }
 
   requestPreload(): Promise<void> {
+    this.generationService.cancelScheduledUnload();
     this.setState({ requested: true });
     return this.maybePreload();
   }
 
+  retryPreload(): Promise<void> {
+    if (this.preloadPromise) {
+      this.attemptedForCurrentRequest = true;
+      return this.preloadPromise;
+    }
+
+    this.generationService.cancelScheduledUnload();
+    useAIStore.getState().setRuntimeError(null);
+    this.attemptedForCurrentRequest = false;
+    this.setState({ requested: true, error: null });
+    return this.maybePreload();
+  }
+
   clearRequest() {
+    this.attemptedForCurrentRequest = false;
     this.setState({ requested: false });
   }
 
+  dispose() {
+    this.generationSubscription?.unsubscribe();
+    this.generationSubscription = null;
+    this.storeSubscription?.();
+    this.storeSubscription = null;
+    this.listeners.clear();
+    this.preloadPromise = null;
+    this.attemptedForCurrentRequest = false;
+    this.isPreloadInFlight = false;
+    this.isSyncing = false;
+    this.state = {
+      requested: false,
+      isPreloading: false,
+      status: '',
+      canPreload: false,
+      error: null,
+    };
+  }
+
   private async maybePreload(): Promise<void> {
+    if (this.preloadPromise) {
+      if (this.state.requested) {
+        this.attemptedForCurrentRequest = true;
+      }
+      return this.preloadPromise;
+    }
+
+    const runtimeSnapshot = this.generationService.getSnapshot();
     const readiness = this.getReadiness();
+    const nextError = this.resolveNextError(runtimeSnapshot, readiness.error);
+
     this.setState({
       canPreload: readiness.canPreload,
-      status: readiness.status,
+      isPreloading: runtimeSnapshot.isPreparingRuntime || this.isPreloadInFlight,
+      status: runtimeSnapshot.runtimeStatus || nextError || readiness.status,
+      error: nextError,
     });
 
-    if (!this.state.requested || !readiness.canPreload) {
+    if (
+      !this.state.requested ||
+      !readiness.canPreload ||
+      this.attemptedForCurrentRequest ||
+      this.isPreloadInFlight ||
+      runtimeSnapshot.isPreparingRuntime ||
+      runtimeSnapshot.isGenerating
+    ) {
       return;
     }
 
-    if (this.preloadPromise) {
-      return this.preloadPromise;
-    }
+    this.attemptedForCurrentRequest = true;
+    this.isPreloadInFlight = true;
 
     this.preloadPromise = (async () => {
       this.setState({
         isPreloading: true,
-        status: this.generationService.getSnapshot().runtimeStatus || readiness.status || 'Opening local chatbot...',
+        error: null,
+        status: this.generationService.getSnapshot().runtimeStatus || 'Opening local chatbot...',
       });
 
       try {
         await this.generationService.ensureChatRuntimeReady();
+        this.setState({ error: null });
+      } catch (error) {
+        const message = getErrorMessage(error, 'Unable to load the local AI model on this device.');
+        this.setState({
+          isPreloading: false,
+          error: message,
+          status: message,
+        });
       } finally {
+        this.isPreloadInFlight = false;
         this.preloadPromise = null;
         this.syncFromStoreAndRuntime(this.generationService.getSnapshot());
       }
@@ -103,20 +173,42 @@ class ChatRuntimePreloadService {
   }
 
   private syncFromStoreAndRuntime(runtimeSnapshot: GenerationServiceRuntimeSnapshot) {
-    const readiness = this.getReadiness();
-    this.setState({
-      isPreloading: runtimeSnapshot.isPreparingRuntime,
-      status: runtimeSnapshot.runtimeStatus || readiness.status,
-      canPreload: readiness.canPreload,
-    });
+    if (this.isSyncing) {
+      return;
+    }
 
-    if (this.state.requested && readiness.canPreload && !runtimeSnapshot.isPreparingRuntime) {
+    let shouldPreload = false;
+    this.isSyncing = true;
+    try {
+      const readiness = this.getReadiness();
+      const nextError = this.resolveNextError(runtimeSnapshot, readiness.error);
+
+      this.setState({
+        isPreloading: runtimeSnapshot.isPreparingRuntime || this.isPreloadInFlight,
+        status: runtimeSnapshot.runtimeStatus || nextError || readiness.status,
+        canPreload: readiness.canPreload,
+        error: nextError,
+      });
+
+      shouldPreload =
+        this.state.requested &&
+        readiness.canPreload &&
+        !this.attemptedForCurrentRequest &&
+        !this.isPreloadInFlight &&
+        !runtimeSnapshot.isPreparingRuntime &&
+        !runtimeSnapshot.isGenerating;
+    } finally {
+      this.isSyncing = false;
+    }
+
+    if (shouldPreload) {
       void this.maybePreload();
     }
   }
 
   private getReadiness() {
     const store = useAIStore.getState();
+    const settings = useSettingsStore.getState();
     const availability = getAIRuntimeAvailability({
       provisioning: store.provisioning,
       runtimeReady: store.runtimeReady,
@@ -124,20 +216,74 @@ class ChatRuntimePreloadService {
       runtime: store.runtime,
     });
 
-    const isBusyProvisioning = availability.hasUsableLocalInferenceBackend
-      && ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(store.provisioning.status);
+    const isLocalMode = settings.aiInferenceMode === 'local';
+    const isBusyProvisioning =
+      availability.hasUsableLocalInferenceBackend &&
+      ['queued', 'downloading', 'verifying', 'unpacking', 'registering', 'warming', 'indexing'].includes(
+        store.provisioning.status,
+      );
+
+    const activeLoadError =
+      isLocalMode &&
+      store.provisioning.status === 'ready' &&
+      store.runtime.lastRuntimeError &&
+      store.runtime.lastRuntimeError.code !== 'generation-cancelled'
+        ? store.runtime.lastRuntimeError
+        : null;
+
+    // Preload is only needed when local mode has an installed model that is not loaded/ready yet
+    // and has not already errored.
+    const canPreload =
+      isLocalMode &&
+      availability.hasUsableLocalInferenceBackend &&
+      store.provisioning.status === 'ready' &&
+      !availability.canRunNativeChat &&
+      !availability.runtimePhaseActive &&
+      !isBusyProvisioning &&
+      !activeLoadError &&
+      !store.runtime.activeGenerationRequestId;
 
     return {
-      canPreload: availability.canRunNativeChat && !availability.runtimePhaseActive && !isBusyProvisioning,
+      canPreload,
       status: availability.localInferenceStatusMessage,
+      error: activeLoadError?.message ?? null,
     };
   }
 
+  private resolveNextError(
+    runtimeSnapshot: GenerationServiceRuntimeSnapshot,
+    readinessError: string | null,
+  ): string | null {
+    const store = useAIStore.getState();
+    const settings = useSettingsStore.getState();
+    if (
+      settings.aiInferenceMode !== 'local' ||
+      store.runtimeReady ||
+      store.provisioning.status !== 'ready' ||
+      runtimeSnapshot.isPreparingRuntime ||
+      this.isPreloadInFlight
+    ) {
+      return null;
+    }
+
+    return readinessError ?? this.state.error;
+  }
+
   private setState(patch: Partial<ChatRuntimePreloadService['state']>) {
-    this.state = {
+    const nextState = {
       ...this.state,
       ...patch,
     };
+    if (
+      nextState.requested === this.state.requested &&
+      nextState.isPreloading === this.state.isPreloading &&
+      nextState.status === this.state.status &&
+      nextState.canPreload === this.state.canPreload &&
+      nextState.error === this.state.error
+    ) {
+      return;
+    }
+    this.state = nextState;
     this.emit();
   }
 
@@ -155,4 +301,11 @@ export function getChatRuntimePreloadService() {
   }
 
   return preloadService;
+}
+
+export function resetChatRuntimePreloadService() {
+  if (preloadService) {
+    preloadService.dispose();
+    preloadService = null;
+  }
 }
