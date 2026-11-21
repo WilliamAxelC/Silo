@@ -6,7 +6,7 @@ import { getOcrEngine } from '../ocr/index';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
 import { isGrounded, isNonItemLine, isSuspiciousMerchantName, pickMerchantFromRows, pickTotalFromRows } from '../ocr/receiptText';
 import { assessReceiptConfidence, type ReceiptConfidence } from '../ocr/receiptConfidence';
-import { parseSignedAmount } from '../../features/transactions/amount';
+import { formatDisplayCurrency, parseSignedAmount } from '../../features/transactions/amount';
 import { parseReceiptLineItemsText, serializeReceiptLineItems } from '../../features/transactions/lineItems';
 import { clampMonthStartDay, getPeriodBounds, shiftPeriod } from '../../features/transactions/periods';
 import { useAIStore, type Message } from '../../store/useAIStore';
@@ -82,6 +82,7 @@ export interface GroundedParsedQuery {
   wantsRecent: boolean;
   asksBiggest: boolean;
   asksIncomeVsSpending: boolean;
+  asksTopCategories: boolean;
 }
 
 export interface BuildRetrievedContextOptions {
@@ -91,24 +92,101 @@ export interface BuildRetrievedContextOptions {
   monthStartDay?: number;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_SHORT_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 const NAMED_MONTH_PATTERNS: Array<{ monthIndex: number; aliases: string[]; guarded?: boolean }> = [
-  { monthIndex: 0, aliases: ['january', 'januari', 'jan'] },
-  { monthIndex: 1, aliases: ['february', 'februari', 'feb'] },
-  { monthIndex: 2, aliases: ['march', 'maret', 'mar'] },
-  { monthIndex: 3, aliases: ['april', 'apr'] },
-  { monthIndex: 4, aliases: ['mei'] },
-  { monthIndex: 4, aliases: ['may'], guarded: true },
-  { monthIndex: 5, aliases: ['june', 'juni', 'jun'] },
-  { monthIndex: 6, aliases: ['july', 'juli', 'jul'] },
-  { monthIndex: 7, aliases: ['august', 'agustus', 'aug', 'agu', 'ags'] },
-  { monthIndex: 8, aliases: ['september', 'sept', 'sep'] },
-  { monthIndex: 9, aliases: ['october', 'oktober', 'oct', 'okt'] },
-  { monthIndex: 10, aliases: ['november', 'nov', 'nop'] },
-  { monthIndex: 11, aliases: ['december', 'desember', 'dec', 'des'] },
+  { monthIndex: 0, aliases: ['january', 'januari'] },
+  { monthIndex: 0, aliases: ['jan'], guarded: true },
+  { monthIndex: 1, aliases: ['february', 'februari'] },
+  { monthIndex: 1, aliases: ['feb'], guarded: true },
+  { monthIndex: 2, aliases: ['march', 'maret'] },
+  { monthIndex: 2, aliases: ['mar'], guarded: true },
+  { monthIndex: 3, aliases: ['april'] },
+  { monthIndex: 3, aliases: ['apr'], guarded: true },
+  { monthIndex: 4, aliases: ['may', 'mei'], guarded: true },
+  { monthIndex: 5, aliases: ['june', 'juni'] },
+  { monthIndex: 5, aliases: ['jun'], guarded: true },
+  { monthIndex: 6, aliases: ['july', 'juli'] },
+  { monthIndex: 6, aliases: ['jul'], guarded: true },
+  { monthIndex: 7, aliases: ['august', 'agustus'] },
+  { monthIndex: 7, aliases: ['aug', 'agu', 'ags'], guarded: true },
+  { monthIndex: 8, aliases: ['september'] },
+  { monthIndex: 8, aliases: ['sept', 'sep'], guarded: true },
+  { monthIndex: 9, aliases: ['october', 'oktober'] },
+  { monthIndex: 9, aliases: ['oct', 'okt'], guarded: true },
+  { monthIndex: 10, aliases: ['november'] },
+  { monthIndex: 10, aliases: ['nov', 'nop'], guarded: true },
+  { monthIndex: 11, aliases: ['december', 'desember'] },
+  { monthIndex: 11, aliases: ['dec', 'des'], guarded: true },
 ];
+
+// Venue-prefix synonyms that belong to a proper merchant name when followed by a specific
+// non-stopword token (e.g. "Warung Mei", "Supermarket Hero", "Hotel Mulia").
+const VENUE_PREFIX_SYNONYMS = new Set([
+  'warung',
+  'restaurant',
+  'resto',
+  'supermarket',
+  'minimarket',
+  'pasar',
+  'hotel',
+  'apotek',
+  'klinik',
+  'bioskop',
+  'sekolah',
+]);
+
+// Broad synonyms that represent an entire category rather than a narrow sub-item;
+// skip opportunistic FTS lookups for these when the category itself already has hits.
+const BROAD_CATEGORY_SYNONYMS = new Set([
+  'food',
+  'dining',
+  'eat',
+  'eating',
+  'meal',
+  'meals',
+  'makan',
+  'makanan',
+  'minum',
+  'minuman',
+  'kuliner',
+  'jajan',
+  'transport',
+  'transportation',
+  'transportasi',
+  'commute',
+  'kendaraan',
+  'grocery',
+  'groceries',
+  'sembako',
+  'shopping',
+  'belanja',
+  'bill',
+  'bills',
+  'utility',
+  'utilities',
+  'tagihan',
+  'entertainment',
+  'hiburan',
+  'health',
+  'healthcare',
+  'medical',
+  'kesehatan',
+  'education',
+  'pendidikan',
+  'travel',
+  'vacation',
+  'holiday',
+  'liburan',
+  'wisata',
+  'home',
+  'house',
+  'household',
+  'rumah',
+  'salary',
+  'gaji',
+  'freelance',
+]);
 
 const CATEGORY_SYNONYM_GROUPS: Array<{
   targetPatterns: RegExp[];
@@ -418,6 +496,9 @@ const STOP_WORDS = new Set([
   'expense',
   'expenses',
   'expensive',
+  'finance',
+  'finances',
+  'financial',
   'fund',
   'funds',
   'highest',
@@ -539,6 +620,7 @@ const STOP_WORDS = new Set([
   'keluar',
   'keluarkan',
   'kemarin',
+  'keuangan',
   'kita',
   'kok',
   'ku',
@@ -630,33 +712,35 @@ function safeQuery<T>(db: GroundedSqliteDb, sql: string, params?: any[]): T[] {
   }
 }
 
-function formatCurrency(amount: number | null | undefined): string {
-  const safeAmount = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0;
-  const normalized = Object.is(safeAmount, -0) ? 0 : safeAmount;
-  let currencyCode = 'IDR';
+function currentCurrencyCode(): string {
   try {
-    currencyCode = useSettingsStore.getState()?.currencyCode || 'IDR';
+    return useSettingsStore.getState?.()?.currencyCode || 'IDR';
+  } catch {
+    return 'IDR';
+  }
+}
+
+function formatCurrency(amount: number | null | undefined): string {
+  let currencyCode = 'IDR';
+  let useThousandsSeparator = true;
+  try {
+    const settings = useSettingsStore.getState?.();
+    currencyCode = settings?.currencyCode || 'IDR';
+    if (typeof settings?.useThousandsSeparator === 'boolean') {
+      useThousandsSeparator = settings.useThousandsSeparator;
+    }
   } catch {
     currencyCode = 'IDR';
+    useThousandsSeparator = true;
   }
-  try {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: currencyCode,
-      maximumFractionDigits: currencyCode === 'IDR' ? 0 : 2,
-    })
-      .format(normalized)
-      .replace(/\u00a0/g, ' ');
-  } catch {
-    return `${currencyCode === 'IDR' ? 'Rp' : currencyCode} ${normalized}`;
-  }
+  return formatDisplayCurrency(amount, currencyCode, useThousandsSeparator).replace(/\u00a0/g, ' ');
 }
 
 function formatSignedCurrency(amount: number): string {
   if (!Number.isFinite(amount) || amount === 0) {
     return formatCurrency(0);
   }
-  return amount > 0 ? `+${formatCurrency(amount)}` : `-${formatCurrency(Math.abs(amount))}`;
+  return amount > 0 ? `+${formatCurrency(amount)}` : formatCurrency(-Math.abs(amount));
 }
 
 function formatShortDate(ms: number, referenceYear?: number): string {
@@ -706,65 +790,56 @@ export function parseTimePeriod(
   const tomorrowStart = startOfLocalDay(y, m, d + 1);
   const dayFromMon = (now.getDay() + 6) % 7;
 
-  // 1. Last N days (English & Indonesian)
+  // Anchor rolling lookbacks to local start-of-day so SQL boundaries match the printed calendar date.
+  const buildLastNDaysPeriod = (days: number, matchedText: string): GroundedTimePeriod => {
+    const clampedDays = Math.max(1, Math.min(3650, days));
+    const fromMs = startOfLocalDay(y, m, d - clampedDays);
+    const toMs = Math.max(now.getTime() + 1, tomorrowStart);
+    return {
+      kind: 'last-n-days',
+      label: `Last ${clampedDays} days (${formatShortDate(fromMs)}–${formatShortDate(now.getTime())})`,
+      fromMs,
+      toMs,
+      isExplicit: true,
+      matchedText,
+    };
+  };
+
+  // 1. Last N days / weeks (English & Indonesian)
   const enDaysMatch = userPrompt.match(
     /\b(?:(?:over|in|during)\s+(?:the\s+)?)?(?:last|past)\s+(\d{1,4})\s+days?\b/i,
   );
   if (enDaysMatch) {
-    const days = Math.max(1, Math.min(3650, Number(enDaysMatch[1]) || 30));
-    const fromMs = now.getTime() - days * DAY_MS;
-    const toMs = Math.max(now.getTime() + 1, tomorrowStart);
-    return {
-      kind: 'last-n-days',
-      label: `Last ${days} days (${formatShortDate(fromMs)}–${formatShortDate(now.getTime())})`,
-      fromMs,
-      toMs,
-      isExplicit: true,
-      matchedText: enDaysMatch[0],
-    };
+    return buildLastNDaysPeriod(Number(enDaysMatch[1]) || 30, enDaysMatch[0]);
+  }
+
+  const enWeeksMatch = userPrompt.match(
+    /\b(?:(?:over|in|during)\s+(?:the\s+)?)?(?:last|past)\s+(\d{1,3})\s+weeks?\b/i,
+  );
+  if (enWeeksMatch) {
+    return buildLastNDaysPeriod((Number(enWeeksMatch[1]) || 2) * 7, enWeeksMatch[0]);
   }
 
   const idDaysMatch = userPrompt.match(/\b(?:dalam\s+)?(\d{1,4})\s+hari\s+(?:terakhir|belakangan|ke\s*belakang)\b/i);
   if (idDaysMatch) {
-    const days = Math.max(1, Math.min(3650, Number(idDaysMatch[1]) || 30));
-    const fromMs = now.getTime() - days * DAY_MS;
-    const toMs = Math.max(now.getTime() + 1, tomorrowStart);
-    return {
-      kind: 'last-n-days',
-      label: `Last ${days} days (${formatShortDate(fromMs)}–${formatShortDate(now.getTime())})`,
-      fromMs,
-      toMs,
-      isExplicit: true,
-      matchedText: idDaysMatch[0],
-    };
+    return buildLastNDaysPeriod(Number(idDaysMatch[1]) || 30, idDaysMatch[0]);
+  }
+
+  const idWeeksMatch = userPrompt.match(
+    /\b(?:dalam\s+)?(\d{1,3})\s+(?:minggu|pekan)\s+(?:terakhir|belakangan|ke\s*belakang)\b/i,
+  );
+  if (idWeeksMatch) {
+    return buildLastNDaysPeriod((Number(idWeeksMatch[1]) || 2) * 7, idWeeksMatch[0]);
   }
 
   const idRollingMonthMatch = userPrompt.match(/\bsebulan\s+terakhir\b/i);
   if (idRollingMonthMatch) {
-    const fromMs = now.getTime() - 30 * DAY_MS;
-    const toMs = Math.max(now.getTime() + 1, tomorrowStart);
-    return {
-      kind: 'last-n-days',
-      label: `Last 30 days (${formatShortDate(fromMs)}–${formatShortDate(now.getTime())})`,
-      fromMs,
-      toMs,
-      isExplicit: true,
-      matchedText: idRollingMonthMatch[0],
-    };
+    return buildLastNDaysPeriod(30, idRollingMonthMatch[0]);
   }
 
   const idRollingWeekMatch = userPrompt.match(/\bseminggu\s+terakhir\b/i);
   if (idRollingWeekMatch) {
-    const fromMs = now.getTime() - 7 * DAY_MS;
-    const toMs = Math.max(now.getTime() + 1, tomorrowStart);
-    return {
-      kind: 'last-n-days',
-      label: `Last 7 days (${formatShortDate(fromMs)}–${formatShortDate(now.getTime())})`,
-      fromMs,
-      toMs,
-      isExplicit: true,
-      matchedText: idRollingWeekMatch[0],
-    };
+    return buildLastNDaysPeriod(7, idRollingWeekMatch[0]);
   }
 
   // 2. Last month (check before single-word "kemarin")
@@ -844,18 +919,28 @@ export function parseTimePeriod(
     };
   }
 
-  // 8. Named month (English & Indonesian, optional year)
+  // 8. Named month (English & Indonesian, optional year).
+  // Short aliases ("jan", "feb", ..., "des") and ambiguous names ("may", "mei") require a period cue
+  // or 4-digit year so merchant names like "Warung Mei" or "Jan Bakery" stay merchant lookups.
+  const merchantPrefixGuard = /\b(?:at|warung|toko|kedai|kafe|cafe|resto|restoran|bakery|kopi|rm)\s+$/i;
   for (const entry of NAMED_MONTH_PATTERNS) {
     const aliasGroup = entry.aliases.join('|');
     const regex = entry.guarded
       ? new RegExp(
-          `(?:\\b(?:in|for|during|of|from|on|bulan)\\s+(?:${aliasGroup})\\b(?:\\s+(\\d{4}))?|\\b(?:${aliasGroup})\\s+(\\d{4})\\b)`,
+          `(?:\\b(?:in|for|during|of|from|(?:di\\s+)?bulan|bln)\\s+(?:${aliasGroup})\\b(?:\\s+(\\d{4}))?|\\b(?:${aliasGroup})\\s+(\\d{4})\\b)`,
           'i',
         )
-      : new RegExp(`(?:\\b(?:in|for|during|of|from|on|bulan)\\s+)?\\b(?:${aliasGroup})\\b(?:\\s+(\\d{4}))?`, 'i');
+      : new RegExp(`(\\b(?:in|for|during|of|from|(?:di\\s+)?bulan|bln)\\s+)?\\b(?:${aliasGroup})\\b(?:\\s+(\\d{4}))?`, 'i');
     const match = userPrompt.match(regex);
     if (match) {
-      const explicitYearRaw = match[1] ?? match[2];
+      const explicitYearRaw = entry.guarded ? (match[1] ?? match[2]) : match[2];
+      const hasPeriodCue = entry.guarded ? true : Boolean(match[1]);
+      if (!entry.guarded && !hasPeriodCue && !explicitYearRaw && typeof match.index === 'number') {
+        const prefix = userPrompt.slice(0, match.index);
+        if (merchantPrefixGuard.test(prefix)) {
+          continue;
+        }
+      }
       const explicitYear = explicitYearRaw ? Number(explicitYearRaw) : null;
       const targetYear =
         explicitYear && explicitYear >= 1970 && explicitYear <= 2100
@@ -913,11 +998,14 @@ interface StoredCategory {
   type: 'expense' | 'income';
 }
 
-interface StoredWallet {
+interface BasicWallet {
   id: number;
   name: string;
   type: string;
   isActive: boolean;
+}
+
+interface StoredWallet extends BasicWallet {
   balance: number;
 }
 
@@ -938,14 +1026,17 @@ function loadUserCategories(db: GroundedSqliteDb): StoredCategory[] {
   const catRows = safeQuery<{ name?: string; type?: string }>(db, 'SELECT name, type FROM categories ORDER BY id ASC');
   catRows.forEach((row) => add(row.name, row.type));
 
-  const txCatRows = safeQuery<{ category?: string; type?: string }>(
-    db,
-    `SELECT DISTINCT i.category AS category, t.type AS type
-     FROM transaction_items i
-     LEFT JOIN transactions t ON t.id = i.transaction_id
-     WHERE i.category IS NOT NULL AND TRIM(i.category) != '' AND COALESCE(t.type, 'expense') != 'transfer'`,
-  );
-  txCatRows.forEach((row) => add(row.category, row.type));
+  // Avoid scanning transaction_items on normal DBs where categories is already seeded/migrated.
+  if (catRows.length === 0) {
+    const txCatRows = safeQuery<{ category?: string; type?: string }>(
+      db,
+      `SELECT DISTINCT i.category AS category, t.type AS type
+       FROM transaction_items i
+       LEFT JOIN transactions t ON t.id = i.transaction_id
+       WHERE i.category IS NOT NULL AND TRIM(i.category) != '' AND COALESCE(t.type, 'expense') != 'transfer'`,
+    );
+    txCatRows.forEach((row) => add(row.category, row.type));
+  }
 
   const budgetCatRows = safeQuery<{ category?: string }>(
     db,
@@ -954,6 +1045,26 @@ function loadUserCategories(db: GroundedSqliteDb): StoredCategory[] {
   budgetCatRows.forEach((row) => add(row.category, 'expense'));
 
   return Array.from(seen.values());
+}
+
+function loadWalletsBasic(db: GroundedSqliteDb): BasicWallet[] {
+  const rows = safeQuery<{
+    id?: number;
+    name?: string;
+    type?: string;
+    is_active?: number | null;
+  }>(db, 'SELECT id, name, type, is_active FROM wallets ORDER BY is_active DESC, id ASC');
+
+  return rows
+    .filter((row): row is { id: number; name: string; type?: string; is_active?: number | null } =>
+      typeof row.id === 'number' && typeof row.name === 'string' && row.name.trim().length > 0,
+    )
+    .map((row) => ({
+      id: row.id,
+      name: row.name.trim(),
+      type: row.type ?? 'cash',
+      isActive: row.is_active !== 0,
+    }));
 }
 
 function loadWalletsWithBalances(db: GroundedSqliteDb): StoredWallet[] {
@@ -994,7 +1105,20 @@ function loadWalletsWithBalances(db: GroundedSqliteDb): StoredWallet[] {
 function matchWordOrPhrase(text: string, phrase: string): boolean {
   const escaped = escapeRegex(phrase.trim().toLowerCase()).replace(/\s+/g, '\\s+');
   if (!escaped) return false;
-  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}([^\\p{L}\\p{N}]|$)`, 'iu').test(text);
+}
+
+function isPartOfNamedMerchant(text: string, term: string): boolean {
+  if (!VENUE_PREFIX_SYNONYMS.has(term.toLowerCase())) {
+    return false;
+  }
+  const escaped = escapeRegex(term.trim().toLowerCase()).replace(/\s+/g, '\\s+');
+  const match = text.match(new RegExp(`(?:^|[^\\p{L}\\p{N}])(${escaped})\\s+([\\p{L}\\p{N}]+)`, 'iu'));
+  if (!match) {
+    return false;
+  }
+  const nextToken = match[2].toLowerCase();
+  return nextToken.length >= 2 && !/^\d+$/.test(nextToken) && !STOP_WORDS.has(nextToken);
 }
 
 function matchCategoriesInPrompt(
@@ -1013,7 +1137,7 @@ function matchCategoriesInPrompt(
     matches.push({ name: cat.name, type: cat.type, matchedViaSynonym, triggerTerm });
     triggerTerm
       .toLowerCase()
-      .split(/[^a-z0-9]+/)
+      .split(/[^\p{L}\p{N}]+/u)
       .filter((t) => t.length > 0)
       .forEach((t) => consumedTokens.add(t));
   };
@@ -1054,7 +1178,9 @@ function matchCategoriesInPrompt(
 
   // Pass 3: English & Indonesian synonyms resolved against real user categories
   for (const group of CATEGORY_SYNONYM_GROUPS) {
-    const hitSynonyms = group.synonyms.filter((syn) => matchWordOrPhrase(lowered, syn));
+    const hitSynonyms = group.synonyms.filter(
+      (syn) => matchWordOrPhrase(lowered, syn) && !isPartOfNamedMerchant(lowered, syn),
+    );
     if (hitSynonyms.length === 0) continue;
 
     let resolvedCategory: StoredCategory | undefined;
@@ -1077,7 +1203,7 @@ function matchCategoriesInPrompt(
       for (const syn of hitSynonyms) {
         syn
           .toLowerCase()
-          .split(/[^a-z0-9]+/)
+          .split(/[^\p{L}\p{N}]+/u)
           .filter((t) => t.length > 0)
           .forEach((t) => consumedTokens.add(t));
       }
@@ -1089,7 +1215,7 @@ function matchCategoriesInPrompt(
 
 function matchAccountInPrompt(
   cleanedPrompt: string,
-  wallets: StoredWallet[],
+  wallets: Array<Pick<BasicWallet, 'id' | 'name'>>,
 ): { account: { id: number; name: string } | null; consumedTokens: Set<string> } {
   const lowered = cleanedPrompt.toLowerCase();
   const consumedTokens = new Set<string>();
@@ -1100,7 +1226,7 @@ function matchAccountInPrompt(
     if (matchWordOrPhrase(lowered, wallet.name)) {
       wallet.name
         .toLowerCase()
-        .split(/[^a-z0-9]+/)
+        .split(/[^\p{L}\p{N}]+/u)
         .filter((t) => t.length > 0)
         .forEach((t) => consumedTokens.add(t));
       return { account: { id: wallet.id, name: wallet.name }, consumedTokens };
@@ -1108,11 +1234,11 @@ function matchAccountInPrompt(
   }
 
   // Pass 2: Unique distinctive token from wallet name (e.g. "BCA" -> "Bank BCA")
-  const tokenToWallets = new Map<string, StoredWallet[]>();
+  const tokenToWallets = new Map<string, Array<Pick<BasicWallet, 'id' | 'name'>>>();
   for (const wallet of sorted) {
     const tokens = wallet.name
       .toLowerCase()
-      .split(/[^a-z0-9]+/)
+      .split(/[^\p{L}\p{N}]+/u)
       .filter((t) => t.length >= 3 && !GENERIC_WALLET_TOKENS.has(t));
     for (const token of tokens) {
       const list = tokenToWallets.get(token) ?? [];
@@ -1134,7 +1260,7 @@ function matchAccountInPrompt(
 function extractSearchKeywords(cleanedPrompt: string, consumedTokens: Set<string>): string[] {
   const rawTokens = cleanedPrompt
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 2 && !/^\d+$/.test(token) && !STOP_WORDS.has(token) && !consumedTokens.has(token));
@@ -1148,7 +1274,7 @@ export function parseGroundedQuery(
     db?: GroundedSqliteDb;
     now?: Date | number;
     categories?: StoredCategory[];
-    wallets?: StoredWallet[];
+    wallets?: Array<Pick<BasicWallet, 'id' | 'name'>>;
     monthStartDay?: number;
   },
 ): GroundedParsedQuery {
@@ -1157,7 +1283,7 @@ export function parseGroundedQuery(
   const cleanedPrompt = period.matchedText ? userPrompt.replace(period.matchedText, ' ') : userPrompt;
 
   const userCategories = options?.categories ?? loadUserCategories(db);
-  const wallets = options?.wallets ?? loadWalletsWithBalances(db);
+  const wallets = options?.wallets ?? loadWalletsBasic(db);
 
   const { matches: categories, consumedTokens: categoryTokens } = matchCategoriesInPrompt(cleanedPrompt, userCategories);
   const { account, consumedTokens: accountTokens } = matchAccountInPrompt(cleanedPrompt, wallets);
@@ -1165,20 +1291,18 @@ export function parseGroundedQuery(
   const asksBudget = /\b(budget|budgets|budgeted|budgeting|anggaran|bujet|limit|limits|cap|caps|batas|jatah)\b/i.test(
     userPrompt,
   );
-  const explicitBalancePhrase =
-    /\b(balance|balances|net\s+worth|money\s+left|cash\s+left|funds\s+left|how\s+much\s+money|total\s+money|my\s+money|remaining\s+money|account\s+balance|wallet\s+balance|saldo|saldoku|sisa\s+uang|sisa\s+duit|sisa\s+dana|uang\s+(?:saya|ku|gue|gw|aku)|duit\s+(?:saya|ku|gue|gw|aku)|uangku|duitku|total\s+uang|total\s+duit|kekayaan\s+bersih)\b/i.test(
-      userPrompt,
-    );
-  const genericLeftWithoutBudget =
-    !asksBudget &&
-    categories.length === 0 &&
-    /\b(have\s+left|do\s+i\s+have\s+left|berapa\s+sisa)\b/i.test(userPrompt);
-  const accountBalanceImplied =
-    account !== null && !/\b(spend|spent|spending|expense|expenses|pengeluaran|beli|bayar)\b/i.test(userPrompt);
-  const asksBalance = explicitBalancePhrase || genericLeftWithoutBudget || accountBalanceImplied;
-
   const wantsRecent =
-    /\b(recent|latest|history|list|show\s+(?:me\s+)?(?:my\s+)?(?:all\s+)?transactions?|all\s+transactions?|last\s+\d*\s*transactions?|transaksi\s+terbaru|transaksi\s+terakhir|transaksi\s+apa\s+saja|pengeluaran\s+terbaru|pengeluaran\s+terakhir|riwayat|daftar\s+transaksi|tampilkan\s+(?:semua\s+)?transaksi|tunjukkan\s+(?:semua\s+|daftar\s+)?transaksi|lihat\s+transaksi)\b/i.test(
+    /\b(recent|latest|history|list|riwayat)\b/i.test(userPrompt) ||
+    /\b(?:show|display|give|view|see)\s+(?:me\s+)?(?:my\s+)?(?:all\s+)?(?:the\s+)?(?:[\p{L}\p{N}&-]+\s+){0,3}(?:transactions?|expenses?|purchases?)\b/iu.test(
+      userPrompt,
+    ) ||
+    /\b(?:all|last\s+\d+)\s+(?:[\p{L}\p{N}&-]+\s+){0,2}(?:transactions?|expenses?|purchases?)\b/iu.test(userPrompt) ||
+    /\bwhat\s+(?:[\p{L}\p{N}&-]+\s+){0,2}(?:transactions?|purchases?)\b/iu.test(userPrompt) ||
+    /\b(?:transactions?|purchases?)\s+(?:did\s+i\s+(?:make|have)|were\s+made)\b/i.test(userPrompt) ||
+    /\b(?:transaksi|pengeluaran|pemasukan)\s+(?:[\p{L}\p{N}&-]+\s+){0,2}(?:terbaru|terakhir|apa\s+saja)\b/iu.test(
+      userPrompt,
+    ) ||
+    /\b(?:daftar|tampilkan|tunjukkan|tunjukin|lihat|liat)\s+(?:semua\s+|daftar\s+)?(?:[\p{L}\p{N}&-]+\s+){0,2}(?:transaksi|pengeluaran|pemasukan)\b/iu.test(
       userPrompt,
     );
   const asksBiggest =
@@ -1189,6 +1313,27 @@ export function parseGroundedQuery(
     /\b(income|earn|earned|earning|earnings|vs|versus|compare|comparison|cashflow|cash\s+flow|net|pemasukan|pendapatan|penghasilan|banding|bandingkan|dibanding|perbandingan|arus\s+kas)\b/i.test(
       userPrompt,
     );
+  const asksTopCategories =
+    /\b(top\s+categor|categor(?:y|ies)\s+breakdown|spending\s+breakdown|where\s+(?:did|does)\s+(?:my\s+)?money\s+go|most\s+spent\s+categor|kategori\s+(?:terbesar|terbanyak|tertinggi)|rincian\s+kategori|pengeluaran\s+per\s+kategori)\b/i.test(
+      userPrompt,
+    );
+
+  const explicitBalancePhrase =
+    /\b(balance|balances|net\s+worth|money\s+left|cash\s+left|funds\s+left|how\s+much\s+money|total\s+money|my\s+money|remaining\s+money|account\s+balance|wallet\s+balance|saldo|saldoku|sisa\s+uang|sisa\s+duit|sisa\s+dana|uang\s+(?:saya|ku|gue|gw|aku)|duit\s+(?:saya|ku|gue|gw|aku)|uangku|duitku|total\s+uang|total\s+duit|kekayaan\s+bersih)\b/i.test(
+      userPrompt,
+    );
+  const genericLeftWithoutBudget =
+    !asksBudget &&
+    categories.length === 0 &&
+    /\b(have\s+left|do\s+i\s+have\s+left|berapa\s+sisa)\b/i.test(userPrompt);
+  const accountBalanceImplied =
+    account !== null &&
+    !asksBudget &&
+    !wantsRecent &&
+    !asksBiggest &&
+    !asksIncomeVsSpending &&
+    !/\b(spend|spent|spending|expense|expenses|pengeluaran|beli|bayar)\b/i.test(userPrompt);
+  const asksBalance = explicitBalancePhrase || genericLeftWithoutBudget || accountBalanceImplied;
 
   const consumedTokens = new Set<string>([...categoryTokens, ...accountTokens]);
   const keywords = extractSearchKeywords(cleanedPrompt, consumedTokens);
@@ -1203,6 +1348,7 @@ export function parseGroundedQuery(
     wantsRecent,
     asksBiggest,
     asksIncomeVsSpending,
+    asksTopCategories,
   };
 }
 
@@ -1226,31 +1372,46 @@ interface MatchedTxRow {
   category: string | null;
 }
 
+function normalizeForMatch(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function escapeLikePattern(term: string): string {
+  return term.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 function formatLineItemSnippet(lineItemsText: string | null | undefined, keywords: string[]): string | null {
   if (!lineItemsText || !lineItemsText.trim()) return null;
-  const rawLines = lineItemsText
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  if (rawLines.length === 0) return null;
+  const parsedItems = parseReceiptLineItemsText(lineItemsText);
+  if (parsedItems.length === 0) return null;
 
-  const loweredKeywords = keywords.map((k) => k.toLowerCase());
-  const matchingLines =
-    loweredKeywords.length > 0
-      ? rawLines.filter((line) => loweredKeywords.some((kw) => line.toLowerCase().includes(kw)))
-      : [];
-  const chosen = (matchingLines.length > 0 ? matchingLines : rawLines).slice(0, 2);
-
-  const formatted = chosen.map((line) => {
-    const pipeMatch = line.match(/^(.+?)\s*\|\s*(-?\d+(?:\.\d+)?)$/);
-    if (pipeMatch) {
-      const itemName = pipeMatch[1].trim();
-      const price = Number(pipeMatch[2]);
-      if (Number.isFinite(price) && price > 0) {
-        return `${itemName} ${formatCurrency(price)}`;
+  const normalizedKeywords = keywords.map((k) => normalizeForMatch(k)).filter((k) => k.length > 0);
+  let matchingItems = parsedItems;
+  if (normalizedKeywords.length > 0) {
+    const allMatch = parsedItems.filter((item) => {
+      const hay = normalizeForMatch(`${item.name} ${item.note}`);
+      return normalizedKeywords.every((kw) => hay.includes(kw));
+    });
+    if (allMatch.length > 0) {
+      matchingItems = allMatch;
+    } else {
+      const anyMatch = parsedItems.filter((item) => {
+        const hay = normalizeForMatch(`${item.name} ${item.note}`);
+        return normalizedKeywords.some((kw) => hay.includes(kw));
+      });
+      if (anyMatch.length > 0) {
+        matchingItems = anyMatch;
       }
     }
-    return trimCollapsedText(line, 45);
+  }
+
+  const currencyCode = currentCurrencyCode();
+  const formatted = matchingItems.slice(0, 2).map((item) => {
+    const price = item.price.trim() ? Math.abs(parseSignedAmount(item.price.trim(), undefined, currencyCode)) : 0;
+    if (Number.isFinite(price) && price > 0) {
+      return `${trimCollapsedText(item.name, 35)} ${formatCurrency(price)}`;
+    }
+    return trimCollapsedText(item.name, 45);
   });
 
   return formatted.join(', ');
@@ -1271,7 +1432,7 @@ function formatTransactionLine(
   } else if (row.total_amount > 0) {
     amountStr = `+${formatCurrency(row.total_amount)}`;
   } else {
-    amountStr = `-${formatCurrency(Math.abs(row.total_amount))}`;
+    amountStr = formatCurrency(-Math.abs(row.total_amount));
   }
 
   let details = '';
@@ -1293,87 +1454,238 @@ function formatTransactionLine(
   return trimCollapsedText(`${dateStr} ${merchant}${cat} ${amountStr}${details}`, 160);
 }
 
-function queryKeywordTransactions(
+interface KeywordMatchResult {
+  totalCount: number;
+  expenseCount: number;
+  expenseSum: number;
+  incomeCount: number;
+  incomeSum: number;
+  allMatchedViaLineItems: boolean;
+  sampleRows: MatchedTxRow[];
+}
+
+interface KeywordAggregateSqlRow {
+  total_count?: number | null;
+  expense_count?: number | null;
+  expense_sum?: number | null;
+  income_count?: number | null;
+  income_sum?: number | null;
+  line_item_row_count?: number | null;
+}
+
+interface LineItemCandidateRow {
+  id: number;
+  merchant_name: string | null;
+  total_amount: number;
+  type: string;
+  line_items_text: string | null;
+}
+
+function queryKeywordMatches(
   db: GroundedSqliteDb,
   keywords: string[],
   range: { fromMs: number; toMs: number } | null,
   accountId: number | null,
-): MatchedTxRow[] {
-  const ftsTerms = keywords
-    .map((w) => w.replace(/[^a-z0-9]/gi, ''))
-    .filter((w) => w.length >= 2);
+  options?: { sampleLimit?: number; allowLikeFallback?: boolean },
+): KeywordMatchResult {
+  const empty: KeywordMatchResult = {
+    totalCount: 0,
+    expenseCount: 0,
+    expenseSum: 0,
+    incomeCount: 0,
+    incomeSum: 0,
+    allMatchedViaLineItems: false,
+    sampleRows: [],
+  };
 
+  const terms = keywords
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase())
+    .filter((w) => w.length >= 2);
+  if (terms.length === 0) {
+    return empty;
+  }
+
+  const sampleLimit = options?.sampleLimit ?? QWEN_MODEL_RETRIEVAL_ITEM_LIMIT;
+  const allowLikeFallback = options?.allowLikeFallback ?? true;
   const dateClause = range ? ' AND t.date >= ? AND t.date < ?' : '';
   const walletClause = accountId !== null ? ' AND t.wallet_id = ?' : '';
   const tailParams: any[] = [];
   if (range) tailParams.push(range.fromMs, range.toMs);
   if (accountId !== null) tailParams.push(accountId);
 
-  let rows: MatchedTxRow[] = [];
+  const aggregateSelect = `
+    COUNT(*) AS total_count,
+    COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.total_amount < 0 THEN 1 ELSE 0 END), 0) AS expense_count,
+    COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.total_amount < 0 THEN ABS(t.total_amount) ELSE 0 END), 0) AS expense_sum,
+    COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.total_amount > 0 THEN 1 ELSE 0 END), 0) AS income_count,
+    COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.total_amount > 0 THEN t.total_amount ELSE 0 END), 0) AS income_sum,
+    COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.line_items_text IS NOT NULL AND TRIM(t.line_items_text) != '' THEN 1 ELSE 0 END), 0) AS line_item_row_count
+  `;
 
-  if (ftsTerms.length > 0) {
-    const matchQuery = ftsTerms.map((w) => `"${w}"*`).join(' OR ');
-    rows = safeQuery<MatchedTxRow>(
-      db,
-      `SELECT
-         t.id AS transaction_id,
-         t.merchant_name,
-         t.total_amount,
-         t.type,
-         t.date,
-         t.note,
-         t.line_items_text,
-         i.category
-       FROM transactions_fts fts
-       JOIN transactions t ON fts.rowid = t.id
-       LEFT JOIN transaction_items i ON t.id = i.transaction_id
-       WHERE transactions_fts MATCH ?${dateClause}${walletClause}
-       ORDER BY fts.rank, t.date DESC
-       LIMIT 8`,
-      [matchQuery, ...tailParams],
-    );
-  }
+  // 1. Primary path: FTS5 requiring ALL terms (AND) with uncapped SQL COUNT/SUM.
+  const matchQuery = terms.map((w) => `"${w}"*`).join(' AND ');
+  const ftsParams = [matchQuery, ...tailParams];
+  const ftsAggRows = safeQuery<KeywordAggregateSqlRow>(
+    db,
+    `SELECT ${aggregateSelect}
+     FROM transactions_fts fts
+     CROSS JOIN transactions t ON fts.rowid = t.id
+     WHERE transactions_fts MATCH ?${dateClause}${walletClause}`,
+    ftsParams,
+  );
 
-  if (rows.length === 0 && ftsTerms.length > 0) {
-    const likeConditions = ftsTerms
-      .map(() => '(t.merchant_name LIKE ? OR t.note LIKE ? OR t.line_items_text LIKE ? OR i.category LIKE ?)')
-      .join(' OR ');
-    const likeParams: string[] = [];
-    ftsTerms.forEach((term) => {
-      const pattern = `%${term}%`;
+  let usedLike = false;
+  let aggRow = ftsAggRows[0];
+  let totalCount = Number(aggRow?.total_count ?? 0) || 0;
+
+  let likeClause = '';
+  let likeParams: string[] = [];
+
+  // 2. Fallback path: LIKE ... ESCAPE '\' requiring ALL terms (AND) across merchant/note/items/category.
+  if (totalCount === 0 && allowLikeFallback) {
+    likeClause = terms
+      .map(
+        () =>
+          "(t.merchant_name LIKE ? ESCAPE '\\' OR t.note LIKE ? ESCAPE '\\' OR t.line_items_text LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM transaction_items i WHERE i.transaction_id = t.id AND i.category LIKE ? ESCAPE '\\'))",
+      )
+      .join(' AND ');
+    terms.forEach((term) => {
+      const pattern = `%${escapeLikePattern(term)}%`;
       likeParams.push(pattern, pattern, pattern, pattern);
     });
 
-    rows = safeQuery<MatchedTxRow>(
+    const likeAggRows = safeQuery<KeywordAggregateSqlRow>(
       db,
-      `SELECT
-         t.id AS transaction_id,
-         t.merchant_name,
-         t.total_amount,
-         t.type,
-         t.date,
-         t.note,
-         t.line_items_text,
-         i.category
+      `SELECT ${aggregateSelect}
        FROM transactions t
-       LEFT JOIN transaction_items i ON t.id = i.transaction_id
-       WHERE (${likeConditions})${dateClause}${walletClause}
-       ORDER BY t.date DESC
-       LIMIT 8`,
+       WHERE (${likeClause})${dateClause}${walletClause}`,
       [...likeParams, ...tailParams],
     );
+    aggRow = likeAggRows[0];
+    totalCount = Number(aggRow?.total_count ?? 0) || 0;
+    usedLike = totalCount > 0;
   }
 
-  // Deduplicate by transaction_id
-  const unique: MatchedTxRow[] = [];
-  const seen = new Set<number>();
-  for (const row of rows) {
-    if (typeof row.transaction_id === 'number' && !seen.has(row.transaction_id)) {
-      seen.add(row.transaction_id);
-      unique.push(row);
+  if (totalCount === 0) {
+    return empty;
+  }
+
+  const expenseCount = Number(aggRow?.expense_count ?? 0) || 0;
+  let expenseSum = Number(aggRow?.expense_sum ?? 0) || 0;
+  const incomeCount = Number(aggRow?.income_count ?? 0) || 0;
+  let incomeSum = Number(aggRow?.income_sum ?? 0) || 0;
+  const lineItemRowCount = Number(aggRow?.line_item_row_count ?? 0) || 0;
+
+  // 3. Per-row line-item adjustment: when a keyword matched a line item inside a larger receipt
+  // (rather than the merchant name itself), sum only the matched line-item prices for that row.
+  let lineItemMatchedRows = 0;
+  const nonTransferCount = expenseCount + incomeCount;
+  if (lineItemRowCount > 0) {
+    const candidateRows = usedLike
+      ? safeQuery<LineItemCandidateRow>(
+          db,
+          `SELECT t.id, t.merchant_name, t.total_amount, t.type, t.line_items_text
+           FROM transactions t
+           WHERE (${likeClause})${dateClause}${walletClause}
+             AND t.type != 'transfer'
+             AND t.line_items_text IS NOT NULL AND TRIM(t.line_items_text) != ''`,
+          [...likeParams, ...tailParams],
+        )
+      : safeQuery<LineItemCandidateRow>(
+          db,
+          `SELECT t.id, t.merchant_name, t.total_amount, t.type, t.line_items_text
+           FROM transactions_fts fts
+           CROSS JOIN transactions t ON fts.rowid = t.id
+           WHERE transactions_fts MATCH ?${dateClause}${walletClause}
+             AND t.type != 'transfer'
+             AND t.line_items_text IS NOT NULL AND TRIM(t.line_items_text) != ''`,
+          ftsParams,
+        );
+
+    const normalizedTerms = terms.map((t) => normalizeForMatch(t));
+    const currencyCode = currentCurrencyCode();
+
+    for (const row of candidateRows) {
+      const merchantNorm = normalizeForMatch(row.merchant_name || '');
+      const remainingTerms = normalizedTerms.filter((t) => !merchantNorm.includes(t));
+      if (remainingTerms.length === 0) {
+        // Merchant itself matched every search term; keep the full receipt total.
+        continue;
+      }
+
+      const parsedItems = parseReceiptLineItemsText(row.line_items_text || '');
+      let matchedItemSum = 0;
+      let matchedItemCount = 0;
+      for (const item of parsedItems) {
+        const itemHay = normalizeForMatch(`${item.name} ${item.note}`);
+        if (!remainingTerms.every((t) => itemHay.includes(t))) {
+          continue;
+        }
+        const price = item.price.trim() ? Math.abs(parseSignedAmount(item.price.trim(), undefined, currencyCode)) : 0;
+        if (Number.isFinite(price) && price > 0) {
+          matchedItemSum += price;
+          matchedItemCount += 1;
+        }
+      }
+
+      if (matchedItemCount > 0 && matchedItemSum > 0) {
+        if (row.total_amount < 0) {
+          expenseSum = expenseSum - Math.abs(row.total_amount) + matchedItemSum;
+        } else if (row.total_amount > 0) {
+          incomeSum = incomeSum - row.total_amount + matchedItemSum;
+        }
+        lineItemMatchedRows += 1;
+      }
     }
   }
-  return unique;
+
+  // 4. Fetch a small set of display rows (deduplicated via scalar category subquery).
+  const sampleRows = usedLike
+    ? safeQuery<MatchedTxRow>(
+        db,
+        `SELECT
+           t.id AS transaction_id,
+           t.merchant_name,
+           t.total_amount,
+           t.type,
+           t.date,
+           t.note,
+           t.line_items_text,
+           (SELECT i.category FROM transaction_items i WHERE i.transaction_id = t.id ORDER BY i.id ASC LIMIT 1) AS category
+         FROM transactions t
+         WHERE (${likeClause})${dateClause}${walletClause}
+         ORDER BY t.date DESC, t.id DESC
+         LIMIT ?`,
+        [...likeParams, ...tailParams, sampleLimit],
+      )
+    : safeQuery<MatchedTxRow>(
+        db,
+        `SELECT
+           t.id AS transaction_id,
+           t.merchant_name,
+           t.total_amount,
+           t.type,
+           t.date,
+           t.note,
+           t.line_items_text,
+           (SELECT i.category FROM transaction_items i WHERE i.transaction_id = t.id ORDER BY i.id ASC LIMIT 1) AS category
+         FROM transactions_fts fts
+         CROSS JOIN transactions t ON fts.rowid = t.id
+         WHERE transactions_fts MATCH ?${dateClause}${walletClause}
+         ORDER BY fts.rank, t.date DESC, t.id DESC
+         LIMIT ?`,
+        [...ftsParams, sampleLimit],
+      );
+
+  return {
+    totalCount,
+    expenseCount,
+    expenseSum,
+    incomeCount,
+    incomeSum,
+    allMatchedViaLineItems: nonTransferCount > 0 && lineItemMatchedRows === nonTransferCount,
+    sampleRows,
+  };
 }
 
 export function buildRetrievedContext(
@@ -1382,176 +1694,413 @@ export function buildRetrievedContext(
 ): RetrievedContextItem[] {
   const db = options?.db ?? expoDb;
   const now = options?.now instanceof Date ? options.now : new Date(options?.now ?? Date.now());
-  const wallets = loadWalletsWithBalances(db);
+  const basicWallets = loadWalletsBasic(db);
   const userCategories = loadUserCategories(db);
   const monthStartDay = options?.monthStartDay ?? currentMonthStartDay();
-  const parsed = parseGroundedQuery(userPrompt, { db, now, categories: userCategories, wallets, monthStartDay });
+  const parsed = parseGroundedQuery(userPrompt, {
+    db,
+    now,
+    categories: userCategories,
+    wallets: basicWallets,
+    monthStartDay,
+  });
 
   const { period, account } = parsed;
   const walletFilterSql = account !== null ? ' AND wallet_id = ?' : '';
   const walletFilterJoinSql = account !== null ? ' AND t.wallet_id = ?' : '';
   const periodParams: any[] = account !== null ? [period.fromMs, period.toMs, account.id] : [period.fromMs, period.toMs];
+  const refYear = now.getFullYear();
+
+  const hasCategoryIntent = parsed.categories.length > 0;
+  const hasKeywordIntent = parsed.keywords.length > 0;
+  const hasSpecificIntent =
+    parsed.asksBalance ||
+    parsed.asksBudget ||
+    hasCategoryIntent ||
+    parsed.asksBiggest ||
+    hasKeywordIntent ||
+    parsed.wantsRecent ||
+    parsed.asksIncomeVsSpending ||
+    parsed.asksTopCategories;
+
+  const asksExplicitOverview =
+    /\b(summary|overview|report|ringkasan|total\s+(?:spend|spent|spending|expense|expenses|pengeluaran)|overall\s+(?:spend|spent|spending|expense|expenses))\b/i.test(
+      userPrompt,
+    );
+  const asksUnscopedSpending =
+    !hasCategoryIntent &&
+    !hasKeywordIntent &&
+    !parsed.asksBiggest &&
+    !parsed.wantsRecent &&
+    /\b(spend|spent|spending|expense|expenses|pengeluaran|dihabiskan|dikeluarkan)\b/i.test(userPrompt);
+
+  const includeSummary =
+    !hasSpecificIntent ||
+    parsed.asksIncomeVsSpending ||
+    asksExplicitOverview ||
+    asksUnscopedSpending;
+  const includeTopCategories =
+    parsed.asksTopCategories ||
+    parsed.asksIncomeVsSpending ||
+    asksExplicitOverview ||
+    (!hasSpecificIntent && !asksUnscopedSpending);
+  const includeBiggest = parsed.asksBiggest;
+  const includeBudgets = parsed.asksBudget;
+  const includeBalance = parsed.asksBalance;
+  const includeRecent = parsed.wantsRecent;
+
+  // Filter recent rows by parsed.categories unless the prompt has a separate unmodified recent-list clause
+  // (e.g. "how much did I spend on food, and show my recent transactions").
+  const hasUnmodifiedRecentClause =
+    /\b(?:and|,|dan)\s+(?:show|list|tampilkan|tunjukkan|lihat)\s+(?:me\s+)?(?:my\s+)?(?:all\s+|semua\s+)?(?:recent|latest|terbaru|terakhir)?\s*(?:transactions?|transaksi)\b/i.test(
+      userPrompt,
+    );
+  const filterRecentByCategories = hasCategoryIntent && !hasUnmodifiedRecentClause;
+
+  // If the user asked purely about a named category's remaining budget (e.g. "Berapa sisa anggaran makan?"),
+  // the matching budget row already carries spent + limit + remaining; only also emit category-spending if
+  // the user asked about spending/merchants or if no budget exists for that category.
+  const isPureCategoryBudgetQuestion =
+    hasCategoryIntent &&
+    parsed.asksBudget &&
+    !parsed.wantsRecent &&
+    !parsed.asksBiggest &&
+    !/\b(spend|spent|spending|expense|expenses|pengeluaran|merchant|top|terbanyak|terbesar)\b/i.test(userPrompt);
 
   const items: RetrievedContextItem[] = [];
 
-  // 1. Period header (always present)
-  const accountSuffix = account ? `, Account: ${account.name}` : '';
-  items.push({
-    id: 'period',
-    kind: 'period',
-    label: 'Period',
-    content: `Period: ${period.label}${accountSuffix}`,
-    score: 1000,
-  });
+  // 1. Budgets (queried first when asked so pure category-budget queries know if a matching budget exists)
+  let matchedAllNamedCategoryBudgets = false;
+  const budgetItems: RetrievedContextItem[] = [];
+  if (includeBudgets) {
+    const usePeriodForBudgets =
+      period.kind === 'this-month' || period.kind === 'last-month' || period.kind === 'named-month';
+    const currentBillingMonth = billingMonthPeriod('this-month', now, monthStartDay);
+    const budgetFromMs = usePeriodForBudgets ? period.fromMs : currentBillingMonth.fromMs;
+    const budgetToMs = usePeriodForBudgets ? period.toMs : currentBillingMonth.toMs;
+    const budgetPeriodLabel = usePeriodForBudgets ? period.label : currentBillingMonth.label;
+    const budgetParams: any[] = account !== null ? [budgetFromMs, budgetToMs, account.id] : [budgetFromMs, budgetToMs];
 
-  // 2. Period totals: total spent, total income, net, transaction count (transfers excluded)
-  const summaryRows = safeQuery<{
-    total_spent?: number | null;
-    total_income?: number | null;
-    tx_count?: number | null;
-  }>(
-    db,
-    `SELECT
-       COALESCE(SUM(CASE WHEN total_amount < 0 THEN ABS(total_amount) ELSE 0 END), 0) AS total_spent,
-       COALESCE(SUM(CASE WHEN total_amount > 0 THEN total_amount ELSE 0 END), 0) AS total_income,
-       COUNT(*) AS tx_count
-     FROM transactions
-     WHERE type != 'transfer' AND date >= ? AND date < ?${walletFilterSql}`,
-    periodParams,
-  );
-  const totalSpent = Number(summaryRows[0]?.total_spent ?? 0) || 0;
-  const totalIncome = Number(summaryRows[0]?.total_income ?? 0) || 0;
-  const txCount = Number(summaryRows[0]?.tx_count ?? 0) || 0;
-  const net = totalIncome - totalSpent;
+    const budgetRows = safeQuery<{
+      category?: string;
+      limit_amount?: number | null;
+      spent?: number | null;
+    }>(
+      db,
+      `SELECT
+         b.category,
+         b.limit_amount,
+         COALESCE((
+           SELECT SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END)
+           FROM transactions t
+           JOIN transaction_items i ON t.id = i.transaction_id
+           WHERE t.type != 'transfer'
+             AND t.total_amount < 0
+             AND LOWER(i.category) = LOWER(b.category)
+             AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
+         ), 0) AS spent
+       FROM budgets b
+       WHERE b.limit_amount > 0
+       ORDER BY b.category ASC`,
+      budgetParams,
+    );
 
-  // 3. Top 3 spending categories (transfers excluded)
-  const topCategoryRows = safeQuery<{ category?: string; total?: number | null; count?: number | null }>(
-    db,
-    `SELECT
-       COALESCE(NULLIF(TRIM(i.category), ''), 'Uncategorized') AS category,
-       COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total,
-       COUNT(DISTINCT t.id) AS count
-     FROM transactions t
-     LEFT JOIN transaction_items i ON t.id = i.transaction_id
-     WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
-     GROUP BY COALESCE(NULLIF(TRIM(i.category), ''), 'Uncategorized')
-     ORDER BY total DESC
-     LIMIT 3`,
-    periodParams,
-  );
+    if (budgetRows.length > 0) {
+      const namedCatSet = new Set(parsed.categories.map((c) => c.name.toLowerCase()));
+      const matchingCategoryBudgets =
+        namedCatSet.size > 0
+          ? budgetRows.filter((row) => row.category && namedCatSet.has(row.category.toLowerCase()))
+          : [];
+      matchedAllNamedCategoryBudgets =
+        namedCatSet.size > 0 && matchingCategoryBudgets.length === namedCatSet.size;
 
-  // 4. Biggest single expense (transfers excluded)
-  const biggestRows = safeQuery<{
-    merchant_name?: string;
-    amount?: number | null;
-    date?: number | null;
-    category?: string | null;
-  }>(
-    db,
-    `SELECT
-       t.merchant_name,
-       ABS(t.total_amount) AS amount,
-       t.date,
-       i.category
-     FROM transactions t
-     LEFT JOIN transaction_items i ON t.id = i.transaction_id
-     WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
-     ORDER BY t.total_amount ASC, t.date DESC
-     LIMIT 1`,
-    periodParams,
-  );
-  const biggest = biggestRows[0];
-  const refYear = now.getFullYear();
+      // Scope to named category budgets when matching budgets exist; otherwise show all configured budgets.
+      const rowsToEmit = matchingCategoryBudgets.length > 0 ? matchingCategoryBudgets : budgetRows;
 
-  const summaryItem: RetrievedContextItem =
-    txCount === 0
-      ? {
-          id: 'period-summary',
-          kind: 'summary',
-          label: 'Period summary',
-          content: `Summary: No transactions in this period (Spent ${formatCurrency(0)}, Income ${formatCurrency(0)}, Net ${formatCurrency(0)})`,
-          score: parsed.asksIncomeVsSpending ? 945 : 900,
-        }
-      : {
-          id: 'period-summary',
-          kind: 'summary',
-          label: 'Period summary',
-          content: `Summary: Spent ${formatCurrency(totalSpent)}, Income ${formatCurrency(totalIncome)}, Net ${formatSignedCurrency(net)} (${txCount} ${txCount === 1 ? 'txn' : 'txns'})`,
-          score: parsed.asksIncomeVsSpending ? 945 : 900,
-        };
+      const formatBudgetRow = (row: { category?: string; limit_amount?: number | null; spent?: number | null }) => {
+        const limit = Number(row.limit_amount ?? 0) || 0;
+        const spent = Number(row.spent ?? 0) || 0;
+        const remaining = limit - spent;
+        const remText =
+          remaining >= 0
+            ? `remaining ${formatCurrency(remaining)}`
+            : `over by ${formatCurrency(Math.abs(remaining))}`;
+        return `${row.category}: limit ${formatCurrency(limit)}, spent ${formatCurrency(spent)}, ${remText}`;
+      };
 
-  let biggestItem: RetrievedContextItem | null = null;
-  if (biggest && biggest.merchant_name && typeof biggest.amount === 'number' && biggest.amount > 0) {
-    const datePart = typeof biggest.date === 'number' ? formatShortDate(biggest.date, refYear) : '';
-    biggestItem = {
-      id: 'biggest-expense',
-      kind: 'biggest-expense',
-      label: 'Biggest expense',
-      content: `Biggest expense: ${biggest.merchant_name} ${formatCurrency(biggest.amount)} (${datePart})`,
-      score: parsed.asksBiggest ? 950 : 850,
-    };
-  } else if (parsed.asksBiggest) {
-    biggestItem = {
-      id: 'biggest-expense',
-      kind: 'biggest-expense',
-      label: 'Biggest expense',
-      content: 'Biggest expense: None in this period.',
-      score: 950,
-    };
+      const accountPart = account ? `, Account: ${account.name}` : '';
+      if (rowsToEmit.length === 1) {
+        budgetItems.push({
+          id: 'budgets-summary',
+          kind: 'budget',
+          label: 'Budgets',
+          content: `Budgets (${budgetPeriodLabel}${accountPart}): ${formatBudgetRow(rowsToEmit[0])}`,
+          score: 955,
+        });
+      } else {
+        const sumLimit = rowsToEmit.reduce((s, r) => s + (Number(r.limit_amount ?? 0) || 0), 0);
+        const sumSpent = rowsToEmit.reduce((s, r) => s + (Number(r.spent ?? 0) || 0), 0);
+        const sumRem = sumLimit - sumSpent;
+        const sumRemText =
+          sumRem >= 0 ? `remaining ${formatCurrency(sumRem)}` : `over by ${formatCurrency(Math.abs(sumRem))}`;
+
+        budgetItems.push({
+          id: 'budgets-summary',
+          kind: 'budget',
+          label: 'Budgets',
+          content: `Budgets (${budgetPeriodLabel}${accountPart}): Total limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}, ${sumRemText}`,
+          score: 955,
+        });
+        rowsToEmit.forEach((row, idx) => {
+          budgetItems.push({
+            id: `budget-${(row.category || String(idx)).toLowerCase()}`,
+            kind: 'budget',
+            label: row.category || 'Budget',
+            content: `- ${formatBudgetRow(row)}`,
+            score: 948 - idx,
+          });
+        });
+      }
+    } else {
+      budgetItems.push({
+        id: 'budgets-none',
+        kind: 'budget',
+        label: 'Budgets',
+        content: `Budgets: 0 budgets configured for ${budgetPeriodLabel} (you have not set any monthly budget limits yet).`,
+        score: 955,
+      });
+    }
   }
 
-  // 5. Budgets for the period (computed before emitting overview so pure empty-budget queries stay focused)
-  const usePeriodForBudgets =
-    period.kind === 'this-month' || period.kind === 'last-month' || period.kind === 'named-month';
-  const currentBillingMonth = billingMonthPeriod('this-month', now, monthStartDay);
-  const budgetFromMs = usePeriodForBudgets ? period.fromMs : currentBillingMonth.fromMs;
-  const budgetToMs = usePeriodForBudgets ? period.toMs : currentBillingMonth.toMs;
-  const budgetPeriodLabel = usePeriodForBudgets ? period.label : currentBillingMonth.label;
-  const budgetParams: any[] = account !== null ? [budgetFromMs, budgetToMs, account.id] : [budgetFromMs, budgetToMs];
+  const includeCategories = hasCategoryIntent && !(isPureCategoryBudgetQuestion && matchedAllNamedCategoryBudgets);
 
-  const budgetRows = safeQuery<{
-    category?: string;
-    limit_amount?: number | null;
-    spent?: number | null;
-  }>(
-    db,
-    `SELECT
-       b.category,
-       b.limit_amount,
-       COALESCE((
-         SELECT SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END)
+  // 2. Named category breakdown (only when categories were asked)
+  const categoryItems: RetrievedContextItem[] = [];
+  const opportunisticKeywords: string[] = [];
+  if (includeCategories) {
+    for (const catMatch of parsed.categories) {
+      const amountCondition = catMatch.type === 'income' ? 't.total_amount > 0' : 't.total_amount < 0';
+      const catParams: any[] =
+        account !== null
+          ? [catMatch.name, period.fromMs, period.toMs, account.id]
+          : [catMatch.name, period.fromMs, period.toMs];
+
+      const catSumRows = safeQuery<{ total?: number | null; count?: number | null }>(
+        db,
+        `SELECT
+           COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total,
+           COUNT(DISTINCT t.id) AS count
          FROM transactions t
          JOIN transaction_items i ON t.id = i.transaction_id
-         WHERE t.type != 'transfer'
-           AND t.total_amount < 0
-           AND LOWER(i.category) = LOWER(b.category)
-           AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
-       ), 0) AS spent
-     FROM budgets b
-     WHERE b.limit_amount > 0
-     ORDER BY b.category ASC`,
-    budgetParams,
-  );
+         WHERE t.type != 'transfer' AND ${amountCondition}
+           AND LOWER(i.category) = LOWER(?)
+           AND t.date >= ? AND t.date < ?${walletFilterJoinSql}`,
+        catParams,
+      );
+      const catTotal = Number(catSumRows[0]?.total ?? 0) || 0;
+      const catCount = Number(catSumRows[0]?.count ?? 0) || 0;
 
-  // When the user asks purely about remaining budget and no budgets exist, omit unrelated
-  // cashflow Net figures so the 0.8B model does not substitute Net for remaining budget.
-  const isPureEmptyBudgetQuery =
-    parsed.asksBudget &&
-    budgetRows.length === 0 &&
-    !parsed.asksBalance &&
-    !parsed.asksBiggest &&
-    !parsed.asksIncomeVsSpending &&
-    !parsed.wantsRecent &&
-    parsed.categories.length === 0 &&
-    parsed.keywords.length === 0 &&
-    !/\b(spend|spent|spending|expense|expenses|pengeluaran|beli|bayar|habis)\b/i.test(userPrompt);
+      let merchantsSuffix = '';
+      if (catCount > 0 && !(includeRecent && filterRecentByCategories)) {
+        const topMerchants = safeQuery<{ merchant_name?: string; total?: number | null }>(
+          db,
+          `SELECT
+             t.merchant_name,
+             COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total
+           FROM transactions t
+           JOIN transaction_items i ON t.id = i.transaction_id
+           WHERE t.type != 'transfer' AND ${amountCondition}
+             AND LOWER(i.category) = LOWER(?)
+             AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
+           GROUP BY t.merchant_name
+           ORDER BY total DESC
+           LIMIT 3`,
+          catParams,
+        );
+        const merchantList = topMerchants
+          .filter((row) => row.merchant_name)
+          .map((row) => `${row.merchant_name} ${formatCurrency(row.total ?? 0)}`)
+          .join(', ');
+        if (merchantList) {
+          merchantsSuffix = `; top: ${merchantList}`;
+        }
+      }
 
-  if (!isPureEmptyBudgetQuery) {
-    // Place general period overview before question-focused facts so the 0.8B model
-    // sees the directly requested metrics closest to the user's question.
-    if (!parsed.asksIncomeVsSpending) {
-      items.push(summaryItem);
+      if (
+        catMatch.matchedViaSynonym &&
+        catMatch.triggerTerm.length >= 3 &&
+        !BROAD_CATEGORY_SYNONYMS.has(catMatch.triggerTerm.toLowerCase())
+      ) {
+        opportunisticKeywords.push(catMatch.triggerTerm);
+      }
+
+      const actionWord = catMatch.type === 'income' ? 'income' : 'spent';
+      const txnWord = catCount === 1 ? 'txn' : 'txns';
+      categoryItems.push({
+        id: `category-${catMatch.name.toLowerCase()}`,
+        kind: 'category-spending',
+        label: `${catMatch.name} ${actionWord}`,
+        content: `Category ${catMatch.name}: ${formatCurrency(catTotal)} ${actionWord} (${catCount} ${txnWord}${merchantsSuffix})`,
+        score: 950,
+      });
     }
+  }
+
+  // 3. Keyword / Merchant matches (FTS AND + LIKE ESCAPE AND, uncapped SQL COUNT/SUM)
+  const searchTerms = hasKeywordIntent ? parsed.keywords : Array.from(new Set(opportunisticKeywords));
+  const keywordItems: RetrievedContextItem[] = [];
+  let keywordMatchedInPeriod = false;
+
+  if (searchTerms.length > 0) {
+    const sampleLimit = parsed.wantsRecent ? QWEN_MODEL_RETRIEVAL_ITEM_LIMIT : 3;
+    const kwOptions = { sampleLimit, allowLikeFallback: hasKeywordIntent };
+    let matchResult = queryKeywordMatches(
+      db,
+      searchTerms,
+      { fromMs: period.fromMs, toMs: period.toMs },
+      account?.id ?? null,
+      kwOptions,
+    );
+    let outsidePeriod = false;
+
+    if (matchResult.totalCount === 0 && !period.isExplicit) {
+      matchResult = queryKeywordMatches(db, searchTerms, null, account?.id ?? null, kwOptions);
+      outsidePeriod = matchResult.totalCount > 0;
+    }
+
+    const kwLabel = searchTerms.join(' ');
+    const accountPart = account ? ` in ${account.name}` : '';
+    if (matchResult.totalCount > 0) {
+      keywordMatchedInPeriod = !outsidePeriod;
+
+      let sumPart = '';
+      if (matchResult.allMatchedViaLineItems) {
+        const itemTotal =
+          matchResult.expenseCount > 0 && matchResult.incomeCount === 0
+            ? matchResult.expenseSum
+            : matchResult.incomeCount > 0 && matchResult.expenseCount === 0
+              ? matchResult.incomeSum
+              : 0;
+        if (itemTotal > 0) {
+          sumPart = `, matched item total ${formatCurrency(itemTotal)}`;
+        }
+      } else if (matchResult.expenseCount > 0 && matchResult.incomeCount === 0) {
+        sumPart = `, total spent ${formatCurrency(matchResult.expenseSum)}`;
+      } else if (matchResult.incomeCount > 0 && matchResult.expenseCount === 0) {
+        sumPart = `, total income ${formatCurrency(matchResult.incomeSum)}`;
+      }
+
+      const scopePart = outsidePeriod ? ', outside current month' : '';
+      const subsetPart =
+        matchResult.totalCount > matchResult.sampleRows.length ? `; latest ${matchResult.sampleRows.length}` : '';
+      const txnWord = matchResult.totalCount === 1 ? 'txn' : 'txns';
+
+      keywordItems.push({
+        id: 'kw-summary',
+        kind: 'keyword-match',
+        label: `Matches for ${kwLabel}`,
+        content: `Matching "${kwLabel}" (${matchResult.totalCount} ${txnWord}${sumPart}${scopePart}${subsetPart}):`,
+        score: 940,
+      });
+
+      matchResult.sampleRows.forEach((row, idx) => {
+        keywordItems.push({
+          id: `kw-tx-${row.transaction_id}`,
+          kind: 'keyword-match',
+          label: row.merchant_name || 'Match',
+          content: `- ${formatTransactionLine(row, searchTerms, true, refYear)}`,
+          score: 935 - idx * 10,
+        });
+      });
+    } else if (hasKeywordIntent) {
+      const periodPart = period.isExplicit ? ` in ${period.label}` : '';
+      keywordItems.push({
+        id: 'kw-none',
+        kind: 'keyword-match',
+        label: `Matches for ${kwLabel}`,
+        content: `Matching "${kwLabel}": No matching transactions found${periodPart}${accountPart}.`,
+        score: 940,
+      });
+    }
+  }
+
+  // Emit Period header only when period-scoped facts need it (skip redundant Period line for
+  // all-time balance-only, self-labeled budget-only, implicit recent-only, or zero-match keyword-only).
+  const needsPeriodHeader =
+    includeSummary ||
+    includeTopCategories ||
+    includeBiggest ||
+    includeCategories ||
+    keywordMatchedInPeriod ||
+    (includeRecent && period.isExplicit);
+
+  if (needsPeriodHeader) {
+    const accountSuffix = account ? `, Account: ${account.name}` : '';
+    items.push({
+      id: 'period',
+      kind: 'period',
+      label: 'Period',
+      content: `Period: ${period.label}${accountSuffix}`,
+      score: 1000,
+    });
+  }
+
+  // 4. Period summary (only when asked: spending overview, income vs spending, or generic question)
+  if (includeSummary) {
+    const summaryRows = safeQuery<{
+      total_spent?: number | null;
+      total_income?: number | null;
+      tx_count?: number | null;
+    }>(
+      db,
+      `SELECT
+         COALESCE(SUM(CASE WHEN total_amount < 0 THEN ABS(total_amount) ELSE 0 END), 0) AS total_spent,
+         COALESCE(SUM(CASE WHEN total_amount > 0 THEN total_amount ELSE 0 END), 0) AS total_income,
+         COUNT(*) AS tx_count
+       FROM transactions
+       WHERE type != 'transfer' AND date >= ? AND date < ?${walletFilterSql}`,
+      periodParams,
+    );
+    const totalSpent = Number(summaryRows[0]?.total_spent ?? 0) || 0;
+    const totalIncome = Number(summaryRows[0]?.total_income ?? 0) || 0;
+    const txCount = Number(summaryRows[0]?.tx_count ?? 0) || 0;
+    const net = totalIncome - totalSpent;
+
+    items.push(
+      txCount === 0
+        ? {
+            id: 'period-summary',
+            kind: 'summary',
+            label: 'Period summary',
+            content: `Summary: No transactions in this period (Spent ${formatCurrency(0)}, Income ${formatCurrency(0)}, Net ${formatCurrency(0)})`,
+            score: parsed.asksIncomeVsSpending ? 945 : 900,
+          }
+        : {
+            id: 'period-summary',
+            kind: 'summary',
+            label: 'Period summary',
+            content: `Summary: Spent ${formatCurrency(totalSpent)}, Income ${formatCurrency(totalIncome)}, Net ${formatSignedCurrency(net)} (${txCount} ${txCount === 1 ? 'txn' : 'txns'})`,
+            score: parsed.asksIncomeVsSpending ? 945 : 900,
+          },
+    );
+  }
+
+  // 5. Top 3 spending categories (only when income-vs-spending, top-categories, overview, or generic)
+  if (includeTopCategories) {
+    const topCategoryRows = safeQuery<{ category?: string; total?: number | null; count?: number | null }>(
+      db,
+      `SELECT
+         COALESCE(NULLIF(TRIM(i.category), ''), 'Uncategorized') AS category,
+         COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total,
+         COUNT(DISTINCT t.id) AS count
+       FROM transactions t
+       LEFT JOIN transaction_items i ON t.id = i.transaction_id
+       WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
+       GROUP BY COALESCE(NULLIF(TRIM(i.category), ''), 'Uncategorized')
+       ORDER BY total DESC
+       LIMIT 3`,
+      periodParams,
+    );
     if (topCategoryRows.length > 0) {
       const topStr = topCategoryRows
         .map((row) => `${row.category} ${formatCurrency(row.total ?? 0)}`)
@@ -1561,141 +2110,65 @@ export function buildRetrievedContext(
         kind: 'top-categories',
         label: 'Top categories',
         content: `Top categories: ${topStr}`,
-        score: 840,
+        score: parsed.asksTopCategories ? 945 : 840,
       });
     }
-    if (biggestItem && !parsed.asksBiggest) {
-      items.push(biggestItem);
-    }
-    if (parsed.asksIncomeVsSpending) {
-      items.push(summaryItem);
-    }
-    if (biggestItem && parsed.asksBiggest) {
-      items.push(biggestItem);
-    }
   }
 
-  // 6. Named category breakdown (spent + top merchants)
-  const opportunisticKeywords: string[] = [];
-  for (const catMatch of parsed.categories) {
-    const amountCondition = catMatch.type === 'income' ? 't.total_amount > 0' : 't.total_amount < 0';
-    const catParams: any[] =
-      account !== null
-        ? [catMatch.name, period.fromMs, period.toMs, account.id]
-        : [catMatch.name, period.fromMs, period.toMs];
-
-    const catSumRows = safeQuery<{ total?: number | null; count?: number | null }>(
+  // 6. Biggest single expense (only when asked)
+  if (includeBiggest) {
+    const biggestRows = safeQuery<{
+      merchant_name?: string;
+      amount?: number | null;
+      date?: number | null;
+    }>(
       db,
       `SELECT
-         COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total,
-         COUNT(DISTINCT t.id) AS count
+         t.merchant_name,
+         ABS(t.total_amount) AS amount,
+         t.date
        FROM transactions t
-       JOIN transaction_items i ON t.id = i.transaction_id
-       WHERE t.type != 'transfer' AND ${amountCondition}
-         AND LOWER(i.category) = LOWER(?)
-         AND t.date >= ? AND t.date < ?${walletFilterJoinSql}`,
-      catParams,
+       WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
+       ORDER BY t.total_amount ASC, t.date DESC
+       LIMIT 1`,
+      periodParams,
     );
-    const catTotal = Number(catSumRows[0]?.total ?? 0) || 0;
-    const catCount = Number(catSumRows[0]?.count ?? 0) || 0;
-
-    let merchantsSuffix = '';
-    if (catCount > 0) {
-      const topMerchants = safeQuery<{ merchant_name?: string; total?: number | null }>(
-        db,
-        `SELECT
-           t.merchant_name,
-           COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total
-         FROM transactions t
-         JOIN transaction_items i ON t.id = i.transaction_id
-         WHERE t.type != 'transfer' AND ${amountCondition}
-           AND LOWER(i.category) = LOWER(?)
-           AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
-         GROUP BY t.merchant_name
-         ORDER BY total DESC
-         LIMIT 3`,
-        catParams,
-      );
-      const merchantList = topMerchants
-        .filter((row) => row.merchant_name)
-        .map((row) => `${row.merchant_name} ${formatCurrency(row.total ?? 0)}`)
-        .join(', ');
-      if (merchantList) {
-        merchantsSuffix = `; top: ${merchantList}`;
-      }
-    } else if (catMatch.triggerTerm.length >= 3) {
-      opportunisticKeywords.push(catMatch.triggerTerm);
+    const biggest = biggestRows[0];
+    if (biggest && biggest.merchant_name && typeof biggest.amount === 'number' && biggest.amount > 0) {
+      const datePart = typeof biggest.date === 'number' ? formatShortDate(biggest.date, refYear) : '';
+      items.push({
+        id: 'biggest-expense',
+        kind: 'biggest-expense',
+        label: 'Biggest expense',
+        content: `Biggest expense: ${biggest.merchant_name} ${formatCurrency(biggest.amount)} (${datePart})`,
+        score: 950,
+      });
+    } else {
+      items.push({
+        id: 'biggest-expense',
+        kind: 'biggest-expense',
+        label: 'Biggest expense',
+        content: 'Biggest expense: None in this period.',
+        score: 950,
+      });
     }
-
-    if (catMatch.matchedViaSynonym && catMatch.triggerTerm.length >= 3) {
-      opportunisticKeywords.push(catMatch.triggerTerm);
-    }
-
-    const actionWord = catMatch.type === 'income' ? 'income' : 'spent';
-    const txnWord = catCount === 1 ? 'txn' : 'txns';
-    items.push({
-      id: `category-${catMatch.name.toLowerCase()}`,
-      kind: 'category-spending',
-      label: `${catMatch.name} ${actionWord}`,
-      content: `Category ${catMatch.name}: ${formatCurrency(catTotal)} ${actionWord} (${catCount} ${txnWord}${merchantsSuffix})`,
-      score: 950,
-    });
   }
 
-  // Emit budgets fact item
-  if (budgetRows.length > 0) {
-    const namedCatSet = new Set(parsed.categories.map((c) => c.name.toLowerCase()));
-    const orderedBudgets = [...budgetRows].sort((a, b) => {
-      const aMatch = a.category && namedCatSet.has(a.category.toLowerCase()) ? 1 : 0;
-      const bMatch = b.category && namedCatSet.has(b.category.toLowerCase()) ? 1 : 0;
-      return bMatch - aMatch;
-    });
+  // Emit category & budget items in order
+  items.push(...categoryItems);
+  items.push(...budgetItems);
 
-    const formattedBudgets = orderedBudgets.map((row) => {
-      const limit = Number(row.limit_amount ?? 0) || 0;
-      const spent = Number(row.spent ?? 0) || 0;
-      const remaining = limit - spent;
-      const remText =
-        remaining >= 0
-          ? `remaining ${formatCurrency(remaining)}`
-          : `over by ${formatCurrency(Math.abs(remaining))}`;
-      return `${row.category}: limit ${formatCurrency(limit)}, spent ${formatCurrency(spent)}, ${remText}`;
-    });
-
-    let totalBudgetPrefix = '';
-    if (orderedBudgets.length > 1) {
-      const sumLimit = orderedBudgets.reduce((s, r) => s + (Number(r.limit_amount ?? 0) || 0), 0);
-      const sumSpent = orderedBudgets.reduce((s, r) => s + (Number(r.spent ?? 0) || 0), 0);
-      const sumRem = sumLimit - sumSpent;
-      const sumRemText =
-        sumRem >= 0 ? `remaining ${formatCurrency(sumRem)}` : `over by ${formatCurrency(Math.abs(sumRem))}`;
-      totalBudgetPrefix = `Total limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}, ${sumRemText} | `;
-    }
-
-    items.push({
-      id: 'budgets-summary',
-      kind: 'budget',
-      label: 'Budgets',
-      content: `Budgets (${budgetPeriodLabel}): ${totalBudgetPrefix}${formattedBudgets.join('; ')}`,
-      score: parsed.asksBudget ? 955 : 830,
-    });
-  } else if (parsed.asksBudget) {
-    items.push({
-      id: 'budgets-none',
-      kind: 'budget',
-      label: 'Budgets',
-      content: 'Budgets: 0 budgets configured (you have not set any monthly budget limits yet).',
-      score: 955,
-    });
-  }
-
-  // 7. Balance & per-account balances ONLY when question is about balance / money left / specific account
-  if (parsed.asksBalance) {
-    const totalBalance = wallets.length > 0 ? wallets.reduce((sum, w) => sum + w.balance, 0) : getTotalBalance(db);
+  // 7. Balance & per-account balances ONLY when asked (avoids running wallet SUM subqueries otherwise)
+  if (includeBalance) {
+    const walletsWithBalances = loadWalletsWithBalances(db);
+    const totalBalance =
+      walletsWithBalances.length > 0
+        ? walletsWithBalances.reduce((sum, w) => sum + w.balance, 0)
+        : getTotalBalance(db);
     let balanceLine: string;
     if (account) {
-      const targetWallet = wallets.find((w) => w.id === account.id);
-      const otherWallets = wallets.filter((w) => w.id !== account.id);
+      const targetWallet = walletsWithBalances.find((w) => w.id === account.id);
+      const otherWallets = walletsWithBalances.filter((w) => w.id !== account.id);
       const targetPart = targetWallet
         ? `${targetWallet.name}: ${formatCurrency(targetWallet.balance)}`
         : `${account.name}: ${formatCurrency(0)}`;
@@ -1704,10 +2177,10 @@ export function buildRetrievedContext(
           ? `; Other: ${otherWallets.map((w) => `${w.name} ${formatCurrency(w.balance)}`).join(', ')}`
           : '';
       balanceLine = `Current balance: ${targetPart}; Total all accounts: ${formatCurrency(totalBalance)}${othersPart}`;
-    } else if (wallets.length === 1) {
-      balanceLine = `Current balance: ${formatCurrency(totalBalance)} (${wallets[0].name})`;
-    } else if (wallets.length > 1) {
-      const perAccount = wallets.map((w) => `${w.name} ${formatCurrency(w.balance)}`).join(', ');
+    } else if (walletsWithBalances.length === 1) {
+      balanceLine = `Current balance: ${formatCurrency(totalBalance)} (${walletsWithBalances[0].name})`;
+    } else if (walletsWithBalances.length > 1) {
+      const perAccount = walletsWithBalances.map((w) => `${w.name} ${formatCurrency(w.balance)}`).join(', ');
       balanceLine = `Current balance: Total ${formatCurrency(totalBalance)} | Accounts: ${perAccount}`;
     } else {
       balanceLine = `Current balance: ${formatCurrency(totalBalance)}`;
@@ -1722,101 +2195,29 @@ export function buildRetrievedContext(
     });
   }
 
-  // 9. Keyword / Merchant matches (FTS + LIKE fallback)
-  const searchTerms = parsed.keywords.length > 0 ? parsed.keywords : Array.from(new Set(opportunisticKeywords));
-  const isExplicitKeywordSearch = parsed.keywords.length > 0;
+  // Emit keyword items
+  items.push(...keywordItems);
 
-  if (searchTerms.length > 0) {
-    let matchedRows = queryKeywordTransactions(db, searchTerms, { fromMs: period.fromMs, toMs: period.toMs }, account?.id ?? null);
-    let outsidePeriod = false;
-
-    if (matchedRows.length === 0 && !period.isExplicit) {
-      matchedRows = queryKeywordTransactions(db, searchTerms, null, account?.id ?? null);
-      outsidePeriod = matchedRows.length > 0;
-    }
-
-    const kwLabel = searchTerms.join(' ');
-    if (matchedRows.length > 0) {
-      const loweredTerms = searchTerms.map((t) => t.toLowerCase());
-      const allLineItemOnlyMatches = matchedRows.every((row) => {
-        const merchantLower = (row.merchant_name || '').toLowerCase();
-        const itemsLower = (row.line_items_text || '').toLowerCase();
-        const hitsMerchant = loweredTerms.some((term) => merchantLower.includes(term));
-        const hitsLineItem = loweredTerms.some((term) => itemsLower.includes(term));
-        return !hitsMerchant && hitsLineItem;
-      });
-
-      let sumPart = '';
-      if (allLineItemOnlyMatches) {
-        let matchedItemSum = 0;
-        let matchedItemCount = 0;
-        for (const row of matchedRows) {
-          for (const rawLine of (row.line_items_text || '').split('\n')) {
-            const trimmed = rawLine.trim();
-            if (!trimmed) continue;
-            if (!loweredTerms.some((term) => trimmed.toLowerCase().includes(term))) continue;
-            const pipeMatch = trimmed.match(/^.+?\s*\|\s*(-?\d+(?:\.\d+)?)$/);
-            if (pipeMatch) {
-              const price = Number(pipeMatch[1]);
-              if (Number.isFinite(price) && price > 0) {
-                matchedItemSum += price;
-                matchedItemCount += 1;
-              }
-            }
-          }
-        }
-        if (matchedItemCount > 0) {
-          sumPart = `, matched item total ${formatCurrency(matchedItemSum)}`;
-        }
-      } else {
-        const expenseMatches = matchedRows.filter((r) => r.type !== 'transfer' && r.total_amount < 0);
-        const incomeMatches = matchedRows.filter((r) => r.type !== 'transfer' && r.total_amount > 0);
-        const expenseSum = expenseMatches.reduce((s, r) => s + Math.abs(r.total_amount), 0);
-        const incomeSum = incomeMatches.reduce((s, r) => s + r.total_amount, 0);
-
-        if (expenseMatches.length > 0 && incomeMatches.length === 0) {
-          sumPart = `, total spent ${formatCurrency(expenseSum)}`;
-        } else if (incomeMatches.length > 0 && expenseMatches.length === 0) {
-          sumPart = `, total income ${formatCurrency(incomeSum)}`;
-        }
-      }
-      const scopePart = outsidePeriod ? ', outside current month' : '';
-      const txnWord = matchedRows.length === 1 ? 'txn' : 'txns';
-
-      items.push({
-        id: 'kw-summary',
-        kind: 'keyword-match',
-        label: `Matches for ${kwLabel}`,
-        content: `Matching "${kwLabel}" (${matchedRows.length} ${txnWord}${sumPart}${scopePart}):`,
-        score: 940,
-      });
-
-      matchedRows.slice(0, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT).forEach((row, idx) => {
-        items.push({
-          id: `kw-tx-${row.transaction_id}`,
-          kind: 'keyword-match',
-          label: row.merchant_name || 'Match',
-          content: `- ${formatTransactionLine(row, searchTerms, true, refYear)}`,
-          score: 935 - idx * 10,
-        });
-      });
-    } else if (isExplicitKeywordSearch) {
-      items.push({
-        id: 'kw-none',
-        kind: 'keyword-match',
-        label: `Matches for ${kwLabel}`,
-        content: `Matching "${kwLabel}": 0 transactions found in ${period.label} (${formatCurrency(0)}).`,
-        score: 940,
-      });
-    }
-  }
-
-  // 10. Recent transactions (when asked to show/list transactions)
-  if (parsed.wantsRecent) {
+  // 8. Recent transactions (uses idx_transactions_date backwards before looking up category via idx_transaction_items_txn_id)
+  if (includeRecent) {
     const recentDateClause = period.isExplicit ? ' AND t.date >= ? AND t.date < ?' : '';
-    const recentParams: any[] = [];
-    if (period.isExplicit) recentParams.push(period.fromMs, period.toMs);
-    if (account !== null) recentParams.push(account.id);
+    const recentCatNames = filterRecentByCategories ? parsed.categories.map((c) => c.name.toLowerCase()) : [];
+    const catPlaceholders = recentCatNames.map(() => '?').join(', ');
+    const recentCategoryClause =
+      recentCatNames.length > 0
+        ? ` AND t.type != 'transfer' AND EXISTS (SELECT 1 FROM transaction_items ci WHERE ci.transaction_id = t.id AND LOWER(ci.category) IN (${catPlaceholders}))`
+        : '';
+
+    const categorySubquery =
+      recentCatNames.length > 0
+        ? `(SELECT i.category FROM transaction_items i WHERE i.transaction_id = t.id AND LOWER(i.category) IN (${catPlaceholders}) ORDER BY i.id ASC LIMIT 1)`
+        : `(SELECT i.category FROM transaction_items i WHERE i.transaction_id = t.id ORDER BY i.id ASC LIMIT 1)`;
+
+    const outerParams: any[] = recentCatNames.length > 0 ? [...recentCatNames] : [];
+    const innerParams: any[] = [];
+    if (period.isExplicit) innerParams.push(period.fromMs, period.toMs);
+    if (account !== null) innerParams.push(account.id);
+    if (recentCatNames.length > 0) innerParams.push(...recentCatNames);
 
     const recentRows = safeQuery<MatchedTxRow>(
       db,
@@ -1828,22 +2229,21 @@ export function buildRetrievedContext(
          t.date,
          t.note,
          t.line_items_text,
-         MIN(i.category) AS category
+         ${categorySubquery} AS category
        FROM transactions t
-       LEFT JOIN transaction_items i ON t.id = i.transaction_id
-       WHERE 1=1${recentDateClause}${walletFilterJoinSql}
-       GROUP BY t.id
+       WHERE 1=1${recentDateClause}${walletFilterJoinSql}${recentCategoryClause}
        ORDER BY t.date DESC, t.id DESC
        LIMIT ?`,
-      [...recentParams, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT],
+      [...outerParams, ...innerParams, QWEN_MODEL_RETRIEVAL_ITEM_LIMIT],
     );
 
+    const accountLabel = account && !needsPeriodHeader ? ` for ${account.name}` : '';
     if (recentRows.length > 0) {
       items.push({
         id: 'recent-header',
         kind: 'note',
         label: 'Recent transactions',
-        content: `Recent transactions (${recentRows.length}):`,
+        content: `Recent transactions${accountLabel} (${recentRows.length}):`,
         score: 920,
       });
       recentRows.forEach((row, idx) => {
@@ -1860,7 +2260,7 @@ export function buildRetrievedContext(
         id: 'recent-none',
         kind: 'note',
         label: 'Recent transactions',
-        content: 'Recent transactions: None recorded.',
+        content: `Recent transactions${accountLabel}: None recorded.`,
         score: 920,
       });
     }
@@ -1988,7 +2388,7 @@ export function buildCompactContextBlock(
   const entries = retrievedContext.map((item, idx) => ({
     item,
     idx,
-    line: trimCollapsedText(item.content, 260),
+    line: trimCollapsedText(item.content, maxChars),
   }));
 
   const calcLength = (list: typeof entries) =>

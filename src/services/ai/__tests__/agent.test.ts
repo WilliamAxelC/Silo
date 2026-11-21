@@ -679,9 +679,12 @@ describe('AI Agent & Context Engine', () => {
       expect(septText).toContain('Period: Sep 2026');
       expect(septText).toContain('No transactions in this period');
 
-      // Unknown merchant
+      // Unknown merchant (R2: never print "(Rp 0)" alongside a zero-match lookup)
       const starbucksItems = buildRetrievedContext('How much did I spend at Starbucks this month?', { db: testDb, now: NOW });
-      expect(joinFacts(starbucksItems)).toContain('Matching "starbucks": 0 transactions found in This month (Nov 2026) (Rp 0).');
+      const starbucksText = joinFacts(starbucksItems);
+      expect(starbucksText).toContain('Matching "starbucks": No matching transactions found in This month (Nov 2026).');
+      expect(starbucksText).not.toContain('(Rp 0)');
+      expect(starbucksText).not.toContain('Summary:');
 
       // Empty budgets table + asking about budgets
       testDb.runSync('DELETE FROM budgets;');
@@ -760,6 +763,371 @@ describe('AI Agent & Context Engine', () => {
       expect(joinFacts(facts)).toContain('25/10/2026–24/11/2026');
       const budgetFacts = buildRetrievedContext('How much budget do I have left?', { db: testDb, now: NOW });
       expect(budgetFacts.some((i) => i.kind === 'budget' && i.content.length > 0)).toBe(true);
+    });
+
+    it('R1: uses AND for multi-word keywords, computes uncapped SQL COUNT/SUM without LIMIT 8, and sums matched line-item prices per row', () => {
+      // 1. nasi goreng must NOT match Nasi Padang (-650,000) via OR
+      const nasiGorengItems = buildRetrievedContext('How much did I spend on nasi goreng?', { db: testDb, now: NOW });
+      const nasiGorengText = joinFacts(nasiGorengItems);
+      expect(nasiGorengText).toContain('Matching "nasi goreng": No matching transactions found.');
+      expect(nasiGorengText).not.toContain('Nasi Padang');
+      expect(nasiGorengText).not.toContain('650.000');
+      expect(nasiGorengText).not.toContain('(Rp 0)');
+
+      // 2. Kopi Kenangan (-450k, -55k) must NOT include Kopi Tuku (-30k)
+      insertTx({
+        id: 20,
+        walletId: 1,
+        merchant: 'Kopi Kenangan',
+        amount: -55_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 10),
+        category: 'Food & Dining',
+      });
+      insertTx({
+        id: 21,
+        walletId: 1,
+        merchant: 'Kopi Tuku',
+        amount: -30_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 11),
+        category: 'Food & Dining',
+      });
+      const kopiItems = buildRetrievedContext('How much did I spend at Kopi Kenangan?', { db: testDb, now: NOW });
+      const kopiText = joinFacts(kopiItems);
+      expect(kopiText).toContain('Matching "kopi kenangan" (2 txns, total spent Rp 505.000):');
+      expect(kopiText).not.toContain('Kopi Tuku');
+      expect(kopiText).not.toContain('535.000');
+
+      // 3. 12 Coffee Place rows (-10,000 each = -120,000): uncapped SQL COUNT/SUM (no LIMIT 8 truncation)
+      for (let i = 0; i < 12; i += 1) {
+        insertTx({
+          id: 30 + i,
+          walletId: 1,
+          merchant: 'Coffee Place',
+          amount: -10_000,
+          type: 'expense',
+          date: localMs(2026, 11, 1 + (i % 10), 8 + (i % 4)),
+          category: 'Food & Dining',
+        });
+      }
+      const coffeeItems = buildRetrievedContext('How much did I spend at Coffee Place?', { db: testDb, now: NOW });
+      const coffeeText = joinFacts(coffeeItems);
+      expect(coffeeText).toContain('Matching "coffee place" (12 txns, total spent Rp 120.000; latest 3):');
+      expect(coffeeText).not.toContain('8 txns');
+      expect(coffeeText).not.toContain('Rp 80.000');
+
+      // 4. Mixing merchant Milk Bar (-50k) + line item Milk | 25000 inside Supermarket Hero (-150k) => Rp 75.000, not Rp 200.000
+      insertTx({
+        id: 50,
+        walletId: 1,
+        merchant: 'Milk Bar',
+        amount: -50_000,
+        type: 'expense',
+        date: localMs(2026, 11, 12, 9),
+        category: 'Food & Dining',
+      });
+      const milkItems = buildRetrievedContext('How much did I spend on milk?', { db: testDb, now: NOW });
+      const milkText = joinFacts(milkItems);
+      expect(milkText).toContain('Matching "milk" (2 txns, total spent Rp 75.000):');
+      expect(milkText).not.toContain('Rp 200.000');
+    });
+
+    it('R2: emits only intent-needed sections and keeps grounded prompt sizes compact per intent', () => {
+      (useSettingsStore.getState as jest.Mock).mockReturnValue({
+        localSystemPrompt: '',
+        externalSystemPrompt: '',
+        aiInferenceMode: 'local',
+        currencyCode: 'IDR',
+        useThousandsSeparator: true,
+        monthStartDay: 1,
+      });
+      const emptyHistoryStore = { ...useAIStore.getState(), chatHistory: [] };
+
+      const kindsOf = (items: RetrievedContextItem[]) => new Set(items.map((i) => i.kind));
+      const promptTokensFor = (query: string, items: RetrievedContextItem[]) => {
+        const messages = buildLocalMessagesForMode(query, 'rag', emptyHistoryStore as any, items);
+        const promptText = messages.map((m) => m.content).join('\n');
+        return { tokens: estimateTokenCount(promptText), chars: promptText.length };
+      };
+
+      // Balance-only: drops Summary, Top categories, Biggest expense, Budgets
+      const balQuery = 'How much money do I have left?';
+      const balItems = buildRetrievedContext(balQuery, { db: testDb, now: NOW });
+      expect(kindsOf(balItems)).toEqual(new Set(['balance']));
+      expect(promptTokensFor(balQuery, balItems).tokens).toBeLessThanOrEqual(150);
+
+      // Budget-only (WITH budgets present): drops Summary, Top categories, Biggest expense, Balance
+      const budQuery = 'How much budget do I have left?';
+      const budItems = buildRetrievedContext(budQuery, { db: testDb, now: NOW });
+      expect(kindsOf(budItems)).toEqual(new Set(['budget']));
+      expect(promptTokensFor(budQuery, budItems).tokens).toBeLessThanOrEqual(165);
+
+      // Category-only: Period + Category only
+      const catQuery = 'How much did I spend on food this month?';
+      const catItems = buildRetrievedContext(catQuery, { db: testDb, now: NOW });
+      expect(kindsOf(catItems)).toEqual(new Set(['period', 'category-spending']));
+      expect(promptTokensFor(catQuery, catItems).tokens).toBeLessThanOrEqual(150);
+
+      // Biggest-expense-only: Period + Biggest expense only
+      const bigQuery = 'What was my biggest expense this month?';
+      const bigItems = buildRetrievedContext(bigQuery, { db: testDb, now: NOW });
+      expect(kindsOf(bigItems)).toEqual(new Set(['period', 'biggest-expense']));
+      expect(promptTokensFor(bigQuery, bigItems).tokens).toBeLessThanOrEqual(135);
+
+      // Keyword-only (zero-match): no Summary/Top/Biggest/Budget and no "(Rp 0)"
+      const kwNoneQuery = 'How much did I spend at Starbucks this month?';
+      const kwNoneItems = buildRetrievedContext(kwNoneQuery, { db: testDb, now: NOW });
+      expect(kindsOf(kwNoneItems)).toEqual(new Set(['keyword-match']));
+      expect(joinFacts(kwNoneItems)).not.toContain('(Rp 0)');
+      expect(promptTokensFor(kwNoneQuery, kwNoneItems).tokens).toBeLessThanOrEqual(130);
+
+      // Keyword-only (with match): Period + keyword-match only
+      const kwHitQuery = 'How much did I spend at Kopi Kenangan?';
+      const kwHitItems = buildRetrievedContext(kwHitQuery, { db: testDb, now: NOW });
+      expect(kindsOf(kwHitItems)).toEqual(new Set(['period', 'keyword-match']));
+      expect(promptTokensFor(kwHitQuery, kwHitItems).tokens).toBeLessThanOrEqual(150);
+
+      // Recent-only: no Summary, Top categories, Biggest expense, Budgets
+      const recQuery = 'Show my recent transactions';
+      const recItems = buildRetrievedContext(recQuery, { db: testDb, now: NOW });
+      expect(kindsOf(recItems)).toEqual(new Set(['note', 'transaction']));
+      expect(promptTokensFor(recQuery, recItems).tokens).toBeLessThanOrEqual(170);
+
+      // Income vs spending: Period + Summary + Top categories (no Biggest/Budget/Balance)
+      const ivsQuery = 'What is my income vs spending?';
+      const ivsItems = buildRetrievedContext(ivsQuery, { db: testDb, now: NOW });
+      expect(kindsOf(ivsItems)).toEqual(new Set(['period', 'summary', 'top-categories']));
+      expect(promptTokensFor(ivsQuery, ivsItems).tokens).toBeLessThanOrEqual(160);
+
+      // Compound query = union of what each part needs (Balance + Category, no unrelated Summary/Biggest/Budgets)
+      const compQuery = 'What is my balance and how much did I spend on food this month?';
+      const compItems = buildRetrievedContext(compQuery, { db: testDb, now: NOW });
+      expect(kindsOf(compItems)).toEqual(new Set(['period', 'category-spending', 'balance']));
+
+      // Generic question with no specific intent keeps summary + top categories
+      const genQuery = 'Give me an overview of my finances';
+      const genItems = buildRetrievedContext(genQuery, { db: testDb, now: NOW });
+      expect(kindsOf(genItems)).toEqual(new Set(['period', 'summary', 'top-categories']));
+    });
+
+    it('R3: guards "mei" and 3-letter month abbreviations so Warung Mei and Jan Bakery stay merchant lookups', () => {
+      insertTx({
+        id: 60,
+        walletId: 1,
+        merchant: 'Warung Mei',
+        amount: -45_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 13),
+        category: 'Food & Dining',
+      });
+      insertTx({
+        id: 61,
+        walletId: 1,
+        merchant: 'Jan Bakery',
+        amount: -65_000,
+        type: 'expense',
+        date: localMs(2026, 11, 10, 15),
+        category: 'Food & Dining',
+      });
+
+      const warungParsed = parseGroundedQuery('How much did I spend at Warung Mei?', { db: testDb, now: NOW });
+      expect(warungParsed.period.kind).toBe('this-month');
+      expect(warungParsed.period.isExplicit).toBe(false);
+      expect(warungParsed.categories).toEqual([]);
+      expect(warungParsed.keywords).toEqual(['warung', 'mei']);
+
+      const warungFacts = joinFacts(buildRetrievedContext('How much did I spend at Warung Mei?', { db: testDb, now: NOW }));
+      expect(warungFacts).toContain('Matching "warung mei" (1 txn, total spent Rp 45.000):');
+      expect(warungFacts).not.toContain('May 2026');
+
+      const janParsed = parseGroundedQuery('How much did I spend at Jan Bakery?', { db: testDb, now: NOW });
+      expect(janParsed.period.kind).toBe('this-month');
+      expect(janParsed.period.isExplicit).toBe(false);
+      expect(janParsed.keywords).toEqual(['jan', 'bakery']);
+
+      const janFacts = joinFacts(buildRetrievedContext('How much did I spend at Jan Bakery?', { db: testDb, now: NOW }));
+      expect(janFacts).toContain('Matching "jan bakery" (1 txn, total spent Rp 65.000):');
+      expect(janFacts).not.toContain('Jan 2026');
+
+      // Explicit cues and years still resolve guarded month abbreviations cleanly
+      expect(parseTimePeriod('How much did I spend in Jan?', NOW).label).toBe('Jan 2026');
+      expect(parseTimePeriod('Pengeluaran di bulan Mei berapa?', NOW).label).toBe('May 2026');
+      expect(parseTimePeriod('Pengeluaran Des 2025 berapa?', NOW).label).toBe('Dec 2025');
+      expect(parseTimePeriod('How much did I spend in Feb 2024?', NOW).label).toBe('Feb 2024');
+    });
+
+    it('R4: matches modified transaction-list phrasings and filters recent rows by named category', () => {
+      // "Show my food transactions this month" -> wantsRecent = true, only Nov Food & Dining rows
+      const foodThisMonth = buildRetrievedContext('Show my food transactions this month', { db: testDb, now: NOW });
+      const foodTxLines = foodThisMonth.filter((i) => i.kind === 'transaction').map((i) => i.content);
+      expect(foodTxLines).toHaveLength(2);
+      expect(foodTxLines.join('\n')).toContain('Kopi Kenangan');
+      expect(foodTxLines.join('\n')).toContain('Nasi Padang');
+      expect(foodTxLines.join('\n')).not.toContain('Gojek');
+      expect(foodTxLines.join('\n')).not.toContain('Supermarket Hero');
+      expect(foodTxLines.join('\n')).not.toContain('Sate Senayan');
+
+      // "What transactions did I make yesterday?" -> wantsRecent = true, only Nov 11 Gojek
+      const yesterdayItems = buildRetrievedContext('What transactions did I make yesterday?', { db: testDb, now: NOW });
+      const yesterdayTxLines = yesterdayItems.filter((i) => i.kind === 'transaction').map((i) => i.content);
+      expect(yesterdayTxLines).toHaveLength(1);
+      expect(yesterdayTxLines[0]).toContain('Gojek');
+
+      // "Show my recent food transactions" -> only Food & Dining rows across time, no Transport/Salary
+      const recentFoodItems = buildRetrievedContext('Show my recent food transactions', { db: testDb, now: NOW });
+      const recentFoodText = recentFoodItems.filter((i) => i.kind === 'transaction').map((i) => i.content).join('\n');
+      expect(recentFoodText).toContain('Kopi Kenangan');
+      expect(recentFoodText).toContain('Nasi Padang');
+      expect(recentFoodText).toContain('Sate Senayan');
+      expect(recentFoodText).toContain('Bakmi GM');
+      expect(recentFoodText).not.toContain('Gojek');
+      expect(recentFoodText).not.toContain('Monthly Salary');
+      expect(recentFoodText).not.toContain('Supermarket Hero');
+    });
+
+    it('R5: preserves Unicode keywords (CJK/accented) and safely escapes LIKE wildcards', () => {
+      insertTx({
+        id: 70,
+        walletId: 1,
+        merchant: 'ラーメン一風堂',
+        amount: -120_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 19),
+        category: 'Food & Dining',
+      });
+      insertTx({
+        id: 71,
+        walletId: 1,
+        merchant: 'Café Crème',
+        amount: -85_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 16),
+        category: 'Food & Dining',
+      });
+
+      const ramenFacts = joinFacts(buildRetrievedContext('How much did I spend at ラーメン一風堂?', { db: testDb, now: NOW }));
+      expect(ramenFacts).toContain('Matching "ラーメン一風堂" (1 txn, total spent Rp 120.000):');
+      expect(ramenFacts).toContain('ラーメン一風堂');
+
+      // Suffix CJK search falls back to LIKE ... ESCAPE '\' cleanly
+      const suffixRamenFacts = joinFacts(buildRetrievedContext('How much did I spend at 一風堂?', { db: testDb, now: NOW }));
+      expect(suffixRamenFacts).toContain('Matching "一風堂" (1 txn, total spent Rp 120.000):');
+
+      const cafeFacts = joinFacts(buildRetrievedContext('How much did I spend at Café Crème?', { db: testDb, now: NOW }));
+      expect(cafeFacts).toContain('Matching "café crème" (1 txn, total spent Rp 85.000):');
+
+      // Adversarial wildcard/punctuation input must never throw or wildcard-match unrelated rows
+      const advFacts = joinFacts(buildRetrievedContext('How much did I spend at 100% _test_ \\ %?', { db: testDb, now: NOW }));
+      expect(advFacts).toContain('No matching transactions found');
+      expect(advFacts).not.toContain('Nasi Padang');
+    });
+
+    it('R6: reuses formatDisplayCurrency and respects useThousandsSeparator = false', () => {
+      (useSettingsStore.getState as jest.Mock).mockReturnValue({
+        currencyCode: 'IDR',
+        useThousandsSeparator: false,
+        monthStartDay: 1,
+      });
+
+      const foodText = joinFacts(buildRetrievedContext('How much did I spend on food this month?', { db: testDb, now: NOW }));
+      expect(foodText).toContain('Rp 1100000');
+      expect(foodText).not.toContain('Rp 1.100.000');
+
+      const balText = joinFacts(buildRetrievedContext('How much money do I have left?', { db: testDb, now: NOW }));
+      expect(balText).toContain('Total Rp 4900000');
+      expect(balText).toContain('Main Wallet -Rp 100000');
+      expect(balText).toContain('Bank BCA Rp 5000000');
+    });
+
+    it('R7: preserves all 5 budgets and long single items without 260-char truncation', () => {
+      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Groceries', 800000, 'monthly', 1);");
+      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Bills', 2000000, 'monthly', 1);");
+      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Entertainment', 500000, 'monthly', 1);");
+
+      const budgetItems = buildRetrievedContext('How much budget do I have left?', { db: testDb, now: NOW });
+      const compact = buildCompactContextBlock(budgetItems, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
+      expect(compact).toContain('Total limit Rp 5.100.000');
+      expect(compact).toContain('Bills: limit Rp 2.000.000');
+      expect(compact).toContain('Entertainment: limit Rp 500.000');
+      expect(compact).toContain('Food & Dining: limit Rp 1.500.000');
+      expect(compact).toContain('Groceries: limit Rp 800.000');
+      expect(compact).toContain('Transport: limit Rp 300.000');
+      expect(compact).not.toContain('…');
+
+      // A single >260 char balance line with many wallets is also preserved within maxChars
+      const longLine =
+        'Current balance: Total Rp 25.000.000 | Accounts: Main Wallet Rp 5.000.000, Bank BCA Rp 5.000.000, Bank Mandiri Rp 5.000.000, GoPay Wallet Rp 5.000.000, OVO Savings Rp 2.500.000, Emergency Reserve Vault Rp 2.500.000, Travel Fund Account Rp 1.000.000, Investment Cash Reserve Rp 1.000.000';
+      expect(longLine.length).toBeGreaterThan(260);
+      expect(
+        buildCompactContextBlock(
+          [{ id: 'balance-total', kind: 'balance', label: 'Balance', content: longLine, score: 960 }],
+          900,
+        ),
+      ).toBe(longLine);
+    });
+
+    it('R8: anchors last-n-days start boundary to local start-of-day matching the printed calendar date', () => {
+      // NOW = 2026-11-12 12:00 -> last 7 days prints 05/11/2026–12/11/2026 and MUST include 2026-11-05 08:00
+      insertTx({
+        id: 80,
+        walletId: 1,
+        merchant: 'Morning Brew',
+        amount: -40_000,
+        type: 'expense',
+        date: localMs(2026, 11, 5, 8),
+        category: 'Food & Dining',
+      });
+      insertTx({
+        id: 81,
+        walletId: 1,
+        merchant: 'Previous Night Brew',
+        amount: -99_000,
+        type: 'expense',
+        date: localMs(2026, 11, 4, 23),
+        category: 'Food & Dining',
+      });
+
+      const period = parseTimePeriod('How much did I spend in the last 7 days?', NOW);
+      expect(period.kind).toBe('last-n-days');
+      expect(period.label).toBe('Last 7 days (05/11/2026–12/11/2026)');
+      expect(period.fromMs).toBe(new Date(2026, 10, 5, 0, 0, 0, 0).getTime());
+
+      const includedFacts = joinFacts(
+        buildRetrievedContext('How much did I spend at Morning Brew in the last 7 days?', { db: testDb, now: NOW }),
+      );
+      expect(includedFacts).toContain('Matching "morning brew" (1 txn, total spent Rp 40.000):');
+
+      const excludedFacts = joinFacts(
+        buildRetrievedContext('How much did I spend at Previous Night Brew in the last 7 days?', { db: testDb, now: NOW }),
+      );
+      expect(excludedFacts).toContain('No matching transactions found');
+    });
+
+    it('R9: skips wallet balance subqueries when !asksBalance, avoids transaction_items category scan, and walks idx_transactions_date for recent rows', () => {
+      const executedSql: string[] = [];
+      const spyDb: GroundedSqliteDb = {
+        getAllSync: <T = any>(sql: string, params?: any[]): T[] => {
+          executedSql.push(sql);
+          return testDb.getAllSync<T>(sql, params ?? []);
+        },
+      };
+
+      // Category query: no wallet balance subqueries, no full transaction_items DISTINCT scan
+      buildRetrievedContext('How much did I spend on food this month?', { db: spyDb, now: NOW });
+      expect(executedSql.some((sql) => /initial_balance|to_wallet_id/i.test(sql))).toBe(false);
+      expect(executedSql.some((sql) => /SELECT DISTINCT i\.category/i.test(sql))).toBe(false);
+
+      // Recent query: walks idx_transactions_date without USE TEMP B-TREE FOR ORDER BY
+      executedSql.length = 0;
+      buildRetrievedContext('Show my recent transactions', { db: spyDb, now: NOW });
+      expect(executedSql.some((sql) => /initial_balance|to_wallet_id/i.test(sql))).toBe(false);
+      const recentSql = executedSql.find((sql) => /ORDER BY t\.date DESC, t\.id DESC/i.test(sql));
+      expect(recentSql).toBeDefined();
+      const planRows = testDb.getAllSync<{ detail: string }>(`EXPLAIN QUERY PLAN ${recentSql!}`, [5]);
+      const planText = planRows.map((r) => r.detail).join('\n');
+      expect(planText).toContain('idx_transactions_date');
+      expect(planText).not.toMatch(/USE TEMP B-TREE FOR ORDER BY/i);
     });
   });
 
