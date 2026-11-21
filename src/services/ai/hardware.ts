@@ -6,10 +6,9 @@ import { getActiveModelConfig } from './config';
 export const LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES = 4 * 1024 * 1024 * 1024;
 export const MODEL_MEMORY_MULTIPLIER = 1.5;
 export const MAX_MODEL_RAM_FRACTION = 0.6;
-export const DEFAULT_BIG_CORE_CPU_THREADS = 4;
-export const FALLBACK_CPU_THREAD_COUNT = 4;
-export const MIN_CPU_THREAD_COUNT = 2;
-export const MAX_CPU_THREAD_COUNT = 6;
+export const DEFAULT_CPU_THREAD_COUNT = 4;
+export const MIN_CPU_THREAD_COUNT = 1;
+export const MAX_CPU_THREAD_COUNT = 8;
 
 export interface QuantizationProfile {
   name: string;
@@ -144,50 +143,39 @@ export async function canLoadModelWithinMemoryBudget(modelFileSizeBytes: number)
   return buildMemoryBudget(totalMemoryBytes, modelFileSizeBytes).withinBudget;
 }
 
-export function getDeviceCpuCoreCount(): number | null {
-  const hardwareConcurrency = (globalThis as { navigator?: { hardwareConcurrency?: unknown } }).navigator
-    ?.hardwareConcurrency;
-  if (typeof hardwareConcurrency === 'number' && Number.isFinite(hardwareConcurrency) && hardwareConcurrency >= 1) {
-    return Math.floor(hardwareConcurrency);
-  }
-  return null;
-}
-
 /**
- * Selects CPU threads from CPU core topology rather than RAM size.
- * On typical 4–8 core big.LITTLE Android phones, 4 threads targets the big/performance
- * cores without spilling onto slow LITTLE cores (llama.rn pins threads to the highest
- * max-frequency cores and clamps to hardware_concurrency() natively).
+ * Selects a fixed CPU thread target (4 on Android/mobile) rather than scaling off RAM
+ * or unavailable browser globals (React Native/Hermes does not populate navigator.hardwareConcurrency).
+ * llama.rn's native set_best_cores() pins threads to the highest max-frequency cores and
+ * clamps n_threads to std::thread::hardware_concurrency() automatically.
  */
 export function resolveRecommendedCpuThreads(
-  cpuCoreCount?: number | null,
   explicitThreadCount?: number | null,
+  _platform: string = Platform.OS,
 ): number {
-  if (Number.isFinite(explicitThreadCount) && explicitThreadCount && explicitThreadCount > 0) {
+  if (typeof explicitThreadCount === 'number' && Number.isFinite(explicitThreadCount) && explicitThreadCount > 0) {
     return Math.max(MIN_CPU_THREAD_COUNT, Math.min(Math.floor(explicitThreadCount), MAX_CPU_THREAD_COUNT));
   }
 
-  if (typeof cpuCoreCount !== 'number' || !Number.isFinite(cpuCoreCount) || cpuCoreCount <= 0) {
-    return FALLBACK_CPU_THREAD_COUNT;
+  return DEFAULT_CPU_THREAD_COUNT;
+}
+
+/**
+ * Extracts the natively resolved thread count from llama.rn's systemInfo string
+ * (e.g. "system_info: n_threads = 4 (n_threads_batch = 4) / 6 | ...").
+ */
+export function parseResolvedThreadsFromSystemInfo(systemInfo?: string | null): number | null {
+  if (!systemInfo || typeof systemInfo !== 'string') {
+    return null;
   }
 
-  const cores = Math.floor(cpuCoreCount);
-  if (cores <= MIN_CPU_THREAD_COUNT) {
-    return MIN_CPU_THREAD_COUNT;
+  const match = systemInfo.match(/\bn_threads\s*=\s*(\d+)/);
+  if (!match) {
+    return null;
   }
 
-  if (cores <= DEFAULT_BIG_CORE_CPU_THREADS) {
-    return cores;
-  }
-
-  if (cores <= 8) {
-    return DEFAULT_BIG_CORE_CPU_THREADS;
-  }
-
-  return Math.max(
-    DEFAULT_BIG_CORE_CPU_THREADS,
-    Math.min(MAX_CPU_THREAD_COUNT, Math.floor(cores / 2)),
-  );
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
 /**

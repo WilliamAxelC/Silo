@@ -2,18 +2,17 @@ import DeviceInfo from 'react-native-device-info';
 import {
   getTotalDeviceMemoryBytes,
   getDevicePssMemoryBytes,
-  getDeviceCpuCoreCount,
   estimateRequiredRamBytes,
   buildMemoryBudget,
   canLoadModelWithinMemoryBudget,
   resolveRecommendedCpuThreads,
+  parseResolvedThreadsFromSystemInfo,
   getGpuLayersForDevice,
   resolveOptimalQuantization,
   recordMemoryTelemetry,
   QUANTIZATION_PROFILES,
   LOW_MEMORY_GPU_DISABLE_THRESHOLD_BYTES,
-  DEFAULT_BIG_CORE_CPU_THREADS,
-  FALLBACK_CPU_THREAD_COUNT,
+  DEFAULT_CPU_THREAD_COUNT,
   MIN_CPU_THREAD_COUNT,
   MAX_CPU_THREAD_COUNT,
 } from '../hardware';
@@ -92,69 +91,43 @@ describe('hardware utilities and memory budgeting', () => {
     });
   });
 
-  describe('getDeviceCpuCoreCount', () => {
-    const originalNavigator = (globalThis as { navigator?: unknown }).navigator;
-
-    afterEach(() => {
-      Object.defineProperty(globalThis, 'navigator', {
-        value: originalNavigator,
-        configurable: true,
-        writable: true,
-      });
+  describe('resolveRecommendedCpuThreads', () => {
+    it('returns the fixed default of 4 threads on Android and mobile when no explicit override is given', () => {
+      expect(resolveRecommendedCpuThreads()).toBe(DEFAULT_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(undefined, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(null, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(0, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(-2, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(NaN, 'android')).toBe(4);
+      expect(resolveRecommendedCpuThreads(undefined, 'ios')).toBe(4);
     });
 
-    it('reads navigator.hardwareConcurrency when available and valid', () => {
-      Object.defineProperty(globalThis, 'navigator', {
-        value: { hardwareConcurrency: 8 },
-        configurable: true,
-        writable: true,
-      });
-      expect(getDeviceCpuCoreCount()).toBe(8);
-    });
-
-    it('returns null when navigator.hardwareConcurrency is unavailable or invalid', () => {
-      Object.defineProperty(globalThis, 'navigator', {
-        value: {},
-        configurable: true,
-        writable: true,
-      });
-      expect(getDeviceCpuCoreCount()).toBeNull();
-
-      Object.defineProperty(globalThis, 'navigator', {
-        value: { hardwareConcurrency: 0 },
-        configurable: true,
-        writable: true,
-      });
-      expect(getDeviceCpuCoreCount()).toBeNull();
+    it('clamps explicit thread count within llama.rn safe bounds', () => {
+      expect(resolveRecommendedCpuThreads(1)).toBe(MIN_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(3)).toBe(3);
+      expect(resolveRecommendedCpuThreads(6)).toBe(6);
+      expect(resolveRecommendedCpuThreads(8)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(16)).toBe(MAX_CPU_THREAD_COUNT);
+      expect(resolveRecommendedCpuThreads(3.8)).toBe(3);
     });
   });
 
-  describe('resolveRecommendedCpuThreads', () => {
-    it('derives threads from CPU core count instead of RAM size', () => {
-      expect(resolveRecommendedCpuThreads(2)).toBe(MIN_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(3)).toBe(3);
-      expect(resolveRecommendedCpuThreads(4)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
-      expect(resolveRecommendedCpuThreads(6)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
-      expect(resolveRecommendedCpuThreads(8)).toBe(DEFAULT_BIG_CORE_CPU_THREADS);
+  describe('parseResolvedThreadsFromSystemInfo', () => {
+    it('extracts natively clamped n_threads from llama.rn systemInfo strings', () => {
+      expect(
+        parseResolvedThreadsFromSystemInfo('system_info: n_threads = 2 (n_threads_batch = 2) / 2 | CPU : NEON'),
+      ).toBe(2);
+      expect(
+        parseResolvedThreadsFromSystemInfo('system_info: n_threads = 4 (n_threads_batch = 4) / 6 | CPU : SSE3'),
+      ).toBe(4);
     });
 
-    it('scales conservatively above 8 cores up to MAX_CPU_THREAD_COUNT', () => {
-      expect(resolveRecommendedCpuThreads(10)).toBe(5);
-      expect(resolveRecommendedCpuThreads(12)).toBe(MAX_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(16)).toBe(MAX_CPU_THREAD_COUNT);
-    });
-
-    it('honors explicit thread count within min/max bounds', () => {
-      expect(resolveRecommendedCpuThreads(8, 5)).toBe(5);
-      expect(resolveRecommendedCpuThreads(8, 1)).toBe(MIN_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(8, 16)).toBe(MAX_CPU_THREAD_COUNT);
-    });
-
-    it('falls back to 4 big-core threads when core count is unknown or invalid', () => {
-      expect(resolveRecommendedCpuThreads(undefined)).toBe(FALLBACK_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(null)).toBe(FALLBACK_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(0)).toBe(FALLBACK_CPU_THREAD_COUNT);
-      expect(resolveRecommendedCpuThreads(NaN)).toBe(FALLBACK_CPU_THREAD_COUNT);
+    it('returns null for missing or unparseable systemInfo strings', () => {
+      expect(parseResolvedThreadsFromSystemInfo(null)).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo(undefined)).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('')).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('no threads here')).toBeNull();
+      expect(parseResolvedThreadsFromSystemInfo('n_threads = 0')).toBeNull();
     });
   });
 

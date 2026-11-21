@@ -8,20 +8,23 @@ jest.mock('llama.rn', () => ({
   releaseAllLlama: jest.fn(async () => {}),
 }));
 
-jest.mock('../hardware', () => ({
-  buildMemoryBudget: jest.fn(() => ({
-    totalMemoryBytes: 8 * 1024 ** 3,
-    modelFileSizeBytes: 1_000_000,
-    estimatedRequiredMemoryBytes: 1_500_000,
-    allowedBudgetBytes: 4 * 1024 ** 3,
-    withinBudget: true,
-  })),
-  canLoadModelWithinMemoryBudget: jest.fn(async () => true),
-  getDeviceCpuCoreCount: jest.fn(() => 8),
-  getGpuLayersForDevice: jest.fn(() => 0),
-  getTotalDeviceMemoryBytes: jest.fn(async () => 8 * 1024 ** 3),
-  resolveRecommendedCpuThreads: jest.fn(() => 4),
-}));
+jest.mock('../hardware', () => {
+  const actual = jest.requireActual('../hardware');
+  return {
+    buildMemoryBudget: jest.fn(() => ({
+      totalMemoryBytes: 8 * 1024 ** 3,
+      modelFileSizeBytes: 1_000_000,
+      estimatedRequiredMemoryBytes: 1_500_000,
+      allowedBudgetBytes: 4 * 1024 ** 3,
+      withinBudget: true,
+    })),
+    canLoadModelWithinMemoryBudget: jest.fn(async () => true),
+    getGpuLayersForDevice: jest.fn(() => 0),
+    getTotalDeviceMemoryBytes: jest.fn(async () => 8 * 1024 ** 3),
+    parseResolvedThreadsFromSystemInfo: actual.parseResolvedThreadsFromSystemInfo,
+    resolveRecommendedCpuThreads: jest.fn(() => 4),
+  };
+});
 
 jest.mock('../modelLifecycle', () => ({
   getVisionProjectorUri: jest.fn(() => 'file:///mock/models/mmproj-F16.gguf'),
@@ -112,6 +115,29 @@ describe('LlamaRnAdapter', () => {
     expect(mockCompletion).not.toHaveBeenCalled();
     expect(mockInitMultimodal).not.toHaveBeenCalled();
     expect(adapter.isMultimodalReady()).toBe(false);
+  });
+
+  it('aligns resolvedThreads in LocalRuntimeInfo with native clamping reported by context.systemInfo', async () => {
+    (initLlama as jest.Mock).mockResolvedValueOnce({
+      gpu: false,
+      systemInfo: 'system_info: n_threads = 2 (n_threads_batch = 2) / 2 | CPU : NEON',
+      completion: mockCompletion,
+      stopCompletion: mockStopCompletion,
+      release: mockRelease,
+      initMultimodal: mockInitMultimodal,
+      releaseMultimodal: mockReleaseMultimodal,
+    });
+
+    const adapter = getLlamaRnAdapter();
+    await adapter.initContext({
+      modelPath: 'file:///mock/model.gguf',
+      modelFileSizeBytes: 1_000_000,
+    });
+
+    const info = await adapter.getRuntimeInfo();
+    expect(info.configuredCpuThreads).toBe(4);
+    expect(info.resolvedThreads).toBe(2);
+    expect(info.detectedBackendSummary).toContain('2 CPU threads');
   });
 
   it('does not load the vision projector during text-only chat completions', async () => {

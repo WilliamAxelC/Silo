@@ -23,9 +23,9 @@ import {
 import {
   buildMemoryBudget,
   canLoadModelWithinMemoryBudget,
-  getDeviceCpuCoreCount,
   getGpuLayersForDevice,
   getTotalDeviceMemoryBytes,
+  parseResolvedThreadsFromSystemInfo,
   resolveRecommendedCpuThreads,
 } from './hardware';
 import { getVisionProjectorUri } from './modelLifecycle';
@@ -212,7 +212,7 @@ class LlamaRnAdapter {
 
       await this.dispose();
 
-      const resolvedCpuThreads = resolveRecommendedCpuThreads(getDeviceCpuCoreCount());
+      const requestedCpuThreads = resolveRecommendedCpuThreads();
       const requestedGpuLayers = getGpuLayersForDevice(totalMemoryBytes);
       let resolvedGpuLayers = requestedGpuLayers;
       let gpuAttemptFailed = false;
@@ -229,7 +229,7 @@ class LlamaRnAdapter {
         n_ctx: requestedContextTokens,
         n_batch: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         n_ubatch: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
-        n_threads: resolvedCpuThreads,
+        n_threads: requestedCpuThreads,
         use_mlock: false,
         use_mmap: true,
         flash_attn_type: flashAttnType,
@@ -254,7 +254,7 @@ class LlamaRnAdapter {
         resolvedGpuLayers = 0;
         logLlamaRuntimeWarning('gpu-init-fallback', {
           requestedGpuLayers,
-          resolvedCpuThreads,
+          requestedCpuThreads,
           message: error instanceof Error ? error.message : String(error),
         });
         context = await initLlama(
@@ -267,6 +267,7 @@ class LlamaRnAdapter {
         );
       }
 
+      const resolvedCpuThreads = parseResolvedThreadsFromSystemInfo(context.systemInfo) ?? requestedCpuThreads;
       const gpuActuallyEnabled = Boolean(context.gpu) && resolvedGpuLayers > 0;
       this.context = context;
       this.initializedModelPath = normalizedModelPath;
@@ -285,7 +286,7 @@ class LlamaRnAdapter {
         isModelLoaded: true,
         abi: null,
         configuredContextTokens: requestedContextTokens,
-        configuredCpuThreads: resolvedCpuThreads,
+        configuredCpuThreads: requestedCpuThreads,
         configuredGpuLayers: this.resolvedGpuLayers,
         configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
         configuredUseFlashAttention: QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
@@ -531,12 +532,12 @@ class LlamaRnAdapter {
       supportsStreaming: true,
       maxContextTokens: contextTokens,
       configuredContextTokens: contextTokens,
-      configuredCpuThreads: resolveRecommendedCpuThreads(getDeviceCpuCoreCount()),
+      configuredCpuThreads: resolveRecommendedCpuThreads(),
       configuredGpuLayers: 0,
       configuredBatchTokens: QWEN_MODEL_DEFAULT_BATCH_TOKENS,
       configuredUseFlashAttention: QWEN_MODEL_DEFAULT_USE_FLASH_ATTENTION,
       configuredUseMlock: false,
-      resolvedThreads: resolveRecommendedCpuThreads(getDeviceCpuCoreCount()),
+      resolvedThreads: resolveRecommendedCpuThreads(),
       likelyCpuOnlyRuntime: true,
       isModelLoaded: Boolean(this.context),
       loadedModelPath: this.initializedModelPath,
