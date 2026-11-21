@@ -3,7 +3,7 @@
     "name": "Silo",
     "owner": "LCS Dev",
     "slug": "silo-app",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -25,6 +25,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.LCSdev.silo",
+      "versionCode": 2,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
