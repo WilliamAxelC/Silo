@@ -957,6 +957,44 @@ describe('AI Agent & Context Engine', () => {
       expect(parseTimePeriod('How much did I spend in Feb 2024?', NOW).label).toBe('Feb 2024');
     });
 
+    it('F-M1/F-M2: filler words never become search keywords and "di April Cafe" stays a merchant', () => {
+      insertTx({
+        id: 62,
+        walletId: 1,
+        merchant: 'April Cafe',
+        amount: -70_000,
+        type: 'expense',
+        date: localMs(2026, 11, 11, 9),
+        category: 'Food & Dining',
+      });
+
+      for (const question of [
+        'How much may I spend this month?',
+        'Berapa banyak pengeluaran saya bulan ini?',
+        'Tolong cek pengeluaran bulan ini',
+      ]) {
+        const parsed = parseGroundedQuery(question, { db: testDb, now: NOW });
+        expect(parsed.keywords).toEqual([]);
+        const facts = joinFacts(buildRetrievedContext(question, { db: testDb, now: NOW }));
+        expect(facts).not.toContain('No matching transactions found');
+        expect(facts).toContain('Spent');
+      }
+
+      const everParsed = parseGroundedQuery('Did I ever spend at Kopi Kenangan?', { db: testDb, now: NOW });
+      expect(everParsed.keywords).toEqual(['kopi', 'kenangan']);
+
+      const diParsed = parseGroundedQuery('Berapa pengeluaran di April Cafe?', { db: testDb, now: NOW });
+      expect(diParsed.period.isExplicit).toBe(false);
+      expect(diParsed.keywords).toEqual(['april', 'cafe']);
+      expect(joinFacts(buildRetrievedContext('Berapa pengeluaran di April Cafe?', { db: testDb, now: NOW }))).toContain(
+        'Matching "april cafe" (1 txn, total spent Rp 70.000)',
+      );
+
+      // A month after "di bulan" or with a year is still a period.
+      expect(parseTimePeriod('Berapa pengeluaran di bulan April?', NOW).label).toBe('Apr 2026');
+      expect(parseTimePeriod('How much did I spend in April?', NOW).label).toBe('Apr 2026');
+    });
+
     it('R4: matches modified transaction-list phrasings and filters recent rows by named category', () => {
       // "Show my food transactions this month" -> wantsRecent = true, only Nov Food & Dining rows
       const foodThisMonth = buildRetrievedContext('Show my food transactions this month', { db: testDb, now: NOW });

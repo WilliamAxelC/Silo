@@ -697,6 +697,22 @@ const STOP_WORDS = new Set([
   'untuk',
   'ya',
   'yang',
+  // Fillers that otherwise leak into AND keyword search (review F-M1)
+  'may',
+  'ever',
+  'anything',
+  'something',
+  'into',
+  'receive',
+  'received',
+  'banyak',
+  'tolong',
+  'coba',
+  'pernah',
+  'seluruh',
+  've',
+  'll',
+  're',
 ]);
 
 function escapeRegex(value: string): string {
@@ -937,7 +953,11 @@ export function parseTimePeriod(
       const hasPeriodCue = entry.guarded ? true : Boolean(match[1]);
       if (!entry.guarded && !hasPeriodCue && !explicitYearRaw && typeof match.index === 'number') {
         const prefix = userPrompt.slice(0, match.index);
-        if (merchantPrefixGuard.test(prefix)) {
+        const suffix = userPrompt.slice(match.index + match[0].length);
+        // "di April Cafe" / "April Bakery": a capitalised name or venue word after the month means a merchant.
+        const venueSuffix = /^\s+(?:cafe|café|kafe|bakery|resto|restaurant|coffee|kopi|store|shop|mart|bar)\b/i.test(suffix);
+        const diBeforeName = /\bdi\s+$/i.test(prefix) && /^\s+\p{Lu}/u.test(suffix);
+        if (merchantPrefixGuard.test(prefix) || venueSuffix || diBeforeName) {
           continue;
         }
       }
