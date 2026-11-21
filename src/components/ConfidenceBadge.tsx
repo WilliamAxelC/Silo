@@ -20,6 +20,7 @@ export function useConfidenceColors(level: ReceiptConfidence) {
 }
 
 export const ConfidenceBadge = ({ level }: { level: ReceiptConfidence }) => {
+  const theme = useAppTheme();
   const { fg, bg } = useConfidenceColors(level);
   return (
     <View
@@ -27,13 +28,14 @@ export const ConfidenceBadge = ({ level }: { level: ReceiptConfidence }) => {
       accessibilityLabel={`Scan confidence: ${LABELS[level]}`}
     >
       <Ionicons name={ICONS[level]} size={12} color={fg} />
-      <Text style={[styles.text, { color: fg }]}>{LABELS[level]}</Text>
+      <Text style={[styles.text, { color: fg, fontSize: theme.scaleFont(11) }]}>{LABELS[level]}</Text>
     </View>
   );
 };
 
 /** Inline note under a scanned amount: why the total may be wrong. Renders nothing for 'high'. */
 export const ConfidenceNotice = ({ level, reasons }: { level: ReceiptConfidence; reasons: string[] }) => {
+  const theme = useAppTheme();
   const { fg, bg } = useConfidenceColors(level);
   if (level === 'high') return null;
   const title = level === 'low' ? 'Compare the total with the receipt' : 'Double-check the total';
@@ -45,9 +47,9 @@ export const ConfidenceNotice = ({ level, reasons }: { level: ReceiptConfidence;
     >
       <Ionicons name={ICONS[level]} size={16} color={fg} style={styles.noticeIcon} />
       <View style={styles.noticeBody}>
-        <Text style={[styles.noticeTitle, { color: fg }]}>{title}</Text>
+        <Text style={[styles.noticeTitle, { color: fg, fontSize: theme.scaleFont(12) }]}>{title}</Text>
         {reasons.map((reason) => (
-          <Text key={reason} style={[styles.noticeText, { color: fg }]}>
+          <Text key={reason} style={[styles.noticeText, { color: fg, fontSize: theme.scaleFont(11) }]}>
             {reason}
           </Text>
         ))}

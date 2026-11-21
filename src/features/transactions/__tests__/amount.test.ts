@@ -339,9 +339,17 @@ describe('amount utilities', () => {
       expect(formatDisplayCurrency(1250.5, 'USD', false)).toBe('USD 1250.5');
     });
 
-    it('handles negative amounts safely without showing negative zero', () => {
+    it('handles negative amounts safely with sign before currency and without negative zero (F-11)', () => {
       const resultNeg = formatDisplayCurrency(-75000, 'IDR');
       expect(resultNeg).toContain('75.000');
+      expect(resultNeg.startsWith('-')).toBe(true);
+
+      const resultUsdNeg = formatDisplayCurrency(-42000, 'USD');
+      expect(resultUsdNeg.startsWith('-')).toBe(true);
+
+      expect(formatDisplayCurrency(-42000, 'USD', false)).toBe('-USD 42000');
+      expect(formatDisplayCurrency(-42000, 'IDR', false)).toBe('-Rp 42000');
+      expect(formatDisplayCurrency(-12.5, 'EUR', false)).toBe('-EUR 12.5');
 
       const resultNegZero = formatDisplayCurrency(-0, 'IDR', false);
       expect(resultNegZero).toBe('Rp 0');
@@ -365,7 +373,7 @@ describe('amount utilities', () => {
         expect(result).toBe('XYZ 50,000');
 
         const resultNeg = formatDisplayCurrency(-1000, 'XYZ');
-        expect(resultNeg).toBe('XYZ -1,000');
+        expect(resultNeg).toBe('-XYZ 1,000');
       } finally {
         Intl.NumberFormat = originalIntl;
       }

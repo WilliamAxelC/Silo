@@ -4,9 +4,10 @@ import { expoDb, type AITransactionRow } from '../../db/index';
 import { isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
-import { isGrounded, pickTotalFromRows } from '../ocr/receiptText';
+import { isGrounded, isNonItemLine, isSuspiciousMerchantName, pickMerchantFromRows, pickTotalFromRows } from '../ocr/receiptText';
 import { assessReceiptConfidence, type ReceiptConfidence } from '../ocr/receiptConfidence';
 import { parseSignedAmount } from '../../features/transactions/amount';
+import { parseReceiptLineItemsText, serializeReceiptLineItems } from '../../features/transactions/lineItems';
 import { formatPeriodLabel, getPeriodBounds, shiftPeriod } from '../../features/transactions/periods';
 import { useAIStore, type Message } from '../../store/useAIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -509,22 +510,44 @@ export interface ParsedReceiptResult {
 }
 
 function itemPricesFromText(lineItemsText: string | null | undefined): number[] {
-  return (lineItemsText ?? '')
-    .split('\n')
-    .map((line) => Number(line.split('|')[1]))
+  return parseReceiptLineItemsText(lineItemsText ?? '')
+    .map((item) => Math.round(Math.abs(parseSignedAmount(item.price.trim()))))
     .filter((price) => Number.isFinite(price) && price > 0);
+}
+
+function sanitizeMerchantName(...candidates: Array<string | null | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    if (!isSuspiciousMerchantName(trimmed)) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function filterSerializedLineItems(lineItemsText: string | null | undefined): string | undefined {
+  if (!lineItemsText) return undefined;
+  const kept = parseReceiptLineItemsText(lineItemsText).filter(
+    (item) => item.name.trim().length > 0 && !isNonItemLine(item.name),
+  );
+  const serialized = serializeReceiptLineItems(kept);
+  return serialized ? serialized : undefined;
 }
 
 function withConfidence(
   result: ParsedReceiptResult,
   rows: string[],
   independentTotal: number | null,
+  rawMerchantCandidate?: string | null,
 ): ParsedReceiptResult {
   const { level, reasons } = assessReceiptConfidence({
     total: result.totalAmount,
     rows,
     independentTotal,
     itemPrices: itemPricesFromText(result.lineItemsText),
+    merchantName: result.merchantName ?? rawMerchantCandidate ?? null,
   });
   return { ...result, confidence: level, confidenceReasons: reasons };
 }
@@ -682,12 +705,12 @@ function formatReceiptItemsText(items: unknown): string | undefined {
     return undefined;
   }
 
-  const formatted: string[] = [];
+  const drafts: Array<{ name: string; price: string; note: string }> = [];
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
     const record = item as { name?: unknown; qty?: unknown; price?: unknown };
     const rawName = typeof record.name === 'string' ? record.name.trim() : '';
-    if (!rawName) continue;
+    if (!rawName || isNonItemLine(rawName)) continue;
 
     const qty =
       typeof record.qty === 'number' && Number.isFinite(record.qty) && record.qty > 1
@@ -702,14 +725,11 @@ function formatReceiptItemsText(items: unknown): string | undefined {
           ? Math.round(Math.abs(parseSignedAmount(record.price)))
           : 0;
 
-    if (rawPrice > 0) {
-      formatted.push(`${name} | ${rawPrice}`);
-    } else {
-      formatted.push(name);
-    }
+    drafts.push({ name, price: rawPrice > 0 ? String(rawPrice) : '', note: '' });
   }
 
-  return formatted.length > 0 ? formatted.join('\n') : undefined;
+  const serialized = serializeReceiptLineItems(drafts);
+  return serialized ? serialized : undefined;
 }
 
 function isExternalConfiguredForReceipt(): boolean {
@@ -795,11 +815,14 @@ export const analyzeReceiptImage = async (
   const keywordTotal = pickTotalFromRows(rows);
   const heuristicTotal = keywordTotal ?? ocrResult.extractedTotal ?? undefined;
 
+  const cleanOcrMerchant = sanitizeMerchantName(ocrResult.extractedMerchant, pickMerchantFromRows(rows));
+  const cleanOcrItems = filterSerializedLineItems(ocrResult.extractedLineItems);
+
   const heuristicResult: ParsedReceiptResult = {
-    merchantName: ocrResult.extractedMerchant || undefined,
+    merchantName: cleanOcrMerchant,
     totalAmount: heuristicTotal,
-    category: ocrResult.extractedCategory || inferReceiptCategory(ocrResult.extractedMerchant ?? null, rawText) || undefined,
-    lineItemsText: ocrResult.extractedLineItems || undefined,
+    category: ocrResult.extractedCategory || inferReceiptCategory(cleanOcrMerchant ?? null, rawText) || undefined,
+    lineItemsText: cleanOcrItems,
     date: ocrResult.extractedDate || undefined,
     rawText,
   };
@@ -838,24 +861,23 @@ export const analyzeReceiptImage = async (
       const usedVisionTotal = typeof visionTotal === 'number' && visionTotal > 0;
       const finalTotal = usedVisionTotal ? visionTotal : heuristicTotal;
 
-      const merchantName =
-        (typeof parsedData.merchant === 'string' && parsedData.merchant.trim()) ||
-        ocrResult.extractedMerchant ||
-        undefined;
+      const rawVisionMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
+      const merchantName = sanitizeMerchantName(rawVisionMerchant, cleanOcrMerchant);
       const date =
         (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
         ocrResult.extractedDate ||
         undefined;
-      const lineItemsText = formatReceiptItemsText(parsedData.items) || ocrResult.extractedLineItems || undefined;
+      const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
       const category =
         ocrResult.extractedCategory ||
-        inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
+        inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
         undefined;
 
       return withConfidence(
         { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
         rows,
         usedVisionTotal ? keywordTotal : null,
+        rawVisionMerchant,
       );
     } catch (visionError) {
       console.warn('Vision extraction failed, falling back to text LLM / OCR heuristics:', visionError);
@@ -865,7 +887,7 @@ export const analyzeReceiptImage = async (
   }
 
   if (!(await canRunReceiptLlm())) {
-    return withConfidence(heuristicResult, rows, null);
+    return withConfidence(heuristicResult, rows, null, ocrResult.extractedMerchant);
   }
 
   onStatusChange?.('Structuring receipt with AI...');
@@ -904,25 +926,24 @@ export const analyzeReceiptImage = async (
         }
       }
 
-      const merchantName =
-        (typeof parsedData.merchant === 'string' && parsedData.merchant.trim()) ||
-        ocrResult.extractedMerchant ||
-        undefined;
+      const rawLlmMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
+      const merchantName = sanitizeMerchantName(rawLlmMerchant, cleanOcrMerchant);
       // Small models invent plausible dates (bench: Qwen3.5-0.8B on 34/39 receipts); keep only dates visible in the OCR text.
       const date =
         (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
         ocrResult.extractedDate ||
         undefined;
-      const lineItemsText = formatReceiptItemsText(parsedData.items) || ocrResult.extractedLineItems || undefined;
+      const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
       const category =
         ocrResult.extractedCategory ||
-        inferReceiptCategory(merchantName ?? ocrResult.extractedMerchant ?? null, rawText) ||
+        inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
         undefined;
 
       return withConfidence(
         { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
         rows,
         usedLlmTotal ? keywordTotal : null,
+        rawLlmMerchant,
       );
     }
   } catch (error) {
@@ -931,5 +952,5 @@ export const analyzeReceiptImage = async (
     getGenerationService().scheduleModelUnload(300_000);
   }
 
-  return withConfidence(heuristicResult, rows, null);
+  return withConfidence(heuristicResult, rows, null, ocrResult.extractedMerchant);
 };

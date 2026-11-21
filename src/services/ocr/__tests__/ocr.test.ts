@@ -186,6 +186,18 @@ CASH 170000
       expect(result.extractedTotal).toBe(54000);
     });
 
+    it('extracts all items beyond 10 on long minimarket receipts without truncating (R3A-07)', () => {
+      const itemLines = Array.from({ length: 15 }, (_, idx) => `1x Barang Ke-${idx + 1}  10.000`);
+      const rawText = ['ALFAMART 1024', ...itemLines, 'TOTAL BELANJA  150.000', 'TUNAI  200.000', 'KEMBALIAN  50.000'].join(
+        '\n'
+      );
+
+      const result = parseReceiptTextHeuristic(rawText);
+      expect(result.extractedMerchant).toBe('ALFAMART 1024');
+      expect(result.extractedTotal).toBe(150000);
+      expect(result.extractedLineItems?.split('\n')).toHaveLength(15);
+    });
+
     it('handles empty or whitespace-only receipt text gracefully', () => {
       expect(parseReceiptTextHeuristic('')).toEqual({
         extractedTotal: null,

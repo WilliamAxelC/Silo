@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
 import type { TextRecognitionResult } from '@react-native-ml-kit/text-recognition';
 import { IOcrEngine, OcrResult } from './types';
-import { buildReceiptRows, extractAmounts, OcrLine, pickTotalFromRows } from './receiptText';
+import { buildReceiptRows, extractAmounts, isNonItemLine, OcrLine, pickMerchantFromRows, pickTotalFromRows } from './receiptText';
+import { serializeReceiptLineItems } from '../../features/transactions/lineItems';
 
 // Auto-detects: true in Custom Dev Clients, false in Expo Go
 export const IS_NATIVE_OCR_SUPPORTED = Constants.appOwnership !== 'expo';
@@ -84,21 +85,8 @@ export function parseReceiptTextHeuristic(rawText: string): {
     return { extractedTotal: null, extractedMerchant: null, extractedDate: null, extractedCategory: null, extractedLineItems: null };
   }
 
-  // 1. Extract Merchant Name candidate from top header lines
-  let extractedMerchant: string | null = null;
-  for (const line of lines.slice(0, 6)) {
-    // Ignore lines that look like numbers, dates, addresses, tax IDs (NPWP), or transaction codes
-    if (
-      !/^\d+$/.test(line) &&
-      !/^[\d\W]+$/.test(line) &&
-      !/\b(jl\.?|jalan|telp\.?|phone|npwp|receipt|struk|nota|order|table|meja|kasir|cashier|pos|date|tanggal|tgl)\b/i.test(line) &&
-      line.length >= 3 &&
-      line.length <= 40
-    ) {
-      extractedMerchant = line;
-      break;
-    }
-  }
+  // 1. Extract Merchant Name candidate from top header lines (skipping prices, items, totals, promos & disclaimers)
+  const extractedMerchant = pickMerchantFromRows(lines);
 
   // 2. Extract Total Amount
   let extractedTotal: number | null = pickTotalFromRows(lines);
@@ -199,8 +187,8 @@ export function parseReceiptTextHeuristic(rawText: string): {
   // 4. Infer Category
   const extractedCategory = inferReceiptCategory(extractedMerchant, reconstructedText);
 
-  // 5. Extract Line Items
-  const extractedLineItems = extractLineItemsHeuristic(reconstructedText);
+  // 5. Extract Line Items (excluding the merchant header row so branch codes like "ALFAMART 1024" never become items)
+  const extractedLineItems = extractLineItemsHeuristic(reconstructedText, extractedMerchant);
 
   return {
     extractedTotal,
@@ -265,16 +253,27 @@ export function inferReceiptCategory(merchantName: string | null, rawText: strin
   return 'Food & Dining';
 }
 
-export function extractLineItemsHeuristic(reconstructedText: string): string | null {
+export function extractLineItemsHeuristic(reconstructedText: string, merchantName?: string | null): string | null {
   const lines = reconstructedText.split('\n').map((l) => l.trim()).filter(Boolean);
-  const items: string[] = [];
+  const resolvedMerchant = merchantName !== undefined ? merchantName : pickMerchantFromRows(lines);
+  const normalizedMerchant = resolvedMerchant?.trim().toLowerCase() ?? null;
+  const items: Array<{ name: string; price: string; note: string }> = [];
 
-  for (const line of lines) {
-    if (
-      !/\b(total|subtotal|subttl|grand\s*total|bayar|tunai|cash|kembali|change|kembalian|ppn|tax|pb-?1|diskon|discount|jl\.|jalan|telp|kasir|cashier|npwp|struk|pos|receipt|table|meja|terima\s*kasih)\b/i.test(
-        line
-      )
-    ) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    // Never treat the merchant header row (e.g. "ALFAMART 1024" or "APOTEK KIMIA FARMA 124") as a line item.
+    if (normalizedMerchant && i < 6 && line.toLowerCase().includes(normalizedMerchant)) {
+      const cleanedHeader = line
+        .replace(/\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b/g, ' ')
+        .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (cleanedHeader === normalizedMerchant) {
+        continue;
+      }
+    }
+    if (!isNonItemLine(line)) {
       const amounts = extractAmounts(line);
       const hasText = /[a-zA-Z]{3,}/.test(line);
       if (hasText && amounts.length > 0 && line.length >= 6 && line.length <= 60) {
@@ -283,14 +282,14 @@ export function extractLineItemsHeuristic(reconstructedText: string): string | n
           .replace(/(?:(?:Rp|IDR)\s*\.?\s*)?\d+(?:[.,]\d+)*(?:,-)?\s*$/i, '')
           .replace(/[\s\-:|]+$/, '')
           .trim();
-        if (name) {
-          items.push(`${name} | ${price}`);
+        if (name && !isNonItemLine(name)) {
+          items.push({ name, price: String(price), note: '' });
         }
       }
     }
   }
 
-  return items.length > 0 ? items.slice(0, 10).join('\n') : null;
+  return items.length > 0 ? serializeReceiptLineItems(items) : null;
 }
 
 export function buildOcrResultFromLines(lines: OcrLine[], fallbackText: string): OcrResult {

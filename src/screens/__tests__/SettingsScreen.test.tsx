@@ -1,7 +1,9 @@
 import React from 'react';
-import { Alert, Text } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text } from 'react-native';
+import { File } from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Sharing from 'expo-sharing';
 import { SettingsScreen } from '../SettingsScreen';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useAIStore, createInitialProvisioningSnapshot, createInitialRuntimeSnapshot } from '../../store/useAIStore';
@@ -48,13 +50,27 @@ jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
   return {
     SafeAreaView: View,
+    useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
   };
 });
 
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///data/user/0/com.silo.app/files/',
+  cacheDirectory: 'file:///data/user/0/com.silo.app/cache/',
+  deleteAsync: jest.fn().mockResolvedValue(undefined),
   writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-  EncodingType: { UTF8: 'utf8' },
+  readAsStringAsync: jest.fn().mockResolvedValue('U1FMaXRlIGZvcm1hdCAzAA=='),
+  EncodingType: { UTF8: 'utf8', Base64: 'base64' },
+  StorageAccessFramework: {
+    getUriForDirectoryInRoot: jest.fn((folder: string) => `content://com.android.externalstorage.documents/tree/primary%3A${folder}`),
+    requestDirectoryPermissionsAsync: jest.fn().mockResolvedValue({
+      granted: true,
+      directoryUri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload',
+    }),
+    createFileAsync: jest.fn().mockResolvedValue(
+      'content://com.android.externalstorage.documents/document/primary%3ADownload%2Fsilo-file'
+    ),
+  },
 }));
 
 jest.mock('expo-sharing', () => ({
@@ -366,9 +382,8 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     });
     const picker = renderer.root.findByType('DateTimePicker');
     await ReactTestRenderer.act(async () => {
-      picker.props.onChange({ type: 'set' }, new Date(2026, 10, 21, 8, 45));
-      await Promise.resolve();
-      await Promise.resolve();
+      await picker.props.onChange({ type: 'set' }, new Date(2026, 10, 21, 8, 45));
+      for (let i = 0; i < 6; i++) await Promise.resolve();
     });
 
     expect(useSettingsStore.getState().dailyReminderTime).toBe('08:45');
@@ -529,9 +544,8 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
 
     const picker = renderer.root.findByType('DateTimePicker');
     await ReactTestRenderer.act(async () => {
-      picker.props.onChange({ type: 'set' }, new Date(2026, 10, 21, 9, 30));
-      await Promise.resolve();
-      await Promise.resolve();
+      await picker.props.onChange({ type: 'set' }, new Date(2026, 10, 21, 9, 30));
+      for (let i = 0; i < 6; i++) await Promise.resolve();
     });
 
     expect(useSettingsStore.getState().dailyReminderTime).toBe('09:30');
@@ -590,6 +604,379 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     expect(texts).toContain('Daily reminders are not available on this device.');
 
     alertSpy.mockRestore();
+  });
+
+  it('saves CSV and Backup directly via Android SAF even when Sharing is unavailable, with Share as secondary action (F-04)', async () => {
+    const { StorageAccessFramework, writeAsStringAsync } = require('expo-file-system/legacy');
+    (Sharing.isAvailableAsync as jest.Mock).mockResolvedValue(false);
+    const createBackupSpy = jest
+      .spyOn(backupService, 'createBackupFile')
+      .mockResolvedValue('file:///data/user/0/com.silo.app/cache/silo-backup-2026-11-21.db');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    ReactTestRenderer.act(() => {
+      useTransactionStore.setState({
+        wallets: [{ id: 1, name: 'Cash', type: 'cash', isActive: true, initialBalance: 0, balance: 0 }],
+        transactionsList: [
+          {
+            id: 1,
+            merchantName: 'Bakery',
+            totalAmount: -20000,
+            type: 'expense',
+            category: 'Food & Dining',
+            date: new Date(2026, 10, 15).getTime(),
+            note: '',
+            lineItemsText: '',
+            walletId: 1,
+          },
+        ],
+      } as any);
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    // Primary CSV export uses SAF and does not call shareAsync
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Export Transactions CSV' }).props.onPress();
+    });
+    expect(StorageAccessFramework.requestDirectoryPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(StorageAccessFramework.createFileAsync).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringMatching(/^Silo_Transactions_\d{4}-\d{2}-\d{2}$/),
+      'text/csv'
+    );
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledWith(
+      'CSV exported',
+      expect.stringContaining('Saved'),
+      expect.arrayContaining([expect.objectContaining({ text: 'Share' })])
+    );
+
+    // Primary Backup saves binary via SAF using SDK 54 File raw bytes and cleans up temp .db file
+    const { deleteAsync, readAsStringAsync } = require('expo-file-system/legacy');
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Back Up All Data' }).props.onPress();
+    });
+    expect(createBackupSpy).toHaveBeenCalledTimes(1);
+    expect(StorageAccessFramework.createFileAsync).toHaveBeenCalledWith(
+      expect.any(String),
+      'silo-backup-2026-11-21.db',
+      'application/octet-stream'
+    );
+    expect(File.prototype.bytes).toHaveBeenCalledTimes(1);
+    expect(File.prototype.write).toHaveBeenCalledWith(expect.any(Uint8Array));
+    expect(readAsStringAsync).not.toHaveBeenCalled();
+    expect(deleteAsync).toHaveBeenCalledWith(
+      'file:///data/user/0/com.silo.app/cache/silo-backup-2026-11-21.db',
+      { idempotent: true }
+    );
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Backup saved',
+      expect.stringContaining('silo-backup-2026-11-21.db'),
+      expect.arrayContaining([expect.objectContaining({ text: 'Share' })])
+    );
+
+    // Secondary Share buttons are present and gracefully explain when sharing is unavailable
+    const shareCsvBtn = renderer.root.findByProps({ accessibilityLabel: 'Share Transactions CSV' });
+    const shareBackupBtn = renderer.root.findByProps({ accessibilityLabel: 'Share backup file' });
+    expect(shareCsvBtn).toBeTruthy();
+    expect(shareBackupBtn).toBeTruthy();
+
+    await ReactTestRenderer.act(async () => {
+      await shareBackupBtn.props.onPress();
+    });
+    expect(alertSpy).toHaveBeenCalledWith('Sharing unavailable', expect.stringContaining('Back Up All Data'));
+
+    createBackupSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+
+  it('filters restore picker to backup MIME types, rejects image files, and confirms before overwriting (F-26)', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const restoreSpy = jest.spyOn(backupService, 'restoreBackupFile').mockResolvedValue({ transactions: 1 } as any);
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    // Picking a photo is rejected before showing overwrite confirmation
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///DCIM/photo.jpg', name: 'photo.jpg', mimeType: 'image/jpeg' }],
+    });
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Restore From Backup' }).props.onPress();
+    });
+
+    expect(DocumentPicker.getDocumentAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: backupService.BACKUP_PICKER_MIME_TYPES,
+      })
+    );
+    expect(alertSpy).toHaveBeenCalledWith('Not a backup file', expect.stringContaining('.db'));
+    expect(alertSpy.mock.calls.some((call) => call[0] === 'Replace all data?')).toBe(false);
+    expect(restoreSpy).not.toHaveBeenCalled();
+
+    restoreSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+
+  it('warns before changing display currency that existing amounts will not be converted (F-11)', async () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ currencyCode: 'IDR' });
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const usdChip = renderer.root.findByProps({ accessibilityLabel: 'Select USD currency' });
+    await ReactTestRenderer.act(async () => {
+      usdChip.props.onPress();
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Change display currency?',
+      expect.stringContaining('will not be converted'),
+      expect.any(Array)
+    );
+    // Currency has NOT changed yet until confirmed
+    expect(useSettingsStore.getState().currencyCode).toBe('IDR');
+
+    const buttons = alertSpy.mock.calls[0][2] as any[];
+    const confirmBtn = buttons.find((b) => b.text === 'Use USD');
+    expect(confirmBtn).toBeDefined();
+
+    await ReactTestRenderer.act(async () => {
+      confirmBtn.onPress();
+      await Promise.resolve();
+    });
+    expect(useSettingsStore.getState().currencyCode).toBe('USD');
+
+    alertSpy.mockRestore();
+  });
+
+  it('stacks model status pill below model name and renders indeterminate verifying progress (F-13)', async () => {
+    ReactTestRenderer.act(() => {
+      const verifyingProvisioning = createInitialProvisioningSnapshot();
+      verifyingProvisioning.status = 'verifying';
+      verifyingProvisioning.progress = 1;
+      useAIStore.setState({
+        provisioning: verifyingProvisioning,
+        runtime: createInitialRuntimeSnapshot(),
+      });
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const header = renderer.root.findByProps({ testID: 'model-card-header' });
+    const headerStyle = StyleSheet.flatten(header.props.style);
+    // Vertical stack prevents status pill from overlapping long model names
+    expect(headerStyle.flexDirection).not.toBe('row');
+
+    const pill = renderer.root.findByProps({ testID: 'model-status-pill' });
+    expect(pill).toBeTruthy();
+
+    const verifyingRow = renderer.root.findByProps({ testID: 'model-verifying-progress' });
+    expect(verifyingRow.props.accessibilityRole).toBe('progressbar');
+    expect(verifyingRow.findByType(ActivityIndicator)).toBeTruthy();
+    const verifyingTexts = verifyingRow
+      .findAllByType(Text)
+      .map((t: any) => String(t.props.children ?? ''))
+      .join(' ');
+    expect(verifyingTexts).toContain('Verifying model integrity');
+  });
+
+  it('checks OS notification permission via syncDailyReminder when reminder time changes and warns if revoked (R2B2-1)', async () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ dailyReminderEnabled: true, dailyReminderTime: '20:00' });
+    });
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: 'denied', granted: false });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const timeRow = renderer.root.findByProps({ accessibilityLabel: 'Reminder time' });
+    ReactTestRenderer.act(() => {
+      timeRow.props.onPress();
+    });
+
+    const picker = renderer.root.findByType('DateTimePicker');
+    await ReactTestRenderer.act(async () => {
+      await picker.props.onChange({ type: 'set' }, new Date(2026, 10, 21, 7, 15));
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    expect(useSettingsStore.getState().dailyReminderTime).toBe('07:15');
+    expect(Notifications.getPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) => t.props.children).flat().join(' ');
+    expect(texts).toContain('notifications are turned off in phone Settings');
+  });
+
+  it('cleans up temporary backup files on SAF cancellation and write failure (R3A-03)', async () => {
+    const { StorageAccessFramework, deleteAsync } = require('expo-file-system/legacy');
+    const tempPath = 'file:///data/user/0/com.silo.app/cache/backups/silo-backup-2026-11-21.db';
+    const createBackupSpy = jest.spyOn(backupService, 'createBackupFile').mockResolvedValue(tempPath);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    // 1. User cancels SAF folder picker -> temp .db file is deleted
+    (StorageAccessFramework.requestDirectoryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Back Up All Data' }).props.onPress();
+    });
+    expect(deleteAsync).toHaveBeenCalledWith(tempPath, { idempotent: true });
+
+    // 2. Binary write throws -> both SAF orphan and temp .db file are cleaned up
+    (deleteAsync as jest.Mock).mockClear();
+    (File.prototype.write as jest.Mock).mockImplementationOnce(() => {
+      throw new Error('Disk full');
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Back Up All Data' }).props.onPress();
+    });
+    expect(File.prototype.delete).toHaveBeenCalledTimes(1);
+    expect(deleteAsync).toHaveBeenCalledWith(tempPath, { idempotent: true });
+    expect(alertSpy).toHaveBeenCalledWith('Backup failed', expect.stringContaining('Disk full'));
+
+    createBackupSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+
+  it('catches DocumentPicker errors, fetches categories before budgets, and keeps onboarding completed after restoring an empty backup (R3A-06)', async () => {
+    const callOrder: string[] = [];
+    let resolveCategories!: () => void;
+    const fetchTransactions = jest.fn(async () => {
+      callOrder.push('fetchTransactions');
+    });
+    const fetchCategories = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          callOrder.push('fetchCategories:start');
+          resolveCategories = () => {
+            callOrder.push('fetchCategories:end');
+            resolve();
+          };
+        })
+    );
+    const fetchBudgets = jest.fn(async () => {
+      callOrder.push('fetchBudgets');
+    });
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ hasCompletedOnboarding: true });
+      useTransactionStore.setState({
+        fetchTransactions,
+        fetchCategories,
+        fetchBudgets,
+      } as any);
+    });
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const restoreSpy = jest.spyOn(backupService, 'restoreBackupFile').mockResolvedValueOnce({ transactions: 0 } as any);
+    const loadSettingsSpy = jest.spyOn(useSettingsStore.getState(), 'loadSettings').mockImplementationOnce(async () => {
+      // Simulate restoring an older empty backup where hasCompletedOnboarding became false
+      useSettingsStore.setState({ hasCompletedOnboarding: false, dailyReminderEnabled: false });
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    // 1. DocumentPicker throws -> handled cleanly with alert (no unhandled rejection)
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockRejectedValueOnce(new Error('No document picker available'));
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Restore From Backup' }).props.onPress();
+    });
+    expect(alertSpy).toHaveBeenCalledWith('Could not open file picker', expect.stringContaining('No document picker'));
+
+    // 2. Restore orders fetchCategories -> fetchBudgets and keeps hasCompletedOnboarding = true
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///empty-v12.db', name: 'empty-v12.db' }],
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Restore From Backup' }).props.onPress();
+    });
+    const confirmCall = alertSpy.mock.calls.find((c) => c[0] === 'Replace all data?');
+    const restoreAction = (confirmCall![2] as any[]).find((b) => b.text === 'Restore');
+
+    let restorePromise!: Promise<void>;
+    await ReactTestRenderer.act(async () => {
+      restorePromise = Promise.resolve(restoreAction.onPress());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // fetchBudgets MUST NOT run until fetchCategories has resolved
+    expect(fetchBudgets).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => {
+      resolveCategories();
+      await restorePromise;
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    expect(callOrder.indexOf('fetchCategories:end')).toBeLessThan(callOrder.indexOf('fetchBudgets'));
+    expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(true);
+
+    restoreSpy.mockRestore();
+    loadSettingsSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+
+  it('scales External API, Vision, Categories, and About text with fontScale (R3A-08)', async () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({
+        aiInferenceMode: 'external',
+        receiptReadingMode: 'vision',
+        fontScale: 1.0,
+      });
+      useTransactionStore.setState({
+        categories: [{ id: 1, name: 'Groceries', type: 'expense', isSystem: true, createdAt: 1000 }],
+      } as any);
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const getSize = (label: string) => {
+      const node = renderer.root.findAllByType(Text).find((t: any) => {
+        const text = Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '');
+        return text === label;
+      });
+      return StyleSheet.flatten(node.props.style).fontSize;
+    };
+
+    const sizes100 = {
+      externalApi: getSize('External API'),
+      endpointLabel: getSize('Endpoint Base URL'),
+      visionNote: getSize('External mode needs no download.'),
+      categoryName: getSize('Groceries'),
+      aboutName: getSize('Silo'),
+    };
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ fontScale: 1.2 });
+    });
+
+    expect(getSize('External API')).toBeGreaterThan(sizes100.externalApi);
+    expect(getSize('Endpoint Base URL')).toBeGreaterThan(sizes100.endpointLabel);
+    expect(getSize('External mode needs no download.')).toBeGreaterThan(sizes100.visionNote);
+    expect(getSize('Groceries')).toBeGreaterThan(sizes100.categoryName);
+    expect(getSize('Silo')).toBeGreaterThan(sizes100.aboutName);
   });
 
   it('imports SettingsScreen without loading expo-notifications at startup when native module is missing (R2B-1)', () => {

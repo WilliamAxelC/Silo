@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import type { Wallet, WalletType } from '../features/transactions/types';
 import { formatDisplayCurrency } from '../features/transactions/amount';
+import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -29,6 +30,7 @@ interface Props {
 
 export const AccountPickerModal = ({ visible, title, wallets, selectedId, excludeId, onSelect, onClose, onManage }: Props) => {
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
   const options = wallets.filter((w) => w.isActive && w.id !== excludeId);
@@ -36,8 +38,15 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={[styles.sheet, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+        <TouchableOpacity
+          activeOpacity={1}
+          testID="account-picker-sheet"
+          style={[
+            styles.sheet,
+            { backgroundColor: theme.surface, paddingBottom: getBottomInsetPadding(insets.bottom, 18) },
+          ]}
+        >
+          <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(16) }]}>{title}</Text>
           <FlatList
             data={options}
             keyExtractor={(w) => String(w.id)}
@@ -55,10 +64,15 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
                   accessibilityLabel={`${item.name}, balance ${formatDisplayCurrency(item.balance, currencyCode, useThousands)}`}
                 >
                   <Ionicons name={WALLET_TYPE_META[item.type].icon} size={20} color={theme.primary} />
-                  <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                  <Text style={[styles.name, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
                     {item.name}
                   </Text>
-                  <Text style={[styles.balance, { color: item.balance < 0 ? theme.expense : theme.textMuted }]}>
+                  <Text
+                    style={[
+                      styles.balance,
+                      { color: item.balance < 0 ? theme.expense : theme.textMuted, fontSize: theme.scaleFont(13) },
+                    ]}
+                  >
                     {formatDisplayCurrency(item.balance, currencyCode, useThousands)}
                   </Text>
                   {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -66,7 +80,9 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
               );
             }}
             ListEmptyComponent={
-              <Text style={[styles.empty, { color: theme.textMuted }]}>No other account yet. Add one to move money between accounts.</Text>
+              <Text style={[styles.empty, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+                No other account yet. Add one to move money between accounts.
+              </Text>
             }
           />
           <TouchableOpacity
@@ -78,7 +94,9 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
             accessibilityRole="button"
           >
             <Ionicons name="add-circle-outline" size={18} color={theme.primary} />
-            <Text style={[styles.manageText, { color: theme.primary }]}>Add or edit accounts</Text>
+            <Text style={[styles.manageText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+              Add or edit accounts
+            </Text>
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>

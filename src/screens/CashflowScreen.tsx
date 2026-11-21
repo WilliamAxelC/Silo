@@ -33,6 +33,8 @@ import {
   type CalendarDayCell,
 } from '../features/transactions/periods';
 import { MonthlyCalendarView } from '../components/MonthlyCalendarView';
+import { WelcomeSheet } from '../components/WelcomeSheet';
+import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import type { Transaction, TransactionType } from '../features/transactions/types';
 import type { DailyTotal, SearchTransactionsOptions } from '../db/index';
@@ -101,6 +103,7 @@ export const CashflowScreen = () => {
   const error = useTransactionStore((state) => state.error);
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const queueItems = useReceiptQueueStore((s) => s.items);
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
@@ -216,6 +219,8 @@ export const CashflowScreen = () => {
   const dateFormat = useSettingsStore((state) => state.dateFormat);
   const monthStartDay = useSettingsStore((state) => state.monthStartDay);
   const weekStartDay = useSettingsStore((state) => state.weekStartDay);
+  const isSettingsLoaded = useSettingsStore((state) => state.isLoaded);
+  const hasCompletedOnboarding = useSettingsStore((state) => state.hasCompletedOnboarding);
   const locale = dateFormat || 'en-GB';
 
   const { currentMonthData, totalIncome, totalExpense, balance, periodBounds } = useMonthlySummary(currentDate);
@@ -365,23 +370,34 @@ export const CashflowScreen = () => {
   const renderSummaryCard = (incomeVal: number, expenseVal: number, balanceVal: number) => (
     <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.summaryCol}>
-        <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Income</Text>
-        <Text style={[styles.summaryValue, { color: theme.income }]} numberOfLines={1} adjustsFontSizeToFit>
+        <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Income</Text>
+        <Text
+          style={[styles.summaryValue, { color: theme.income, fontSize: theme.scaleFont(13) }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
           {formatDisplayCurrency(incomeVal || 0, currencyCode, useThousandsSeparator)}
         </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
       <View style={styles.summaryCol}>
-        <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Expense</Text>
-        <Text style={[styles.summaryValue, { color: theme.expense }]} numberOfLines={1} adjustsFontSizeToFit>
+        <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Expense</Text>
+        <Text
+          style={[styles.summaryValue, { color: theme.expense, fontSize: theme.scaleFont(13) }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
           {formatDisplayCurrency(expenseVal || 0, currencyCode, useThousandsSeparator)}
         </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
       <View style={styles.summaryCol}>
-        <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Balance</Text>
+        <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Balance</Text>
         <Text
-          style={[styles.summaryValue, { color: (balanceVal || 0) >= 0 ? theme.income : theme.expense }]}
+          style={[
+            styles.summaryValue,
+            { color: (balanceVal || 0) >= 0 ? theme.income : theme.expense, fontSize: theme.scaleFont(13) },
+          ]}
           numberOfLines={1}
           adjustsFontSizeToFit
         >
@@ -497,32 +513,45 @@ export const CashflowScreen = () => {
   const renderSearchSummaryHeader = () => (
     <View style={[styles.filterSummaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.filterSummaryTop}>
-        <Text style={[styles.filterSummaryCount, { color: theme.text }]}>
+        <Text style={[styles.filterSummaryCount, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
           {searchSummary.count} {searchSummary.count === 1 ? 'transaction' : 'transactions'}
         </Text>
         {isSearching ? (
-          <Text style={[styles.filterSummaryUpdating, { color: theme.textMuted }]}>Updating…</Text>
+          <Text style={[styles.filterSummaryUpdating, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+            Updating…
+          </Text>
         ) : null}
       </View>
       <View style={styles.filterSummaryRow}>
         <View style={styles.summaryCol}>
-          <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>In</Text>
-          <Text style={[styles.summaryValue, { color: theme.income }]} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>In</Text>
+          <Text
+            style={[styles.summaryValue, { color: theme.income, fontSize: theme.scaleFont(13) }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
             {formatDisplayCurrency(searchSummary.totalIn, currencyCode, useThousandsSeparator)}
           </Text>
         </View>
         <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
         <View style={styles.summaryCol}>
-          <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Out</Text>
-          <Text style={[styles.summaryValue, { color: theme.expense }]} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Out</Text>
+          <Text
+            style={[styles.summaryValue, { color: theme.expense, fontSize: theme.scaleFont(13) }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
             {formatDisplayCurrency(searchSummary.totalOut, currencyCode, useThousandsSeparator)}
           </Text>
         </View>
         <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
         <View style={styles.summaryCol}>
-          <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Net</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Net</Text>
           <Text
-            style={[styles.summaryValue, { color: searchSummary.net >= 0 ? theme.income : theme.expense }]}
+            style={[
+              styles.summaryValue,
+              { color: searchSummary.net >= 0 ? theme.income : theme.expense, fontSize: theme.scaleFont(13) },
+            ]}
             numberOfLines={1}
             adjustsFontSizeToFit
           >
@@ -531,7 +560,7 @@ export const CashflowScreen = () => {
         </View>
       </View>
       {isListTruncated && searchResults ? (
-        <Text style={[styles.filterSummaryTruncation, { color: theme.textMuted }]}>
+        <Text style={[styles.filterSummaryTruncation, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
           Showing first {searchResults.length} of {searchSummary.count} matches · totals cover all {searchSummary.count}
         </Text>
       ) : null}
@@ -563,12 +592,17 @@ export const CashflowScreen = () => {
           <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
         </View>
         <View style={styles.transactionDetails}>
-          <Text style={[styles.transactionTitle, { color: theme.text }]} numberOfLines={1}>{item.merchantName || 'Unknown'}</Text>
-          <Text style={[styles.transactionSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
+          <Text style={[styles.transactionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
+            {item.merchantName || 'Unknown'}
+          </Text>
+          <Text
+            style={[styles.transactionSubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}
+            numberOfLines={1}
+          >
             {subtitle}
           </Text>
         </View>
-        <Text style={[styles.transactionAmount, { color: tint }]}>
+        <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
           {isIncome ? '+' : ''}{amountText}
         </Text>
       </TouchableOpacity>
@@ -609,7 +643,7 @@ export const CashflowScreen = () => {
             size={16}
             color={viewMode === 'list' ? theme.onPrimary : theme.textMuted}
           />
-          <Text style={[styles.viewModeText, { color: viewMode === 'list' ? theme.onPrimary : theme.text }]}>
+          <Text style={[styles.viewModeText, { color: viewMode === 'list' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) }]}>
             List
           </Text>
         </TouchableOpacity>
@@ -628,7 +662,7 @@ export const CashflowScreen = () => {
             size={16}
             color={viewMode === 'calendar' ? theme.onPrimary : theme.textMuted}
           />
-          <Text style={[styles.viewModeText, { color: viewMode === 'calendar' ? theme.onPrimary : theme.text }]}>
+          <Text style={[styles.viewModeText, { color: viewMode === 'calendar' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) }]}>
             Calendar
           </Text>
         </TouchableOpacity>
@@ -640,7 +674,7 @@ export const CashflowScreen = () => {
           <View style={[styles.searchBarWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
             <TextInput
-              style={[styles.searchInput, { color: theme.text }]}
+              style={[styles.searchInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
               placeholder="Search merchant, note, or items..."
               placeholderTextColor={theme.textMuted}
               selectionColor={theme.primary}
@@ -685,7 +719,10 @@ export const CashflowScreen = () => {
               accessibilityLabel="Filter by type"
               accessibilityState={{ selected: Boolean(typeFilter) }}
             >
-              <Text style={[styles.filterChipText, { color: typeFilter ? theme.primary : theme.text }]} numberOfLines={1}>
+              <Text
+                style={[styles.filterChipText, { color: typeFilter ? theme.primary : theme.text, fontSize: theme.scaleFont(13) }]}
+                numberOfLines={1}
+              >
                 {typeChipLabel}
               </Text>
               <Ionicons name="chevron-down" size={14} color={typeFilter ? theme.primary : theme.textMuted} />
@@ -705,7 +742,10 @@ export const CashflowScreen = () => {
               accessibilityState={{ selected: walletFilterId != null }}
             >
               <Text
-                style={[styles.filterChipText, { color: walletFilterId != null ? theme.primary : theme.text }]}
+                style={[
+                  styles.filterChipText,
+                  { color: walletFilterId != null ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
+                ]}
                 numberOfLines={1}
               >
                 {accountChipLabel}
@@ -727,7 +767,10 @@ export const CashflowScreen = () => {
               accessibilityState={{ selected: Boolean(categoryFilter) }}
             >
               <Text
-                style={[styles.filterChipText, { color: categoryFilter ? theme.primary : theme.text }]}
+                style={[
+                  styles.filterChipText,
+                  { color: categoryFilter ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
+                ]}
                 numberOfLines={1}
               >
                 {categoryFilter ?? 'Category'}
@@ -754,7 +797,10 @@ export const CashflowScreen = () => {
                 color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
               />
               <Text
-                style={[styles.filterChipText, { color: dateFrom != null || dateTo != null ? theme.primary : theme.text }]}
+                style={[
+                  styles.filterChipText,
+                  { color: dateFrom != null || dateTo != null ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
+                ]}
                 numberOfLines={1}
               >
                 {dateRangeChipLabel}
@@ -774,7 +820,7 @@ export const CashflowScreen = () => {
                 accessibilityLabel="Clear filters"
               >
                 <Ionicons name="close-circle-outline" size={15} color={theme.textMuted} />
-                <Text style={[styles.filterChipText, { color: theme.textMuted }]}>Clear</Text>
+                <Text style={[styles.filterChipText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>Clear</Text>
               </TouchableOpacity>
             ) : null}
           </ScrollView>
@@ -789,7 +835,7 @@ export const CashflowScreen = () => {
           accessibilityLabel="Open Receipt Inbox"
         >
           <Ionicons name="receipt-outline" size={18} color={theme.primary} style={styles.errorBannerIcon} />
-          <Text style={[styles.errorBannerText, { color: theme.primary }]} numberOfLines={1}>
+          <Text style={[styles.errorBannerText, { color: theme.primary, fontSize: theme.scaleFont(12) }]} numberOfLines={1}>
             {queueReady > 0 ? `${queueReady} receipt${queueReady === 1 ? '' : 's'} ready to review` : 'Reading receipts…'}
             {queueReady > 0 && queueWaiting > 0 ? ` · ${queueWaiting} reading` : ''}
           </Text>
@@ -800,7 +846,7 @@ export const CashflowScreen = () => {
       {error ? (
         <View style={[styles.errorBanner, { backgroundColor: theme.expenseMuted, borderColor: theme.expense }]}>
           <Ionicons name="alert-circle-outline" size={18} color={theme.expense} style={styles.errorBannerIcon} />
-          <Text style={[styles.errorBannerText, { color: theme.expense }]} numberOfLines={2}>
+          <Text style={[styles.errorBannerText, { color: theme.expense, fontSize: theme.scaleFont(12) }]} numberOfLines={2}>
             {error}
           </Text>
           <TouchableOpacity
@@ -835,12 +881,18 @@ export const CashflowScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Jump to current month"
             >
-              <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+              <Text
+                style={[styles.monthText, { color: theme.text, fontSize: theme.scaleFont(16) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
                 {calendarMonthLabel}
               </Text>
               {!isCalendarCurrentMonth && (
                 <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                  <Text style={[styles.todayBadgeText, { color: theme.primary }]}>Today</Text>
+                  <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
+                    Today
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -875,7 +927,10 @@ export const CashflowScreen = () => {
             {selectedCalendarDate ? (
               <View style={styles.selectedDaySection}>
                 <View style={styles.selectedDayHeader}>
-                  <Text style={[styles.selectedDayTitle, { color: theme.text }]} numberOfLines={1}>
+                  <Text
+                    style={[styles.selectedDayTitle, { color: theme.text, fontSize: theme.scaleFont(13) }]}
+                    numberOfLines={1}
+                  >
                     {selectedDayFullLabel}
                   </Text>
                   <TouchableOpacity
@@ -885,7 +940,10 @@ export const CashflowScreen = () => {
                     accessibilityLabel={`Add on ${selectedDayShortLabel}`}
                   >
                     <Ionicons name="add" size={16} color={theme.primary} />
-                    <Text style={[styles.addOnDayBtnText, { color: theme.primary }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.addOnDayBtnText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}
+                      numberOfLines={1}
+                    >
                       Add on {selectedDayShortLabel}
                     </Text>
                   </TouchableOpacity>
@@ -897,7 +955,7 @@ export const CashflowScreen = () => {
                   </View>
                 ) : (
                   <View style={[styles.emptyDayCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                    <Text style={[styles.emptyDayText, { color: theme.textMuted }]}>
+                    <Text style={[styles.emptyDayText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
                       No transactions on {selectedDayShortLabel}.
                     </Text>
                   </View>
@@ -905,7 +963,7 @@ export const CashflowScreen = () => {
               </View>
             ) : (
               <View style={[styles.emptyDayCard, { marginHorizontal: 14, marginTop: 12, backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Text style={[styles.emptyDayText, { color: theme.textMuted }]}>
+                <Text style={[styles.emptyDayText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
                   Tap a day to view its transactions or add one.
                 </Text>
               </View>
@@ -922,7 +980,7 @@ export const CashflowScreen = () => {
           ListFooterComponent={
             isListTruncated ? (
               <View style={[styles.truncationFooter, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                <Text style={[styles.truncationFooterText, { color: theme.textMuted }]}>
+                <Text style={[styles.truncationFooterText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                   List capped at {searchResults.length} of {searchSummary.count} matching transactions. Narrow filters to view older matches.
                 </Text>
               </View>
@@ -933,10 +991,10 @@ export const CashflowScreen = () => {
           ListEmptyComponent={
             <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="search-outline" size={32} color={theme.textMuted} style={styles.emptyIcon} />
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>
+              <Text style={[styles.emptyTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
                 {isSearching ? 'Searching...' : 'No transactions found'}
               </Text>
-              <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
+              <Text style={[styles.emptySubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                 {isSearching
                   ? 'Looking up matching records...'
                   : searchQuery.trim()
@@ -961,12 +1019,14 @@ export const CashflowScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Jump to current month"
             >
-              <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={[styles.monthText, { color: theme.text, fontSize: theme.scaleFont(16) }]} numberOfLines={1} adjustsFontSizeToFit>
                 {periodLabel}
               </Text>
               {!isCurrentMonthNow && (
                 <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                  <Text style={[styles.todayBadgeText, { color: theme.primary }]}>Today</Text>
+                  <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
+                    Today
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -983,16 +1043,18 @@ export const CashflowScreen = () => {
             ListEmptyComponent={
               <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                 <Ionicons name="wallet-outline" size={32} color={theme.textMuted} style={styles.emptyIcon} />
-                <Text style={[styles.emptyTitle, { color: theme.text }]}>
+                <Text style={[styles.emptyTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
                   {monthStartDay === 1 ? 'No transactions this month' : 'No transactions in this period'}
                 </Text>
-                <Text style={[styles.emptySubtitle, { color: theme.textMuted }]}>
+                <Text style={[styles.emptySubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                   Tap + at the bottom to add your first transaction.
                 </Text>
               </View>
             }
             contentContainerStyle={styles.listContent}
-            renderSectionHeader={({ section: { title } }) => <Text style={[styles.sectionHeader, { color: theme.text }]}>{title}</Text>}
+            renderSectionHeader={({ section: { title } }) => (
+              <Text style={[styles.sectionHeader, { color: theme.text, fontSize: theme.scaleFont(12) }]}>{title}</Text>
+            )}
             renderItem={({ item }) => renderTransactionItem(item)}
           />
         </>
@@ -1013,10 +1075,18 @@ export const CashflowScreen = () => {
           <TouchableOpacity
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
-            style={[styles.sheetCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+            testID="cashflow-filter-sheet"
+            style={[
+              styles.sheetCard,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                paddingBottom: getBottomInsetPadding(insets.bottom, 16),
+              },
+            ]}
           >
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: theme.text }]}>
+              <Text style={[styles.sheetTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
                 {activeFilterSheet === 'type'
                   ? 'Filter by type'
                   : activeFilterSheet === 'account'
@@ -1054,7 +1124,12 @@ export const CashflowScreen = () => {
                       accessibilityLabel={`Type option ${opt.label}`}
                       accessibilityState={{ selected }}
                     >
-                      <Text style={[styles.sheetRowText, { color: selected ? theme.primary : theme.text }]}>
+                      <Text
+                        style={[
+                          styles.sheetRowText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                        ]}
+                      >
                         {opt.label}
                       </Text>
                       {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -1082,7 +1157,12 @@ export const CashflowScreen = () => {
                   accessibilityLabel="Account option All accounts"
                   accessibilityState={{ selected: walletFilterId == null }}
                 >
-                  <Text style={[styles.sheetRowText, { color: walletFilterId == null ? theme.primary : theme.text }]}>
+                  <Text
+                    style={[
+                      styles.sheetRowText,
+                      { color: walletFilterId == null ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                    ]}
+                  >
                     All accounts
                   </Text>
                   {walletFilterId == null ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -1107,7 +1187,12 @@ export const CashflowScreen = () => {
                       accessibilityLabel={`Account option ${w.name}`}
                       accessibilityState={{ selected }}
                     >
-                      <Text style={[styles.sheetRowText, { color: selected ? theme.primary : theme.text }]}>
+                      <Text
+                        style={[
+                          styles.sheetRowText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                        ]}
+                      >
                         {w.name}
                         {!w.isActive ? ' (archived)' : ''}
                       </Text>
@@ -1136,7 +1221,12 @@ export const CashflowScreen = () => {
                   accessibilityLabel="Category option All categories"
                   accessibilityState={{ selected: categoryFilter == null }}
                 >
-                  <Text style={[styles.sheetRowText, { color: categoryFilter == null ? theme.primary : theme.text }]}>
+                  <Text
+                    style={[
+                      styles.sheetRowText,
+                      { color: categoryFilter == null ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                    ]}
+                  >
                     All categories
                   </Text>
                   {categoryFilter == null ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -1161,7 +1251,12 @@ export const CashflowScreen = () => {
                       accessibilityLabel={`Category option ${name}`}
                       accessibilityState={{ selected }}
                     >
-                      <Text style={[styles.sheetRowText, { color: selected ? theme.primary : theme.text }]}>
+                      <Text
+                        style={[
+                          styles.sheetRowText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                        ]}
+                      >
                         {name}
                       </Text>
                       {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -1189,7 +1284,10 @@ export const CashflowScreen = () => {
                   <Text
                     style={[
                       styles.sheetRowText,
-                      { color: dateFrom == null && dateTo == null ? theme.primary : theme.text },
+                      {
+                        color: dateFrom == null && dateTo == null ? theme.primary : theme.text,
+                        fontSize: theme.scaleFont(14),
+                      },
                     ]}
                   >
                     Any time
@@ -1215,7 +1313,12 @@ export const CashflowScreen = () => {
                       accessibilityLabel={`Date option ${preset.label}`}
                       accessibilityState={{ selected }}
                     >
-                      <Text style={[styles.sheetRowText, { color: selected ? theme.primary : theme.text }]}>
+                      <Text
+                        style={[
+                          styles.sheetRowText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
+                        ]}
+                      >
                         {preset.label}
                       </Text>
                       {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
@@ -1223,7 +1326,9 @@ export const CashflowScreen = () => {
                   );
                 })}
 
-                <Text style={[styles.customDateLabel, { color: theme.textMuted }]}>Custom range</Text>
+                <Text style={[styles.customDateLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                  Custom range
+                </Text>
                 <View style={styles.customDateRow}>
                   <TouchableOpacity
                     style={[styles.customDateBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
@@ -1231,8 +1336,10 @@ export const CashflowScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel="Pick start date"
                   >
-                    <Text style={[styles.customDateHint, { color: theme.textMuted }]}>From</Text>
-                    <Text style={[styles.customDateValue, { color: theme.text }]}>
+                    <Text style={[styles.customDateHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                      From
+                    </Text>
+                    <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
                       {dateFrom != null
                         ? formatLocaleDate(dateFrom, locale, { day: 'numeric', month: 'short', year: 'numeric' })
                         : 'Any'}
@@ -1244,8 +1351,10 @@ export const CashflowScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel="Pick end date"
                   >
-                    <Text style={[styles.customDateHint, { color: theme.textMuted }]}>To</Text>
-                    <Text style={[styles.customDateValue, { color: theme.text }]}>
+                    <Text style={[styles.customDateHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                      To
+                    </Text>
+                    <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
                       {dateTo != null
                         ? formatLocaleDate(dateTo, locale, { day: 'numeric', month: 'short', year: 'numeric' })
                         : 'Any'}
@@ -1270,6 +1379,8 @@ export const CashflowScreen = () => {
           onChange={handleCustomDateChange}
         />
       ) : null}
+
+      <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding} />
     </SafeAreaView>
   );
 };

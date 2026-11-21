@@ -19,6 +19,8 @@ export type RootStackParamList = {
   AddTransactionStack: {
     transactionId?: number;
     receiptQueueId?: number;
+    reviewBatchIndex?: number;
+    reviewBatchTotal?: number;
     duplicateFromId?: number;
     /** Optional epoch ms timestamp to prefill the transaction date (e.g. from Calendar view). */
     initialDate?: number;

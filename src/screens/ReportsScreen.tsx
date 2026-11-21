@@ -175,12 +175,14 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Jump to current month"
           >
-            <Text style={[styles.monthText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>
+            <Text style={[styles.monthText, { color: theme.text, fontSize: theme.scaleFont(17) }]} numberOfLines={1} adjustsFontSizeToFit>
               {periodLabel}
             </Text>
             {!isCurrentMonthNow && (
               <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                <Text style={[styles.todayBadgeText, { color: theme.primary }]}>Today</Text>
+                <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
+                  Today
+                </Text>
               </View>
             )}
           </TouchableOpacity>
@@ -213,7 +215,12 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Show expense reports"
           >
-            <Text style={[styles.toggleText, { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted }]}>
+            <Text
+              style={[
+                styles.toggleText,
+                { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
+              ]}
+            >
               Expenses
             </Text>
           </TouchableOpacity>
@@ -234,7 +241,12 @@ export const ReportsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Show income reports"
           >
-            <Text style={[styles.toggleText, { color: reportType === 'income' ? theme.onPrimary : theme.textMuted }]}>
+            <Text
+              style={[
+                styles.toggleText,
+                { color: reportType === 'income' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
+              ]}
+            >
               Income
             </Text>
           </TouchableOpacity>
@@ -246,22 +258,22 @@ export const ReportsScreen = () => {
         {/* Month Summary KPI Bar */}
         <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.summaryCol}>
-            <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Income</Text>
-            <Text style={[styles.summaryValue, { color: theme.income }]}>
+            <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Income</Text>
+            <Text style={[styles.summaryValue, { color: theme.income, fontSize: theme.scaleFont(13) }]}>
               {formatDisplayCurrency(totalIncome || 0, currencyCode, useThousandsSeparator)}
             </Text>
           </View>
           <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
           <View style={styles.summaryCol}>
-            <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Expense</Text>
-            <Text style={[styles.summaryValue, { color: theme.expense }]}>
+            <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Expense</Text>
+            <Text style={[styles.summaryValue, { color: theme.expense, fontSize: theme.scaleFont(13) }]}>
               {formatDisplayCurrency(totalExpense || 0, currencyCode, useThousandsSeparator)}
             </Text>
           </View>
           <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
           <View style={styles.summaryCol}>
-            <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Net Flow</Text>
-            <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense }]}>
+            <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Net Flow</Text>
+            <Text style={[styles.summaryValue, { color: (balance || 0) >= 0 ? theme.income : theme.expense, fontSize: theme.scaleFont(13) }]}>
               {formatDisplayCurrency(balance || 0, currencyCode, useThousandsSeparator)}
             </Text>
           </View>
@@ -277,20 +289,22 @@ export const ReportsScreen = () => {
               data={chartData}
               backgroundColor={theme.background}
               textColor="#ffffff"
-              textSize={10}
+              textSize={theme.scaleFont(10)}
               fontWeight="700"
               isAnimated
               animationDuration={600}
               centerLabelComponent={() => (
                 <View style={{ justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
                   <Text
-                    style={{ fontSize: 16, color: theme.text, fontWeight: '800' }}
+                    style={{ fontSize: theme.scaleFont(16), color: theme.text, fontWeight: '800' }}
                     adjustsFontSizeToFit
                     numberOfLines={1}
                   >
                     {formatDisplayCurrency(totalForType || 0, currencyCode, useThousandsSeparator)}
                   </Text>
-                  <Text style={{ fontSize: 11, color: theme.textMuted, fontWeight: '600', marginTop: 2 }}>
+                  <Text
+                    style={{ fontSize: theme.scaleFont(11), color: theme.textMuted, fontWeight: '600', marginTop: 2 }}
+                  >
                     Total {reportType === 'expense' ? 'Expense' : 'Income'}
                   </Text>
                 </View>
@@ -299,7 +313,7 @@ export const ReportsScreen = () => {
           ) : (
             <View style={[styles.emptyChartCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} style={{ marginBottom: 8 }} />
-              <Text style={{ color: theme.textMuted, fontSize: 13, fontWeight: '600' }}>
+              <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13), fontWeight: '600' }}>
                 No {reportType} records for {compactPeriodLabel}.
               </Text>
             </View>
@@ -313,7 +327,13 @@ export const ReportsScreen = () => {
               <Ionicons name="sparkles" size={18} color={theme.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontSize: 13, lineHeight: 18 }}>
+              <Text
+                style={{
+                  color: theme.text,
+                  fontSize: theme.scaleFont(13),
+                  lineHeight: Math.round(theme.scaleFont(18)),
+                }}
+              >
                 Top {reportType === 'expense' ? 'spending' : 'income'} was{' '}
                 <Text style={{ fontWeight: '800' }}>{topCategory.category}</Text> ({topCategory.text} of total).
               </Text>
@@ -323,7 +343,7 @@ export const ReportsScreen = () => {
 
         {/* Collapsible Category Breakdown Drill-down */}
         <View style={styles.legendContainer}>
-          <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted }]}>
+          <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
             CATEGORY BREAKDOWN ({chartData.length})
           </Text>
 
@@ -348,12 +368,12 @@ export const ReportsScreen = () => {
                   <View style={styles.legendHeader}>
                     <View style={styles.legendHeaderLeft}>
                       <View style={[styles.colorDot, { backgroundColor: item.color }]} />
-                      <Text style={[styles.legendCategory, { color: theme.text }]} numberOfLines={1}>
+                      <Text style={[styles.legendCategory, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
                         {item.category}
                       </Text>
                     </View>
                     <View style={styles.legendHeaderRight}>
-                      <Text style={[styles.legendAmount, { color: theme.text }]}>
+                      <Text style={[styles.legendAmount, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
                         {formatDisplayCurrency(item.value || 0, currencyCode, useThousandsSeparator)}
                       </Text>
                       <Ionicons
@@ -374,14 +394,18 @@ export const ReportsScreen = () => {
                         ]}
                       />
                     </View>
-                    <Text style={[styles.percentageText, { color: theme.textMuted }]}>{item.text}</Text>
+                    <Text style={[styles.percentageText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                      {item.text}
+                    </Text>
                   </View>
                 </TouchableOpacity>
 
                 {/* Nested Transaction List */}
                 {isExpanded && (
                   <View style={[styles.transactionsList, { borderTopColor: theme.border }]}>
-                    <Text style={[styles.nestedTransactionsHeader, { color: theme.textMuted }]}>
+                    <Text
+                      style={[styles.nestedTransactionsHeader, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}
+                    >
                       {item.items.length} {item.items.length === 1 ? 'transaction' : 'transactions'}
                     </Text>
                     {item.items.map((tx, txIndex) => (
@@ -397,10 +421,10 @@ export const ReportsScreen = () => {
                         ]}
                       >
                         <View style={{ flex: 1, marginRight: 8 }}>
-                          <Text style={[styles.txMerchant, { color: theme.text }]} numberOfLines={1}>
+                          <Text style={[styles.txMerchant, { color: theme.text, fontSize: theme.scaleFont(13) }]} numberOfLines={1}>
                             {tx.merchantName || 'Unnamed'}
                           </Text>
-                          <Text style={[styles.txDate, { color: theme.textMuted }]}>
+                          <Text style={[styles.txDate, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                             {formatLocaleDate(tx.date, locale, {
                               day: 'numeric',
                               month: 'short',
@@ -412,7 +436,10 @@ export const ReportsScreen = () => {
                         <Text
                           style={[
                             styles.txAmount,
-                            { color: reportType === 'income' ? theme.income : theme.text },
+                            {
+                              color: reportType === 'income' ? theme.income : theme.text,
+                              fontSize: theme.scaleFont(13),
+                            },
                           ]}
                         >
                           {reportType === 'income' ? '+' : ''}
@@ -516,7 +543,7 @@ const styles = StyleSheet.create({
   progressRow: { flexDirection: 'row', alignItems: 'center' },
   progressBarBackground: { flex: 1, height: 6, borderRadius: 3, marginRight: 10, overflow: 'hidden' },
   progressBarFill: { height: '100%', borderRadius: 3 },
-  percentageText: { fontSize: 12, fontWeight: '700', width: 36, textAlign: 'right' },
+  percentageText: { fontSize: 12, fontWeight: '700', minWidth: 36, textAlign: 'right' },
   transactionsList: { borderTopWidth: 1, paddingHorizontal: 14, paddingBottom: 10, paddingTop: 8 },
   nestedTransactionsHeader: { fontSize: 11, fontWeight: '700', marginBottom: 6 },
   transactionItem: {

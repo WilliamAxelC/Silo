@@ -518,6 +518,139 @@ describe('AI Agent & Context Engine', () => {
         expect(callArg.systemPrompt).toContain('Indonesian receipt OCR text');
         expect(result?.confidence).toBeDefined();
       });
+
+      it('filters SUBTOTAL/TAX/CASH/CHANGE/OCR-typo lines from LLM items and downgrades confidence on garbled merchant (F-07)', async () => {
+        const { getOcrEngine } = require('../../ocr/index');
+        (getOcrEngine as jest.Mock).mockReturnValueOnce({
+          processImage: jest.fn(async () => ({
+            success: true,
+            rawText:
+              'J.STB PROMO 17500\nKopi Susu  25.000\nRoti Bakar  20.000\nSUS T8TAL  45.000\nPB1 10%  4.500\nTOTAL  49.500\nTUNAI  50.000\nKEMBALIAN  500',
+            rows: [
+              'J.STB PROMO 17500',
+              'Kopi Susu  25.000',
+              'Roti Bakar  20.000',
+              'SUS T8TAL  45.000',
+              'PB1 10%  4.500',
+              'TOTAL  49.500',
+              'TUNAI  50.000',
+              'KEMBALIAN  500',
+            ],
+            extractedTotal: 49500,
+            extractedMerchant: undefined,
+          })),
+        });
+
+        mockGenService.startGeneration.mockResolvedValueOnce(
+          JSON.stringify({
+            merchant: 'J.STB PROMO 17500',
+            date: null,
+            total: 49500,
+            items: [
+              { name: 'Kopi Susu', qty: 1, price: 25000 },
+              { name: 'Roti Bakar', qty: 1, price: 20000 },
+              { name: 'SUS T8TAL', qty: 1, price: 45000 },
+              { name: 'PB1 10%', qty: 1, price: 4500 },
+              { name: 'TUNAI', qty: 1, price: 50000 },
+              { name: 'KEMBALIAN', qty: 1, price: 500 },
+            ],
+          }),
+        );
+
+        const result = await analyzeReceiptImage('file:///path/to/garbled.jpg');
+        expect(result).toBeDefined();
+        expect(result?.merchantName).toBeUndefined();
+        expect(result?.lineItemsText).toBe('Kopi Susu | 25000\nRoti Bakar | 20000');
+        expect(result?.confidence).not.toBe('high');
+      });
+
+      it('preserves legitimate items containing keywords, pipe names, and 4-digit branch merchants with high confidence (R3A-01, R3A-02)', async () => {
+        const { getOcrEngine } = require('../../ocr/index');
+        const rows = [
+          'ALFAMART 1024',
+          'Cash Back Burger  45.000',
+          'Potongan Ayam  22.000',
+          'Paket Hemat  35.000',
+          'Fish | Chips  50.000',
+          'Kopi Tunas  18.000',
+          'Nasi Bajak  30.000',
+          'TOTAL  200.000',
+        ];
+        (getOcrEngine as jest.Mock).mockReturnValueOnce({
+          processImage: jest.fn(async () => ({
+            success: true,
+            rawText: rows.join('\n'),
+            rows,
+            extractedTotal: 200000,
+            extractedMerchant: 'ALFAMART 1024',
+          })),
+        });
+
+        mockGenService.startGeneration.mockResolvedValueOnce(
+          JSON.stringify({
+            merchant: 'ALFAMART 1024',
+            date: null,
+            total: 200000,
+            items: [
+              { name: 'Cash Back Burger', qty: 1, price: 45000 },
+              { name: 'Potongan Ayam', qty: 1, price: 22000 },
+              { name: 'Paket Hemat', qty: 1, price: 35000 },
+              { name: 'Fish | Chips', qty: 1, price: 50000 },
+              { name: 'Kopi Tunas', qty: 1, price: 18000 },
+              { name: 'Nasi Bajak', qty: 1, price: 30000 },
+            ],
+          }),
+        );
+
+        const result = await analyzeReceiptImage('file:///path/to/real-items.jpg');
+        expect(result?.merchantName).toBe('ALFAMART 1024');
+        expect(result?.lineItemsText).toContain('Cash Back Burger | 45000');
+        expect(result?.lineItemsText).toContain('Potongan Ayam | 22000');
+        expect(result?.lineItemsText).toContain('Paket Hemat | 35000');
+        expect(result?.lineItemsText).toContain('Fish \\| Chips | 50000');
+        expect(result?.lineItemsText).toContain('Kopi Tunas | 18000');
+        expect(result?.lineItemsText).toContain('Nasi Bajak | 30000');
+        expect(result?.confidence).toBe('high');
+      });
+
+      it('reconciles confidence as high on 15-item minimarket receipts in Fast OCR mode without 10-item truncation (R3A-07)', async () => {
+        (useSettingsStore.getState as jest.Mock).mockReturnValue({
+          aiInferenceMode: 'local',
+          receiptReadingMode: 'ocr',
+          externalApiUrl: '',
+          externalApiModel: '',
+        });
+        const store = useAIStore.getState();
+        store.provisioning.status = 'not-installed';
+        store.runtimeReady = false;
+        store.runtime.modelLoaded = false;
+        (isActiveModelInstalled as jest.Mock).mockResolvedValueOnce(false);
+
+        const { parseReceiptTextHeuristic } = require('../../ocr/MlKitEngine');
+        const rows = [
+          'ALFAMART 1024',
+          ...Array.from({ length: 15 }, (_, idx) => `1x Snack Pack ${idx + 1}  10.000`),
+          'TOTAL BELANJA  150.000',
+          'TUNAI  200.000',
+          'KEMBALIAN  50.000',
+        ];
+        const parsed = parseReceiptTextHeuristic(rows.join('\n'));
+        const { getOcrEngine } = require('../../ocr/index');
+        (getOcrEngine as jest.Mock).mockReturnValueOnce({
+          processImage: jest.fn(async () => ({
+            success: true,
+            rawText: rows.join('\n'),
+            rows,
+            ...parsed,
+          })),
+        });
+
+        const result = await analyzeReceiptImage('file:///path/to/long-minimarket.jpg');
+        expect(result?.merchantName).toBe('ALFAMART 1024');
+        expect(result?.totalAmount).toBe(150000);
+        expect(result?.lineItemsText?.split('\n')).toHaveLength(15);
+        expect(result?.confidence).toBe('high');
+      });
     });
   });
 });

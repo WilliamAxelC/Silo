@@ -151,6 +151,7 @@ export const DEFAULT_APP_SETTINGS = {
   dailyReminderTime: '20:00',
   monthStartDay: 1,
   weekStartDay: 'monday',
+  hasCompletedOnboarding: false,
 } as const;
 
 export const APP_SETTING_KEYS = {
@@ -175,4 +176,5 @@ export const APP_SETTING_KEYS = {
   dailyReminderTime: 'dailyReminderTime',
   monthStartDay: 'monthStartDay',
   weekStartDay: 'weekStartDay',
+  hasCompletedOnboarding: 'hasCompletedOnboarding',
 } as const;

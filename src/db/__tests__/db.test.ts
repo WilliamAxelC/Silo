@@ -142,7 +142,7 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(12);
+      expect(versionRow?.user_version).toBe(13);
 
       const templatesTable = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
@@ -151,8 +151,9 @@ describe('Database Layer and SQLite Operations', () => {
     });
 
     it('migrates an existing v11 database to v12 by adding transaction_templates without losing data', () => {
-      // Simulate a v11 database that predates transaction_templates
+      // Simulate a v11 database that predates transaction_templates & onboarding flag
       testDb.execSync('DROP TABLE IF EXISTS transaction_templates;');
+      testDb.execSync(`DELETE FROM app_settings WHERE key = 'hasCompletedOnboarding';`);
       testDb.runSync(
         `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?, ?);`,
         [500, 1, 'Legacy Entry', -15000, 'expense', 1710000000000]
@@ -161,7 +162,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(12);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(13);
       const tbl = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
       );
@@ -170,6 +171,16 @@ describe('Database Layer and SQLite Operations', () => {
         'SELECT merchant_name FROM transactions WHERE id = 500;'
       );
       expect(existing?.merchant_name).toBe('Legacy Entry');
+
+      // v13 marks onboarding completed automatically for upgraded DBs with existing transactions
+      const onboardingRow = testDb.getFirstSync<{ value: string }>(
+        `SELECT value FROM app_settings WHERE key = 'hasCompletedOnboarding';`
+      );
+      expect(onboardingRow?.value).toBe('true');
+
+      // v13 adds image_hash column on receipt_queue
+      const queueCols = testDb.getAllSync<{ name: string }>('PRAGMA table_info(receipt_queue);');
+      expect(queueCols.some((c) => c.name === 'image_hash')).toBe(true);
     });
 
     it('skips migrations, seeding, and view recreation on steady-state launch when user_version is current', () => {

@@ -4,13 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
+import type { ReceiptLineItemDraft } from '../features/transactions/lineItems';
 
-export type ReceiptLineItemDraft = {
-  id: string;
-  name: string;
-  price: string;
-  note: string;
-};
+export type { ReceiptLineItemDraft };
 
 interface ReceiptItemsEditorProps {
   lineItems: ReceiptLineItemDraft[];
@@ -41,10 +37,14 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
       <View style={styles.receiptHeaderRow}>
         <View style={styles.headerLeft}>
           <Ionicons name="receipt-outline" size={16} color={theme.primary} />
-          <Text style={[styles.receiptHeaderTitle, { color: theme.text }]}>Itemized Breakdown</Text>
+          <Text style={[styles.receiptHeaderTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+            Itemized Breakdown
+          </Text>
           {lineItems.length > 0 && (
             <View style={[styles.countBadge, { backgroundColor: theme.primaryMuted }]}>
-              <Text style={[styles.countBadgeText, { color: theme.primary }]}>{lineItems.length}</Text>
+              <Text style={[styles.countBadgeText, { color: theme.primary, fontSize: theme.scaleFont(11) }]}>
+                {lineItems.length}
+              </Text>
             </View>
           )}
         </View>
@@ -56,7 +56,9 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           <Ionicons name="add" size={16} color={theme.primary} />
-          <Text style={[styles.inlineAddButtonText, { color: theme.primary }]}>Add Item</Text>
+          <Text style={[styles.inlineAddButtonText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>
+            Add Item
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -68,7 +70,9 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
           accessibilityLabel="Add itemized lines"
         >
           <Ionicons name="receipt-outline" size={18} color={theme.textMuted} />
-          <Text style={[styles.emptyReceiptText, { color: theme.textMuted }]}>No items added yet. Tap to add line items.</Text>
+          <Text style={[styles.emptyReceiptText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+            No items added yet. Tap to add line items.
+          </Text>
         </TouchableOpacity>
       ) : (
         <>
@@ -79,19 +83,31 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
             >
               <View style={styles.receiptRowTop}>
                 <View style={[styles.itemNumberBadge, { backgroundColor: theme.background }]}>
-                  <Text style={[styles.itemNumberText, { color: theme.textMuted }]}>#{index + 1}</Text>
+                  <Text style={[styles.itemNumberText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+                    #{index + 1}
+                  </Text>
                 </View>
                 <TextInput
-                  style={[styles.receiptNameInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                  style={[
+                    styles.receiptNameInput,
+                    {
+                      color: theme.text,
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                      fontSize: theme.scaleFont(13),
+                    },
+                  ]}
                   value={item.name}
                   onChangeText={(value) => onUpdateRow(item.id, 'name', value)}
                   placeholder="Item name"
                   placeholderTextColor={theme.textMuted}
                 />
                 <View style={[styles.receiptPriceBox, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                  <Text style={[styles.receiptPricePrefix, { color: theme.textMuted }]}>{currencyCode}</Text>
+                  <Text style={[styles.receiptPricePrefix, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                    {currencyCode}
+                  </Text>
                   <TextInput
-                    style={[styles.receiptPriceInput, { color: theme.text }]}
+                    style={[styles.receiptPriceInput, { color: theme.text, fontSize: theme.scaleFont(13) }]}
                     value={item.price}
                     onChangeText={(value) => onUpdateRow(item.id, 'price', value)}
                     placeholder="0"
@@ -109,7 +125,15 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
                 </TouchableOpacity>
               </View>
               <TextInput
-                style={[styles.receiptNoteInput, { color: theme.text, borderTopColor: theme.border, backgroundColor: theme.surface }]}
+                style={[
+                  styles.receiptNoteInput,
+                  {
+                    color: theme.text,
+                    borderTopColor: theme.border,
+                    backgroundColor: theme.surface,
+                    fontSize: theme.scaleFont(12),
+                  },
+                ]}
                 value={item.note}
                 onChangeText={(value) => onUpdateRow(item.id, 'note', value)}
                 placeholder="Item notes / quantity (optional)"
@@ -120,8 +144,10 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
 
           {/* Subtotal Summary Bar */}
           <View style={[styles.totalBar, { backgroundColor: theme.background, borderColor: theme.border }]}>
-            <Text style={[styles.totalLabel, { color: theme.textMuted }]}>Items Subtotal ({lineItems.length}):</Text>
-            <Text style={[styles.totalValue, { color: theme.primary }]}>
+            <Text style={[styles.totalLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+              Items Subtotal ({lineItems.length}):
+            </Text>
+            <Text style={[styles.totalValue, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>
               {formatDisplayCurrency(itemsTotal, currencyCode, useThousandsSeparator)}
             </Text>
           </View>

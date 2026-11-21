@@ -327,4 +327,25 @@ describe('useSettingsStore', () => {
       expect(state.weekStartDay).toBe('sunday');
     });
   });
+
+  describe('First-launch onboarding flag (F-14)', () => {
+    it('persists hasCompletedOnboarding and restores it from app_settings rows', async () => {
+      (db.insert as jest.Mock).mockClear();
+      await useSettingsStore.getState().setHasCompletedOnboarding(true);
+      expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(true);
+      expect(db.insert).toHaveBeenCalled();
+
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => [{ key: 'hasCompletedOnboarding', value: 'false' }]),
+      });
+      await useSettingsStore.getState().loadSettings();
+      expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(false);
+
+      (db.select as jest.Mock).mockReturnValueOnce({
+        from: jest.fn(() => [{ key: 'hasCompletedOnboarding', value: 'true' }]),
+      });
+      await useSettingsStore.getState().loadSettings();
+      expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(true);
+    });
+  });
 });

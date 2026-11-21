@@ -108,6 +108,77 @@ export function setRecurringRuleActive(id: number, active: boolean) {
   expoDb.runSync('UPDATE recurring_rules SET is_active = ? WHERE id = ?;', [active ? 1 : 0, id]);
 }
 
+export function updateRecurringRule(
+  id: number,
+  template: RecurringTemplate,
+  frequency: RecurringFrequency,
+) {
+  const { merchantName, totalAmount, type, category, note, lineItemsText, walletId, toWalletId } =
+    template;
+  expoDb.runSync('UPDATE recurring_rules SET template_json = ?, frequency = ? WHERE id = ?;', [
+    JSON.stringify({
+      merchantName,
+      totalAmount,
+      type,
+      category,
+      note,
+      lineItemsText,
+      walletId,
+      toWalletId,
+    }),
+    frequency,
+    id,
+  ]);
+}
+
+/**
+ * Finds the recurring rule associated with an existing transaction by matching its template fields
+ * and checking whether the transaction's date matches the rule's start date or a materialized occurrence.
+ */
+export function findRecurringRuleForTransaction(tx: {
+  merchantName?: string;
+  totalAmount?: number;
+  type?: string;
+  category?: string;
+  date?: number;
+  walletId?: number;
+  toWalletId?: number | null;
+}): RecurringRule | null {
+  let rules: RecurringRule[];
+  try {
+    rules = listRecurringRules();
+  } catch {
+    return null;
+  }
+
+  const txMerchant = (tx.merchantName ?? '').trim().toLowerCase();
+  const txCategory = (tx.category ?? '').trim().toLowerCase();
+  const txAmount = tx.totalAmount ?? 0;
+  const txType = tx.type ?? 'expense';
+  const txDate = typeof tx.date === 'number' && Number.isFinite(tx.date) ? tx.date : null;
+
+  for (const rule of rules) {
+    const tpl = rule.template;
+    if ((tpl.merchantName ?? '').trim().toLowerCase() !== txMerchant) continue;
+    if (tpl.type !== txType) continue;
+    if (tpl.totalAmount !== txAmount) continue;
+    if (txType !== 'transfer' && (tpl.category ?? '').trim().toLowerCase() !== txCategory) continue;
+    if (tpl.walletId != null && tx.walletId != null && tpl.walletId !== tx.walletId) continue;
+
+    if (txDate !== null) {
+      if (rule.startDate === txDate) return rule;
+      const maxCheck = Math.min(Math.max(rule.occurrences, 1), 200);
+      for (let n = 0; n < maxCheck; n++) {
+        if (occurrenceDate(rule.startDate, rule.frequency, n) === txDate) {
+          return rule;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 /** Stops future occurrences; transactions already created stay. */
 export function deleteRecurringRule(id: number) {
   expoDb.runSync('DELETE FROM recurring_rules WHERE id = ?;', [id]);

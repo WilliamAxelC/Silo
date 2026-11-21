@@ -37,6 +37,7 @@ interface SettingsState extends AppSettings {
   setDailyReminderTime: (time: string) => Promise<void>;
   setMonthStartDay: (day: number) => Promise<void>;
   setWeekStartDay: (day: WeekStartDay) => Promise<void>;
+  setHasCompletedOnboarding: (completed: boolean) => Promise<void>;
 }
 
 function deriveIsDarkMode(themeMode: ThemeMode): boolean {
@@ -229,6 +230,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setWeekStartDay: async (weekStartDay) => {
     await saveSetting('weekStartDay', weekStartDay);
     set({ weekStartDay });
+  },
+
+  setHasCompletedOnboarding: async (hasCompletedOnboarding) => {
+    await saveSetting('hasCompletedOnboarding', hasCompletedOnboarding);
+    set({ hasCompletedOnboarding });
   },
 }));
 

@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 12;
+const DB_SCHEMA_VERSION = 13;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -162,6 +162,7 @@ export function createReceiptQueueTable(sqliteDb: typeof expoDb = expoDb) {
     CREATE TABLE IF NOT EXISTS receipt_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       image_uri TEXT NOT NULL,
+      image_hash TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       result_json TEXT,
       error TEXT,
@@ -390,6 +391,18 @@ function migrateToVersion10(sqliteDb: typeof expoDb = expoDb) {
 function migrateToVersion12(sqliteDb: typeof expoDb = expoDb) {
   createTransactionTemplatesTable(sqliteDb);
   sqliteDb.execSync('CREATE INDEX IF NOT EXISTS idx_transactions_to_wallet ON transactions(to_wallet_id);');
+}
+
+function migrateToVersion13(sqliteDb: typeof expoDb = expoDb) {
+  if (!hasColumn('receipt_queue', 'image_hash', sqliteDb)) {
+    sqliteDb.execSync('ALTER TABLE receipt_queue ADD COLUMN image_hash TEXT;');
+  }
+  sqliteDb.execSync('CREATE INDEX IF NOT EXISTS idx_receipt_queue_hash ON receipt_queue(image_hash);');
+  // Existing installations that already have transactions should not be shown first-launch onboarding.
+  const existingTxCount = sqliteDb.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM transactions;');
+  if ((existingTxCount?.n ?? 0) > 0) {
+    sqliteDb.runSync(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('hasCompletedOnboarding', 'true');`);
+  }
 }
 
 export function rebuildFtsIndex(sqliteDb: typeof expoDb = expoDb) {
@@ -790,6 +803,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 12) {
     migrateToVersion12(sqliteDb);
+  }
+
+  if (currentVersion < 13) {
+    migrateToVersion13(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

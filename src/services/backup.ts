@@ -3,6 +3,27 @@ import { backupDatabaseAsync, openDatabaseAsync } from 'expo-sqlite';
 
 import { expoDb, rebuildFtsIndex, runMigrations } from '../db/index';
 
+/**
+ * MIME types accepted when picking a Silo SQLite backup file (.db / .sqlite / .silo).
+ * Excludes images/media so Android DocumentsUI filters out receipt photos.
+ */
+export const BACKUP_PICKER_MIME_TYPES: string[] = [
+  'application/octet-stream',
+  'application/x-sqlite3',
+  'application/vnd.sqlite3',
+];
+
+const NON_BACKUP_MEDIA_EXT_RE = /\.(?:jpe?g|png|gif|webp|heic|heif|bmp|svg|mp4|mov|avi|mkv|mp3|wav|pdf|csv|txt)$/i;
+
+/**
+ * Rejects obvious non-backup file extensions (such as receipt photos) in case a third-party
+ * Android file manager ignores the DocumentPicker MIME filter.
+ */
+export function isLikelyBackupFile(fileName?: string | null): boolean {
+  if (!fileName || !fileName.trim()) return true;
+  return !NON_BACKUP_MEDIA_EXT_RE.test(fileName.trim());
+}
+
 // Restored in this order so foreign keys always point at rows that already exist.
 const RESTORE_TABLES = [
   'wallets',
@@ -29,15 +50,25 @@ export async function createBackupFile(now = new Date()): Promise<string> {
   const dir = `${FileSystem.cacheDirectory ?? ''}backups/`;
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => undefined);
   const fileName = `silo-backup-${now.toISOString().slice(0, 10)}.db`;
-  await FileSystem.deleteAsync(`${dir}${fileName}`, { idempotent: true });
+  const targetUri = `${dir}${fileName}`;
+  await FileSystem.deleteAsync(targetUri, { idempotent: true });
 
   const dest = await openDatabaseAsync(fileName, undefined, plainPath(dir));
+  let failed = false;
   try {
     await backupDatabaseAsync({ sourceDatabase: expoDb, destDatabase: dest });
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await dest.closeAsync();
+    await dest.closeAsync().catch(() => undefined);
+    if (failed) {
+      await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
+      await FileSystem.deleteAsync(`${targetUri}-wal`, { idempotent: true }).catch(() => undefined);
+      await FileSystem.deleteAsync(`${targetUri}-shm`, { idempotent: true }).catch(() => undefined);
+    }
   }
-  return `${dir}${fileName}`;
+  return targetUri;
 }
 
 /**
@@ -46,7 +77,12 @@ export async function createBackupFile(now = new Date()): Promise<string> {
  */
 export async function restoreBackupFile(sourceUri: string): Promise<{ transactions: number }> {
   const workCopy = `${FileSystem.cacheDirectory ?? ''}restore-${Date.now()}.db`;
-  await FileSystem.copyAsync({ from: sourceUri, to: workCopy });
+  try {
+    await FileSystem.copyAsync({ from: sourceUri, to: workCopy });
+  } catch (error) {
+    await FileSystem.deleteAsync(workCopy, { idempotent: true }).catch(() => undefined);
+    throw error;
+  }
 
   try {
     expoDb.runSync('ATTACH DATABASE ? AS backup;', [plainPath(workCopy)]);

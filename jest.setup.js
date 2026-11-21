@@ -15,10 +15,46 @@ jest.mock('expo-sqlite', () => ({
   })),
 }));
 
-// Mock expo-file-system
+// Mock expo-file-system (SDK 54 File/Directory API)
+jest.mock('expo-file-system', () => {
+  class MockFile {
+    constructor(...uris) {
+      this.uri = uris
+        .map((part) => (typeof part === 'string' ? part : part?.uri ?? ''))
+        .filter(Boolean)
+        .join('/');
+      this.exists = true;
+    }
+  }
+  MockFile.prototype.bytes = jest.fn(async () => new Uint8Array([83, 81, 76, 105, 116, 101]));
+  MockFile.prototype.write = jest.fn();
+  MockFile.prototype.delete = jest.fn();
+  MockFile.prototype.text = jest.fn(async () => '');
+
+  class MockDirectory {
+    constructor(...uris) {
+      this.uri = uris
+        .map((part) => (typeof part === 'string' ? part : part?.uri ?? ''))
+        .filter(Boolean)
+        .join('/');
+      this.exists = true;
+    }
+  }
+  MockDirectory.prototype.createFile = jest.fn(function (name) {
+    return new MockFile(`${this.uri}/${encodeURIComponent(name)}`);
+  });
+
+  return {
+    File: MockFile,
+    Directory: MockDirectory,
+  };
+});
+
+// Mock expo-file-system/legacy
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///mock/data/user/0/com.LCSdev.silo/files/',
   cacheDirectory: 'file:///mock/data/user/0/com.LCSdev.silo/cache/',
+  EncodingType: { UTF8: 'utf8', Base64: 'base64' },
   getInfoAsync: jest.fn(async () => ({ exists: true, size: 1024 })),
   makeDirectoryAsync: jest.fn(async () => {}),
   deleteAsync: jest.fn(async () => {}),
@@ -26,6 +62,16 @@ jest.mock('expo-file-system/legacy', () => ({
   moveAsync: jest.fn(async () => {}),
   readAsStringAsync: jest.fn(async () => '{}'),
   writeAsStringAsync: jest.fn(async () => {}),
+  StorageAccessFramework: {
+    getUriForDirectoryInRoot: jest.fn((folder) => `content://com.android.externalstorage.documents/tree/primary%3A${folder}`),
+    requestDirectoryPermissionsAsync: jest.fn(async () => ({
+      granted: true,
+      directoryUri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload',
+    })),
+    createFileAsync: jest.fn(async (dirUri, fileName) => `${dirUri}/${encodeURIComponent(fileName)}`),
+    writeAsStringAsync: jest.fn(async () => {}),
+    readAsStringAsync: jest.fn(async () => ''),
+  },
 }));
 
 // Mock @react-native-ml-kit/text-recognition

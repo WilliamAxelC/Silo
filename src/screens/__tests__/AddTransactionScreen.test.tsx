@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { AddTransactionScreen } from '../AddTransactionScreen';
 import { analyzeReceiptImage } from '../../services/ai/agent';
@@ -7,15 +7,25 @@ import { useTransactionStore } from '../../store/useTransactionStore';
 import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import * as templateService from '../../services/templates';
+import * as recurringService from '../../services/recurring';
 
 const ReactTestRenderer = require('react-test-renderer');
 
 const mockNavigate = jest.fn();
-const mockRouteParams: { transactionId?: number; duplicateFromId?: number; initialDate?: number } = {};
+const mockReplace = jest.fn();
+const mockRouteParams: {
+  transactionId?: number;
+  duplicateFromId?: number;
+  receiptQueueId?: number;
+  reviewBatchIndex?: number;
+  reviewBatchTotal?: number;
+  initialDate?: number;
+} = {};
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
+    replace: mockReplace,
     canGoBack: () => false,
     goBack: jest.fn(),
   }),
@@ -26,6 +36,7 @@ jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
   return {
     SafeAreaView: View,
+    useSafeAreaInsets: () => ({ top: 0, bottom: 32, left: 0, right: 0 }),
   };
 });
 
@@ -51,9 +62,13 @@ describe('AddTransactionScreen', () => {
     jest.clearAllMocks();
     delete mockRouteParams.transactionId;
     delete mockRouteParams.duplicateFromId;
+    delete mockRouteParams.receiptQueueId;
+    delete mockRouteParams.reviewBatchIndex;
+    delete mockRouteParams.reviewBatchTotal;
     delete mockRouteParams.initialDate;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true });
+    jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true, fontScale: 1 });
 
     useTransactionStore.setState({
       transactionsList: [
@@ -139,7 +154,11 @@ describe('AddTransactionScreen', () => {
 
     expect(Alert.alert).toHaveBeenCalledWith(
       'Camera Permission Required',
-      'Camera access is required to take photos of receipts.'
+      'Camera access is required to take photos of receipts.',
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'Import from gallery' }),
+        expect.objectContaining({ text: 'Open settings' }),
+      ])
     );
     expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
 
@@ -322,7 +341,9 @@ describe('AddTransactionScreen', () => {
       canceled: false,
       assets: [{ uri: 'file:///a.jpg' }, { uri: 'file:///b.jpg' }],
     });
-    const enqueue = jest.spyOn(useReceiptQueueStore.getState(), 'enqueue').mockResolvedValue();
+    const enqueue = jest
+      .spyOn(useReceiptQueueStore.getState(), 'enqueue')
+      .mockResolvedValue({ added: 2, skippedDuplicates: 0 });
 
     let renderer: any;
     ReactTestRenderer.act(() => {
@@ -794,5 +815,261 @@ describe('AddTransactionScreen', () => {
 
     ReactTestRenderer.act(() => renderer.unmount());
     listSpy.mockRestore();
+  });
+
+  it('editing an existing transaction and saving unchanged preserves category, line items without trailing pipe, and repeat schedule (F-01)', async () => {
+    const txDate = new Date(2026, 10, 10, 12, 30).getTime();
+    const existingTx = {
+      id: 301,
+      walletId: 1,
+      merchantName: 'Sate Khas Dinner',
+      totalAmount: -45000,
+      type: 'expense' as const,
+      category: 'Food & Dining',
+      date: txDate,
+      note: 'Dinner with team',
+      lineItemsText: 'Latte | 30.000\nCroissant | 15.000',
+      imageUri: 'file:///sate.jpg',
+    };
+
+    useTransactionStore.setState({
+      transactionsList: [existingTx],
+      categories: [
+        { id: 1, name: 'Bills', type: 'expense', isSystem: true, createdAt: 1000 },
+        { id: 2, name: 'Entertainment', type: 'expense', isSystem: true, createdAt: 1000 },
+        { id: 3, name: 'Food & Dining', type: 'expense', isSystem: true, createdAt: 1000 },
+        { id: 4, name: 'Salary', type: 'income', isSystem: true, createdAt: 1000 },
+      ],
+      wallets: [{ id: 1, name: 'Main Wallet', type: 'cash', isActive: true, initialBalance: 0, balance: 0 }],
+    } as any);
+
+    const findRuleSpy = jest.spyOn(recurringService, 'findRecurringRuleForTransaction').mockReturnValue({
+      id: 77,
+      template: {
+        merchantName: existingTx.merchantName,
+        totalAmount: existingTx.totalAmount,
+        type: existingTx.type,
+        category: existingTx.category,
+        note: existingTx.note,
+        lineItemsText: existingTx.lineItemsText,
+        walletId: 1,
+        toWalletId: null,
+      },
+      frequency: 'monthly',
+      startDate: txDate,
+      occurrences: 1,
+      isActive: true,
+      nextDate: txDate + 30 * 86400000,
+    });
+    const updateRuleSpy = jest.spyOn(recurringService, 'updateRecurringRule').mockImplementation(() => {});
+    const createRuleSpy = jest.spyOn(recurringService, 'createRecurringRule').mockReturnValue(99);
+    mockUpdateTransaction.mockResolvedValueOnce(undefined);
+
+    mockRouteParams.transactionId = 301;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    // Category must remain 'Food & Dining' (NOT reset to alphabetically-first 'Bills')
+    const catPicker = renderer.root.findByProps({ accessibilityLabel: 'Select category' });
+    const catTexts = catPicker.findAllByType(Text).map((t: any) => t.props.children);
+    expect(catTexts).toContain('Food & Dining');
+    expect(catTexts).not.toContain('Bills');
+
+    // Repeat row must be visible in edit mode and reflect 'Monthly'
+    const monthlyChip = renderer.root.findByProps({ accessibilityLabel: 'Repeat Monthly' });
+    expect(monthlyChip.props.accessibilityState).toEqual({ selected: true });
+
+    // Item price inputs must NOT contain trailing ' |'
+    const priceInputs = renderer.root
+      .findAllByType(TextInput)
+      .map((i: any) => i.props.value)
+      .filter((v: any) => typeof v === 'string');
+    expect(priceInputs).toContain('30.000');
+    expect(priceInputs).toContain('15.000');
+    expect(priceInputs.some((v: string) => v.includes('|'))).toBe(false);
+
+    // Tap Update Transaction unchanged -> stored row payload must match original exactly
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockUpdateTransaction).toHaveBeenCalledWith(
+      301,
+      expect.objectContaining({
+        merchantName: 'Sate Khas Dinner',
+        totalAmount: -45000,
+        type: 'expense',
+        category: 'Food & Dining',
+        date: txDate,
+        note: 'Dinner with team',
+        lineItemsText: 'Latte | 30.000\nCroissant | 15.000',
+        imageUri: 'file:///sate.jpg',
+        walletId: 1,
+      })
+    );
+    expect(createRuleSpy).not.toHaveBeenCalled();
+    expect(updateRuleSpy).not.toHaveBeenCalled();
+
+    ReactTestRenderer.act(() => renderer.unmount());
+    findRuleSpy.mockRestore();
+    updateRuleSpy.mockRestore();
+    createRuleSpy.mockRestore();
+  });
+
+  it('preserves income category when editing a saved income transaction (F-01)', async () => {
+    const txDate = new Date(2026, 10, 1, 9, 0).getTime();
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 302,
+          walletId: 1,
+          merchantName: 'Monthly Payroll',
+          totalAmount: 8500000,
+          type: 'income',
+          category: 'Salary',
+          date: txDate,
+          note: '',
+          lineItemsText: '',
+          imageUri: null,
+        },
+      ],
+      categories: [
+        { id: 1, name: 'Bills', type: 'expense', isSystem: true, createdAt: 1000 },
+        { id: 2, name: 'Freelance', type: 'income', isSystem: true, createdAt: 1000 },
+        { id: 3, name: 'Salary', type: 'income', isSystem: true, createdAt: 1000 },
+      ],
+    } as any);
+    mockUpdateTransaction.mockResolvedValueOnce(undefined);
+
+    mockRouteParams.transactionId = 302;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    const catPicker = renderer.root.findByProps({ accessibilityLabel: 'Select category' });
+    expect(catPicker.findAllByType(Text).map((t: any) => t.props.children)).toContain('Salary');
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+    expect(mockUpdateTransaction).toHaveBeenCalledWith(302, expect.objectContaining({ type: 'income', category: 'Salary' }));
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('advances to the next pending receipt (2 of N) after saving a queued receipt and returns to ReceiptInbox after the last one (F-08)', async () => {
+    const mockQueueRemove = jest.fn(async (id: number) => {
+      useReceiptQueueStore.setState((state) => ({
+        items: state.items.filter((item) => item.id !== id),
+      }));
+    });
+
+    useReceiptQueueStore.setState({
+      items: [
+        {
+          id: 10,
+          imageUri: 'file:///docs/receipts/r1.jpg',
+          imageHash: 'md5:1',
+          status: 'done',
+          result: { merchantName: 'Cafe One', totalAmount: 32000, confidence: 'high' },
+          error: null,
+          createdAt: 1000,
+        },
+        {
+          id: 11,
+          imageUri: 'file:///docs/receipts/r2.jpg',
+          imageHash: 'md5:2',
+          status: 'done',
+          result: { merchantName: 'Cafe Two', totalAmount: 55000, confidence: 'high' },
+          error: null,
+          createdAt: 2000,
+        },
+      ],
+      remove: mockQueueRemove,
+    } as any);
+
+    mockRouteParams.receiptQueueId = 10;
+    mockRouteParams.reviewBatchIndex = 1;
+    mockRouteParams.reviewBatchTotal = 2;
+    mockAddTransaction.mockResolvedValue(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    // Shows "1 of 2" progress indicator
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Receipt 1 of 2' })).toBeDefined();
+
+    // Tap photo to zoom opens ReceiptPhotoModal
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Zoom receipt photo' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Close photo viewer' })).toBeDefined();
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Close photo viewer' }).props.onPress();
+    });
+
+    // Save first receipt -> advances directly to receipt 11 as "2 of 2", NOT Cashflow
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockQueueRemove).toHaveBeenCalledWith(10, false);
+    expect(mockReplace).toHaveBeenCalledWith('AddTransactionStack', {
+      receiptQueueId: 11,
+      reviewBatchIndex: 2,
+      reviewBatchTotal: 2,
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith('MainTabs', expect.anything());
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // Now open receipt 11 (last one) and save -> navigates back to ReceiptInbox (NOT Cashflow)
+    mockNavigate.mockClear();
+    mockReplace.mockClear();
+    mockRouteParams.receiptQueueId = 11;
+    mockRouteParams.reviewBatchIndex = 2;
+    mockRouteParams.reviewBatchTotal = 2;
+
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Receipt 2 of 2' })).toBeDefined();
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockQueueRemove).toHaveBeenCalledWith(11, false);
+    expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
+    expect(mockNavigate).not.toHaveBeenCalledWith('MainTabs', expect.anything());
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('applies bottom safe-area inset padding to the action stack and scales fonts with fontScale (F-06, F-12)', () => {
+    useSettingsStore.setState({ fontScale: 1.2 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    const actions = renderer.root.findByProps({ testID: 'add-transaction-actions' });
+    expect(StyleSheet.flatten(actions.props.style).paddingBottom).toBeGreaterThanOrEqual(44);
+
+    const headerTitle = renderer.root
+      .findAllByType(Text)
+      .find((t: any) => t.props.children === 'Add Transaction');
+    expect(StyleSheet.flatten(headerTitle.props.style).fontSize).toBeCloseTo(21.6, 1);
+
+    const saveText = renderer.root
+      .findAllByType(Text)
+      .find((t: any) => t.props.children === 'Save Transaction');
+    expect(StyleSheet.flatten(saveText.props.style).fontSize).toBeCloseTo(18, 1);
+
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 });

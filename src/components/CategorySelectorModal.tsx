@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord } from '../features/transactions/types';
 
@@ -36,6 +37,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
   selectedCategory,
 }) => {
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredCategories = useMemo(() => {
@@ -69,7 +71,11 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
         style={styles.keyboardShell}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={handleClose}>
+        <TouchableOpacity
+          style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 16)]}
+          activeOpacity={1}
+          onPress={handleClose}
+        >
           <TouchableOpacity
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
@@ -79,7 +85,9 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleWrap}>
                 <Ionicons name="pricetags-outline" size={20} color={theme.primary} />
-                <Text style={[styles.modalTitle, { color: theme.text }]}>Select Category</Text>
+                <Text style={[styles.modalTitle, { color: theme.text, fontSize: theme.scaleFont(17) }]}>
+                  Select Category
+                </Text>
               </View>
               <TouchableOpacity
                 style={styles.closeIconButton}
@@ -95,7 +103,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
             <View style={[styles.searchBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
               <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
               <TextInput
-                style={[styles.searchInput, { color: theme.text }]}
+                style={[styles.searchInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
                 placeholder="Search or create category..."
                 placeholderTextColor={theme.textMuted}
                 value={searchQuery}
@@ -134,10 +142,10 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                     <Ionicons name="add" size={18} color="#fff" />
                   </View>
                   <View style={styles.instantCreateTextWrap}>
-                    <Text style={[styles.instantCreateLabel, { color: theme.primary }]}>
+                    <Text style={[styles.instantCreateLabel, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
                       Create "{searchQuery.trim()}"
                     </Text>
-                    <Text style={[styles.instantCreateSub, { color: theme.textMuted }]}>
+                    <Text style={[styles.instantCreateSub, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                       Tap to add and select instantly
                     </Text>
                   </View>
@@ -146,7 +154,9 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
 
               {filteredCategories.length === 0 && exactMatchExists ? (
                 <View style={styles.emptyState}>
-                  <Text style={[styles.emptyStateText, { color: theme.textMuted }]}>No categories found.</Text>
+                  <Text style={[styles.emptyStateText, { color: theme.textMuted, fontSize: theme.scaleFont(14) }]}>
+                    No categories found.
+                  </Text>
                 </View>
               ) : (
                 filteredCategories.map((cat) => {
@@ -170,7 +180,11 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                       <Text
                         style={[
                           styles.categoryText,
-                          { color: isSelected ? theme.primary : theme.text, fontWeight: isSelected ? '700' : '500' },
+                          {
+                            color: isSelected ? theme.primary : theme.text,
+                            fontWeight: isSelected ? '700' : '500',
+                            fontSize: theme.scaleFont(15),
+                          },
                         ]}
                         numberOfLines={1}
                       >
@@ -190,7 +204,15 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
             {/* Quick Add Custom Category Row */}
             <View style={styles.customCategoryBox}>
               <TextInput
-                style={[styles.customCategoryInput, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text }]}
+                style={[
+                  styles.customCategoryInput,
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
+                ]}
                 placeholderTextColor={theme.textMuted}
                 placeholder="New category name..."
                 value={customCategory}

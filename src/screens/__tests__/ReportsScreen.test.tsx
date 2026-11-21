@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { ReportsScreen, getCategoryColor } from '../ReportsScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -250,6 +250,48 @@ describe('ReportsScreen', () => {
     expect(texts).toContain(expectedLabel);
     expect(texts).toContain('Groceries');
     expect(texts).not.toContain('Bills');
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('scales toggle, donut center, breakdown header, and expanded transaction rows with fontScale (R3A-08)', () => {
+    useSettingsStore.setState({ fontScale: 1.0 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+
+    const categoryCard = renderer.root.findByProps({ accessibilityLabel: `${UNCATEGORIZED_EXPENSE_LABEL}, 100%` });
+    ReactTestRenderer.act(() => {
+      categoryCard.props.onPress();
+    });
+
+    const getSize = (label: string) => {
+      const node = renderer.root.findAllByType(Text).find((t: any) => {
+        const text = Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '');
+        return text === label;
+      });
+      return StyleSheet.flatten(node.props.style).fontSize;
+    };
+
+    const sizes100 = {
+      toggle: getSize('Expenses'),
+      donutLabel: getSize('Total Expense'),
+      breakdownHeader: getSize('CATEGORY BREAKDOWN (1)'),
+      txMerchant: getSize('Kopi Kenangan'),
+    };
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ fontScale: 1.2 });
+    });
+
+    expect(getSize('Expenses')).toBeGreaterThan(sizes100.toggle);
+    expect(getSize('Total Expense')).toBeGreaterThan(sizes100.donutLabel);
+    expect(getSize('CATEGORY BREAKDOWN (1)')).toBeGreaterThan(sizes100.breakdownHeader);
+    expect(getSize('Kopi Kenangan')).toBeGreaterThan(sizes100.txMerchant);
 
     ReactTestRenderer.act(() => {
       renderer.unmount();

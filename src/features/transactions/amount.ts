@@ -270,6 +270,7 @@ export function calculatePercentage(part: number, total: number): number {
 
 /**
  * Formats display currency according to locale and currency rules.
+ * Always places the minus sign before the currency symbol/code for negative amounts.
  */
 export function formatDisplayCurrency(
   amount: number | null | undefined,
@@ -278,20 +279,24 @@ export function formatDisplayCurrency(
 ): string {
   const safeAmount = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0;
   const normalizedAmount = Object.is(safeAmount, -0) ? 0 : safeAmount;
+  const isNegative = normalizedAmount < 0;
+  const absAmount = Math.abs(normalizedAmount);
+  const sign = isNegative ? '-' : '';
   const decimals = getCurrencyDecimals(currencyCode);
 
   if (!useThousands) {
-    return `${currencyCode === 'IDR' ? 'Rp' : currencyCode} ${normalizedAmount}`;
+    return `${sign}${currencyCode === 'IDR' ? 'Rp' : currencyCode} ${absAmount}`;
   }
 
   try {
-    return new Intl.NumberFormat('id-ID', {
+    const formattedAbs = new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: currencyCode || 'IDR',
       maximumFractionDigits: decimals,
-    }).format(normalizedAmount);
+    }).format(absAmount);
+    return `${sign}${formattedAbs}`;
   } catch {
-    return `${currencyCode} ${normalizedAmount.toLocaleString('en-US')}`;
+    return `${sign}${currencyCode} ${absAmount.toLocaleString('en-US')}`;
   }
 }
 

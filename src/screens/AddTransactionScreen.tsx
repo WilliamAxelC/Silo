@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -26,18 +26,34 @@ import {
   parseSignedAmount,
 } from '../features/transactions/amount';
 import { getCategoryTypeForTransaction } from '../features/transactions/categories';
+import { TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { createTransactionInput, deriveEditableTransactionType, normalizeTransactionInput } from '../features/transactions/factories';
+import {
+  createReceiptItemDraft,
+  parseReceiptLineItemsText,
+  serializeReceiptLineItems,
+  type ReceiptLineItemDraft,
+} from '../features/transactions/lineItems';
 import { buildEditableTransactionInput } from '../features/transactions/mappers';
 import type { Transaction, TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
+import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
 import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
 import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfidence';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
-import { scanReceiptDocuments } from '../services/ocr/documentScanner';
+import { capturePhotoWithCamera, captureReceiptWithFallback } from '../services/ocr/documentScanner';
 import { AccountPickerModal } from '../components/AccountPickerModal';
 import { AmountCalculatorModal } from '../components/AmountCalculatorKeypad';
-import { RECURRING_FREQUENCIES, createRecurringRule, type RecurringFrequency } from '../services/recurring';
+import { ReceiptPhotoModal } from '../components/ReceiptPhotoModal';
+import {
+  RECURRING_FREQUENCIES,
+  createRecurringRule,
+  deleteRecurringRule,
+  findRecurringRuleForTransaction,
+  updateRecurringRule,
+  type RecurringFrequency,
+} from '../services/recurring';
 import {
   createTransactionTemplate,
   deleteTransactionTemplate,
@@ -50,56 +66,11 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
 
-import { ReceiptItemsEditor, ReceiptLineItemDraft } from '../components/ReceiptItemsEditor';
+import { ReceiptItemsEditor } from '../components/ReceiptItemsEditor';
 import { CategorySelectorModal } from '../components/CategorySelectorModal';
 import { SourceSelectorModal } from '../components/SourceSelectorModal';
 
-const createReceiptItemDraft = (overrides?: Partial<ReceiptLineItemDraft>): ReceiptLineItemDraft => ({
-  id: overrides?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  name: overrides?.name ?? '',
-  price: overrides?.price ?? '',
-  note: overrides?.note ?? '',
-});
-
-const parseReceiptLineItemsText = (value: string): ReceiptLineItemDraft[] => {
-  if (!value.trim()) {
-    return [];
-  }
-
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const parts = line.split(' | ').map((part) => part.trim());
-      const [namePart = '', pricePart = '', notePart = ''] = parts;
-      const fallbackMatch = parts.length === 1 ? line.match(/^(.*?)\s*-\s*([\d.,]+)$/) : null;
-
-      return createReceiptItemDraft({
-        id: `${index}-${line}`,
-        name: fallbackMatch ? fallbackMatch[1].trim() : namePart,
-        price: fallbackMatch ? fallbackMatch[2].trim() : pricePart,
-        note: notePart,
-      });
-    });
-};
-
-const serializeReceiptLineItems = (items: ReceiptLineItemDraft[]): string => {
-  return items
-    .map((item) => {
-      const name = item.name.trim();
-      const price = item.price.trim();
-      const note = item.note.trim();
-
-      if (!name && !price && !note) {
-        return '';
-      }
-
-      return [name, price, note].join(' | ').trim();
-    })
-    .filter(Boolean)
-    .join('\n');
-};
+export { parseReceiptLineItemsText, serializeReceiptLineItems };
 
 export const AddTransactionScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -107,11 +78,15 @@ export const AddTransactionScreen = () => {
   const editingId = route.params?.transactionId;
   const duplicateFromId = route.params?.duplicateFromId;
   const receiptQueueId = route.params?.receiptQueueId;
+  const reviewBatchIndexParam = route.params?.reviewBatchIndex;
+  const reviewBatchTotalParam = route.params?.reviewBatchTotal;
   const initialDate = route.params?.initialDate;
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousandsSeparator = useSettingsStore((s) => s.useThousandsSeparator);
   const dateFormat = useSettingsStore((s) => s.dateFormat);
+  const queueItems = useReceiptQueueStore((s) => s.items);
 
   const {
     addTransaction,
@@ -135,6 +110,10 @@ export const AddTransactionScreen = () => {
   const [toWalletId, setToWalletId] = useState<number | null>(null);
   const [accountPicker, setAccountPicker] = useState<'from' | 'to' | null>(null);
   const [repeat, setRepeat] = useState<RecurringFrequency | null>(null);
+  const linkedRecurringRuleIdRef = useRef<number | null>(null);
+  const initialRepeatRef = useRef<RecurringFrequency | null>(null);
+  const originalEditedTxRef = useRef<Transaction | null>(null);
+
   const isSelectableWallet = (id: number | null) => {
     if (id == null) return false;
     if (wallets.length === 0) return true;
@@ -163,6 +142,7 @@ export const AddTransactionScreen = () => {
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
 
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [rawOcrText, setRawOcrText] = useState<string | null>(null);
   const [isRawTextExpanded, setIsRawTextExpanded] = useState<boolean>(false);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
@@ -176,6 +156,21 @@ export const AddTransactionScreen = () => {
   const [calculatorVisible, setCalculatorVisible] = useState(false);
   const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
   const [templateFeedback, setTemplateFeedback] = useState<string | null>(null);
+
+  // Prevents the category validation effect from overwriting freshly hydrated form state during the same commit.
+  const skipNextCategorySyncRef = useRef(false);
+
+  const readyQueueItems = useMemo(() => queueItems.filter((item) => item.status === 'done'), [queueItems]);
+  const reviewProgress = useMemo(() => {
+    if (!receiptQueueId) return null;
+    const derivedIndex = readyQueueItems.findIndex((item) => item.id === receiptQueueId);
+    const total = Math.max(reviewBatchTotalParam ?? readyQueueItems.length, 1);
+    const index = Math.min(
+      Math.max(reviewBatchIndexParam ?? (derivedIndex >= 0 ? derivedIndex + 1 : 1), 1),
+      total
+    );
+    return { index, total };
+  }, [receiptQueueId, readyQueueItems, reviewBatchIndexParam, reviewBatchTotalParam]);
 
   const refreshTemplates = useCallback(() => {
     try {
@@ -210,8 +205,10 @@ export const AddTransactionScreen = () => {
   );
 
   const resetForm = (dateOverride?: number) => {
-    const fallbackCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
-    const nextForm = createTransactionInput({ category: fallbackCategory, type });
+    const expenseCats = getCategoriesByType('expense');
+    const fallbackCategory = expenseCats[0]?.name ?? normalizeCategoryForType('', 'expense');
+    const nextForm = createTransactionInput({ category: fallbackCategory, type: 'expense' });
+    skipNextCategorySyncRef.current = true;
     setTitle(nextForm.merchantName);
     setAmount('');
     setAmountError(null);
@@ -222,6 +219,7 @@ export const AddTransactionScreen = () => {
     setLineItems(parseReceiptLineItemsText(nextForm.lineItemsText ?? ''));
     setDetailsMode('note');
     setImageUri(nextForm.imageUri ?? null);
+    setPhotoViewerVisible(false);
     setType(nextForm.type);
     setSelectedDate(
       typeof dateOverride === 'number' && Number.isFinite(dateOverride) ? new Date(dateOverride) : new Date()
@@ -232,18 +230,27 @@ export const AddTransactionScreen = () => {
     setWalletId(null);
     setToWalletId(null);
     setRepeat(null);
+    linkedRecurringRuleIdRef.current = null;
+    initialRepeatRef.current = null;
+    originalEditedTxRef.current = null;
     setTemplateFeedback(null);
   };
 
-  const prevTypeRef = React.useRef(type);
-
   const populateFormFromTransaction = (
     tx: Partial<Transaction>,
-    options: { preserveDateAndPhoto: boolean; dateOverride?: Date }
+    options: { preserveDateAndPhoto: boolean; dateOverride?: Date; loadRecurring?: boolean }
   ) => {
     const editableTransaction = buildEditableTransactionInput(tx);
     const editableType = deriveEditableTransactionType(editableTransaction.totalAmount, editableTransaction.type);
-    prevTypeRef.current = editableType;
+    const knownCategories = useTransactionStore.getState().categories;
+    const resolvedCategory =
+      editableType === 'transfer'
+        ? editableTransaction.category || TRANSFER_CATEGORY_LABEL
+        : knownCategories.length > 0
+          ? normalizeCategoryForType(editableTransaction.category, editableType)
+          : editableTransaction.category || normalizeCategoryForType('', editableType);
+
+    skipNextCategorySyncRef.current = true;
     setTitle(editableTransaction.merchantName);
     setAmount(
       editableTransaction.totalAmount !== 0
@@ -253,7 +260,7 @@ export const AddTransactionScreen = () => {
     setAmountError(null);
     setScanConfidence(null);
     setType(editableType);
-    setCategory(normalizeCategoryForType(editableTransaction.category, editableType));
+    setCategory(resolvedCategory);
     setPendingScannedCategory(null);
     setNote(editableTransaction.note || '');
     setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
@@ -266,6 +273,7 @@ export const AddTransactionScreen = () => {
           : new Date()
     );
     setImageUri(options.preserveDateAndPhoto ? editableTransaction.imageUri || null : null);
+    setPhotoViewerVisible(false);
     const knownWallets = useTransactionStore.getState().wallets;
     const activeDefaultWalletId = knownWallets.find((w) => w.isActive)?.id ?? null;
     const resolveWalletId = (id?: number | null) => {
@@ -286,10 +294,70 @@ export const AddTransactionScreen = () => {
         : rawToId;
     setWalletId(resolvedFromId);
     setToWalletId(resolvedToId);
-    setRepeat(null);
+
+    if (options.loadRecurring) {
+      const matchedRule = findRecurringRuleForTransaction({
+        merchantName: editableTransaction.merchantName,
+        totalAmount: editableTransaction.totalAmount,
+        type: editableType,
+        category: resolvedCategory,
+        date: editableTransaction.date,
+        walletId: resolvedFromId ?? undefined,
+        toWalletId: resolvedToId,
+      });
+      linkedRecurringRuleIdRef.current = matchedRule?.id ?? null;
+      const loadedFrequency = matchedRule?.isActive ? matchedRule.frequency : null;
+      initialRepeatRef.current = loadedFrequency;
+      setRepeat(loadedFrequency);
+    } else {
+      linkedRecurringRuleIdRef.current = null;
+      initialRepeatRef.current = null;
+      setRepeat(null);
+    }
+
     setRawOcrText(null);
     setIsRawTextExpanded(false);
     setTemplateFeedback(null);
+  };
+
+  const applyScanResult = (parsedData: ParsedReceiptResult) => {
+    setScanConfidence(
+      parsedData.confidence ? { level: parsedData.confidence, reasons: parsedData.confidenceReasons ?? [] } : null
+    );
+    const rawText = (parsedData as { rawText?: string }).rawText;
+    if (rawText) {
+      setRawOcrText(rawText);
+      setIsRawTextExpanded(false);
+    }
+    if (parsedData.merchantName) setTitle(parsedData.merchantName);
+    if (parsedData.totalAmount) {
+      setAmount(formatAmountForInput(parsedData.totalAmount, currencyCode));
+      setAmountError(isAmountWithinRange(parsedData.totalAmount) ? null : 'Amount is too large');
+    }
+    if (parsedData.category) {
+      const detectedCategory = parsedData.category.trim();
+      const currentAvailable = getCategoriesByType(getCategoryTypeForTransaction(type));
+      const existingCategory = currentAvailable.find(
+        (item) => item.name.toLowerCase() === detectedCategory.toLowerCase()
+      );
+      skipNextCategorySyncRef.current = true;
+      if (existingCategory) {
+        setCategory(existingCategory.name);
+        setPendingScannedCategory(null);
+      } else {
+        // Keep in form state, do NOT call addCategory during scan
+        setCategory(detectedCategory);
+        setPendingScannedCategory(detectedCategory);
+      }
+    }
+    if (parsedData.lineItemsText) {
+      setParsedLineItems(parsedData.lineItemsText);
+      setDetailsMode(note ? 'both' : 'receipt');
+    }
+    if (parsedData.date) {
+      const parsedDate = new Date(parsedData.date);
+      if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
+    }
   };
 
   useEffect(() => {
@@ -297,9 +365,11 @@ export const AddTransactionScreen = () => {
       const latestTransactions = useTransactionStore.getState().transactionsList;
       const tx = latestTransactions.find((transaction) => transaction.id === editingId);
       if (tx) {
-        populateFormFromTransaction(tx, { preserveDateAndPhoto: true });
+        originalEditedTxRef.current = tx;
+        populateFormFromTransaction(tx, { preserveDateAndPhoto: true, loadRecurring: true });
       }
     } else if (duplicateFromId) {
+      originalEditedTxRef.current = null;
       const latestTransactions = useTransactionStore.getState().transactionsList;
       const tx = latestTransactions.find((transaction) => transaction.id === duplicateFromId);
       if (tx) {
@@ -308,6 +378,7 @@ export const AddTransactionScreen = () => {
         resetForm();
       }
     } else {
+      originalEditedTxRef.current = null;
       resetForm(initialDate);
       const queued = receiptQueueId
         ? useReceiptQueueStore.getState().items.find((item) => item.id === receiptQueueId)
@@ -320,13 +391,12 @@ export const AddTransactionScreen = () => {
   }, [editingId, duplicateFromId, receiptQueueId, initialDate]);
 
   useEffect(() => {
-    const typeChanged = prevTypeRef.current !== type;
-    prevTypeRef.current = type;
+    if (skipNextCategorySyncRef.current) {
+      skipNextCategorySyncRef.current = false;
+      return;
+    }
 
-    if (typeChanged) {
-      setPendingScannedCategory(null);
-      const nextCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
-      setCategory(nextCategory);
+    if (type === 'transfer') {
       return;
     }
 
@@ -335,12 +405,12 @@ export const AddTransactionScreen = () => {
     }
 
     if (availableCategories.length === 0) {
-      const fallback = normalizeCategoryForType('', type);
-      if (category !== fallback) {
-        setCategory(fallback);
+      if (!category) {
+        setCategory(normalizeCategoryForType('', type));
       }
       return;
     }
+
     if (!category || !availableCategories.some((item) => item.name === category)) {
       const nextCategory = availableCategories[0]?.name ?? normalizeCategoryForType('', type);
       if (category !== nextCategory) {
@@ -348,6 +418,17 @@ export const AddTransactionScreen = () => {
       }
     }
   }, [availableCategories, category, normalizeCategoryForType, pendingScannedCategory, type]);
+
+  const handleTypeChange = (nextType: TransactionType) => {
+    if (nextType === type) return;
+    setType(nextType);
+    setPendingScannedCategory(null);
+    if (nextType !== 'transfer') {
+      const nextCats = getCategoriesByType(getCategoryTypeForTransaction(nextType));
+      skipNextCategorySyncRef.current = true;
+      setCategory(nextCats[0]?.name ?? normalizeCategoryForType('', nextType));
+    }
+  };
 
   const openPicker = (mode: 'date' | 'time') => {
     setPickerMode(mode);
@@ -406,99 +487,62 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const pickImage = async (source: 'gallery' | 'camera') => {
-    const target = sourceModalTarget;
-    setSourceModalVisible(false);
-    let result;
+  const launchGalleryPicker = async (target: 'attachment' | 'scan' | null) => {
     try {
-      if (source === 'gallery') {
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          quality: 0.8,
-          // Scanning accepts several receipts at once; they go to the Receipt Inbox and are read in the background.
-          allowsMultipleSelection: target === 'scan',
-          selectionLimit: target === 'scan' ? 0 : 1,
-        });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        // Scanning accepts several receipts at once; they go to the Receipt Inbox and are read in the background.
+        allowsMultipleSelection: target === 'scan',
+        selectionLimit: target === 'scan' ? 0 : 1,
+      });
+
+      if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
+
+      if (target === 'scan' && result.assets.length > 1) {
+        await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
+        navigation.navigate('ReceiptInbox');
+        return;
+      }
+
+      if (target === 'scan') {
+        void processScanReceipt(result.assets[0].uri);
       } else {
-        if (target === 'scan') {
-          let scanned: string[] | null = null;
-          try {
-            scanned = await scanReceiptDocuments();
-          } catch (scannerError) {
-            console.warn('Document scanner unavailable, falling back to camera:', scannerError);
-          }
-          if (scanned) {
-            if (scanned.length > 1) {
-              await useReceiptQueueStore.getState().enqueue(scanned);
-              navigation.navigate('ReceiptInbox');
-            } else if (scanned.length === 1) {
-              processScanReceipt(scanned[0]);
-            }
-            return;
-          }
-        }
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permission.granted) {
-          Alert.alert('Camera Permission Required', 'Camera access is required to take photos of receipts.');
-          return;
-        }
-        result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+        setImageUri(result.assets[0].uri);
       }
     } catch (error) {
       Alert.alert('Image Error', getErrorMessage(error, 'Failed to pick an image. Please try again.'));
-      return;
     }
+  };
 
-    if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
+  const pickImage = async (source: 'gallery' | 'camera') => {
+    const target = sourceModalTarget;
+    setSourceModalVisible(false);
 
-    if (target === 'scan' && result.assets.length > 1) {
-      await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
-      navigation.navigate('ReceiptInbox');
+    if (source === 'gallery') {
+      await launchGalleryPicker(target);
       return;
     }
 
     if (target === 'scan') {
-      processScanReceipt(result.assets[0].uri);
-    } else {
-      setImageUri(result.assets[0].uri);
-    }
-  };
-
-  const applyScanResult = (parsedData: ParsedReceiptResult) => {
-    setScanConfidence(
-      parsedData.confidence ? { level: parsedData.confidence, reasons: parsedData.confidenceReasons ?? [] } : null
-    );
-    const rawText = (parsedData as { rawText?: string }).rawText;
-    if (rawText) {
-      setRawOcrText(rawText);
-      setIsRawTextExpanded(false);
-    }
-    if (parsedData.merchantName) setTitle(parsedData.merchantName);
-    if (parsedData.totalAmount) {
-      setAmount(formatAmountForInput(parsedData.totalAmount, currencyCode));
-      setAmountError(isAmountWithinRange(parsedData.totalAmount) ? null : 'Amount is too large');
-    }
-    if (parsedData.category) {
-      const detectedCategory = parsedData.category.trim();
-      const existingCategory = availableCategories.find(
-        (item) => item.name.toLowerCase() === detectedCategory.toLowerCase()
-      );
-      if (existingCategory) {
-        setCategory(existingCategory.name);
-        setPendingScannedCategory(null);
-      } else {
-        // Keep in form state, do NOT call addCategory during scan
-        setCategory(detectedCategory);
-        setPendingScannedCategory(detectedCategory);
+      const captured = await captureReceiptWithFallback({
+        onImportFromGallery: () => launchGalleryPicker('scan'),
+      });
+      if (captured.status !== 'captured') return;
+      if (captured.uris.length > 1) {
+        await useReceiptQueueStore.getState().enqueue(captured.uris);
+        navigation.navigate('ReceiptInbox');
+      } else if (captured.uris.length === 1) {
+        void processScanReceipt(captured.uris[0]);
       }
+      return;
     }
-    if (parsedData.lineItemsText) {
-      setParsedLineItems(parsedData.lineItemsText);
-      setDetailsMode(note ? 'both' : 'receipt');
-    }
-    if (parsedData.date) {
-      const parsedDate = new Date(parsedData.date);
-      if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
+
+    const captured = await capturePhotoWithCamera({
+      onImportFromGallery: () => launchGalleryPicker('attachment'),
+    });
+    if (captured.status === 'captured' && captured.uris[0]) {
+      setImageUri(captured.uris[0]);
     }
   };
 
@@ -567,7 +611,10 @@ export const AddTransactionScreen = () => {
         merchantName: title.trim() || (type === 'transfer' ? 'Transfer' : title),
         totalAmount: parseSignedAmount(amount, signedType, currencyCode),
         type,
-        category: (categoryOverride ?? category).trim() || normalizeCategoryForType('', type),
+        category:
+          type === 'transfer'
+            ? TRANSFER_CATEGORY_LABEL
+            : (categoryOverride ?? category).trim() || normalizeCategoryForType('', type),
         date: selectedDate.getTime(),
         note,
         lineItemsText,
@@ -602,7 +649,7 @@ export const AddTransactionScreen = () => {
 
     try {
       let resolvedCategory = category;
-      if (category) {
+      if (type !== 'transfer' && category) {
         const categoryExists = availableCategories.some(
           (item) => item.name.toLowerCase() === category.toLowerCase()
         );
@@ -620,6 +667,31 @@ export const AddTransactionScreen = () => {
 
       if (editingId) {
         await updateTransaction(editingId, data);
+
+        const linkedId = linkedRecurringRuleIdRef.current;
+        const repeatChanged = repeat !== initialRepeatRef.current;
+        const original = originalEditedTxRef.current;
+        const txFieldsChanged = Boolean(
+          original &&
+            (original.merchantName !== data.merchantName ||
+              original.totalAmount !== data.totalAmount ||
+              original.type !== data.type ||
+              original.category !== data.category ||
+              (original.note ?? '') !== (data.note ?? '') ||
+              (original.lineItemsText ?? '') !== (data.lineItemsText ?? '') ||
+              original.walletId !== data.walletId ||
+              (original.toWalletId ?? null) !== (data.toWalletId ?? null))
+        );
+
+        if (linkedId !== null) {
+          if (repeat === null && repeatChanged) {
+            deleteRecurringRule(linkedId);
+          } else if (repeat !== null && (repeatChanged || txFieldsChanged)) {
+            updateRecurringRule(linkedId, data, repeat);
+          }
+        } else if (repeat !== null) {
+          createRecurringRule(data, repeat, data.date);
+        }
       } else {
         await addTransaction(data);
         if (repeat) {
@@ -628,6 +700,31 @@ export const AddTransactionScreen = () => {
         if (receiptQueueId) {
           // The transaction now owns the receipt photo, so keep the file.
           await useReceiptQueueStore.getState().remove(receiptQueueId, false);
+
+          const remainingReady = useReceiptQueueStore
+            .getState()
+            .items.filter((item) => item.status === 'done');
+          const nextReady = remainingReady[0];
+          if (nextReady) {
+            const nextBatchTotal = Math.max(reviewProgress?.total ?? remainingReady.length + 1, remainingReady.length + 1);
+            const nextBatchIndex = Math.min((reviewProgress?.index ?? 1) + 1, nextBatchTotal);
+            const nextParams = {
+              receiptQueueId: nextReady.id,
+              reviewBatchIndex: nextBatchIndex,
+              reviewBatchTotal: nextBatchTotal,
+            };
+            const navAny = navigation as unknown as {
+              replace?: (screen: string, params: Record<string, unknown>) => void;
+            };
+            if (typeof navAny.replace === 'function') {
+              navAny.replace('AddTransactionStack', nextParams);
+            } else {
+              navigation.navigate('AddTransactionStack', nextParams);
+            }
+          } else {
+            navigation.navigate('ReceiptInbox');
+          }
+          return;
         }
       }
 
@@ -743,6 +840,7 @@ export const AddTransactionScreen = () => {
     if (trimmedCategory !== '') {
       try {
         const createdCategory = await addCategory(trimmedCategory, activeCategoryType);
+        skipNextCategorySyncRef.current = true;
         setCategory(createdCategory);
         setPendingScannedCategory(null);
         setCustomCategory('');
@@ -753,15 +851,17 @@ export const AddTransactionScreen = () => {
     }
   };
 
+  const scrollBottomPadding = getBottomInsetPadding(insets.bottom, 32);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={styles.keyboardShell}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPadding }]}
           keyboardShouldPersistTaps="handled"
         >
           {/* Top Header */}
@@ -770,7 +870,9 @@ export const AddTransactionScreen = () => {
               style={[styles.headerBackButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
               onPress={() => {
                 resetForm();
-                if (navigation.canGoBack()) {
+                if (receiptQueueId) {
+                  navigation.navigate('ReceiptInbox');
+                } else if (navigation.canGoBack()) {
                   navigation.goBack();
                 } else {
                   navigation.navigate('MainTabs', { screen: 'Cashflow' });
@@ -781,9 +883,19 @@ export const AddTransactionScreen = () => {
             >
               <Ionicons name="chevron-back" size={22} color={theme.text} />
             </TouchableOpacity>
-            <Text style={[styles.headerScreenTitle, { color: theme.text }]}>
-              {editingId ? 'Edit Transaction' : 'Add Transaction'}
-            </Text>
+            <View style={styles.headerCenter}>
+              <Text style={[styles.headerScreenTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>
+                {editingId ? 'Edit Transaction' : receiptQueueId ? 'Review Receipt' : 'Add Transaction'}
+              </Text>
+              {reviewProgress ? (
+                <Text
+                  style={[styles.reviewProgressText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}
+                  accessibilityLabel={`Receipt ${reviewProgress.index} of ${reviewProgress.total}`}
+                >
+                  {reviewProgress.index} of {reviewProgress.total}
+                </Text>
+              ) : null}
+            </View>
             <View style={styles.headerSpacer} />
           </View>
 
@@ -791,8 +903,12 @@ export const AddTransactionScreen = () => {
           {!editingId && templates.length > 0 ? (
             <View style={styles.templatesSection}>
               <View style={styles.templatesHeaderRow}>
-                <Text style={[styles.label, styles.templatesLabel, { color: theme.text }]}>Templates</Text>
-                <Text style={[styles.templatesHint, { color: theme.textMuted }]}>Tap to fill · hold to remove</Text>
+                <Text style={[styles.label, styles.templatesLabel, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                  Templates
+                </Text>
+                <Text style={[styles.templatesHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Tap to fill · hold to remove
+                </Text>
               </View>
               <ScrollView
                 horizontal
@@ -826,11 +942,17 @@ export const AddTransactionScreen = () => {
                       accessibilityHint="Long press to delete template"
                     >
                       <View style={[styles.templateDot, { backgroundColor: dotColor }]} />
-                      <Text style={[styles.templateChipName, { color: theme.text }]} numberOfLines={1}>
+                      <Text
+                        style={[styles.templateChipName, { color: theme.text, fontSize: theme.scaleFont(13) }]}
+                        numberOfLines={1}
+                      >
                         {tpl.name}
                       </Text>
                       {amountPreview ? (
-                        <Text style={[styles.templateChipAmount, { color: theme.textMuted }]} numberOfLines={1}>
+                        <Text
+                          style={[styles.templateChipAmount, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}
+                          numberOfLines={1}
+                        >
                           {amountPreview}
                         </Text>
                       ) : null}
@@ -846,8 +968,10 @@ export const AddTransactionScreen = () => {
             <View style={[styles.scanStatusBar, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}>
               <ActivityIndicator color={theme.primary} size="small" style={styles.scanSpinner} />
               <View style={styles.scanStatusTextWrap}>
-                <Text style={[styles.scanStatusTitle, { color: theme.primary }]}>Scanning Receipt</Text>
-                <Text style={[styles.scanStatusSub, { color: theme.text }]}>
+                <Text style={[styles.scanStatusTitle, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>
+                  Scanning Receipt
+                </Text>
+                <Text style={[styles.scanStatusSub, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
                   {scanStatusLabel || 'Extracting text and identifying line items...'}
                 </Text>
               </View>
@@ -863,11 +987,18 @@ export const AddTransactionScreen = () => {
                   styles.compactToggleBtn,
                   { backgroundColor: type === 'expense' ? theme.expense : 'transparent' },
                 ]}
-                onPress={() => setType('expense')}
+                onPress={() => handleTypeChange('expense')}
                 accessibilityRole="button"
                 accessibilityLabel="Set Expense type"
               >
-                <Text style={[styles.toggleText, { color: type === 'expense' ? '#fff' : theme.textMuted }]}>Expense</Text>
+                <Text
+                  style={[
+                    styles.toggleText,
+                    { color: type === 'expense' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                  ]}
+                >
+                  Expense
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -875,11 +1006,18 @@ export const AddTransactionScreen = () => {
                   styles.compactToggleBtn,
                   { backgroundColor: type === 'income' ? theme.income : 'transparent' },
                 ]}
-                onPress={() => setType('income')}
+                onPress={() => handleTypeChange('income')}
                 accessibilityRole="button"
                 accessibilityLabel="Set Income type"
               >
-                <Text style={[styles.toggleText, { color: type === 'income' ? '#fff' : theme.textMuted }]}>Income</Text>
+                <Text
+                  style={[
+                    styles.toggleText,
+                    { color: type === 'income' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                  ]}
+                >
+                  Income
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -887,11 +1025,18 @@ export const AddTransactionScreen = () => {
                   styles.compactToggleBtn,
                   { backgroundColor: type === 'transfer' ? theme.primary : 'transparent' },
                 ]}
-                onPress={() => setType('transfer')}
+                onPress={() => handleTypeChange('transfer')}
                 accessibilityRole="button"
                 accessibilityLabel="Set Transfer type"
               >
-                <Text style={[styles.toggleText, { color: type === 'transfer' ? '#fff' : theme.textMuted }]}>Transfer</Text>
+                <Text
+                  style={[
+                    styles.toggleText,
+                    { color: type === 'transfer' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                  ]}
+                >
+                  Transfer
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -907,16 +1052,26 @@ export const AddTransactionScreen = () => {
               ) : (
                 <Ionicons name="scan-outline" size={18} color="#fff" />
               )}
-              <Text style={styles.scanButtonTextCompact}>{isScanning ? 'Scanning…' : 'Scan'}</Text>
+              <Text style={[styles.scanButtonTextCompact, { fontSize: theme.scaleFont(13) }]}>
+                {isScanning ? 'Scanning…' : 'Scan'}
+              </Text>
             </TouchableOpacity>
           </View>
 
           {/* Title & Amount Fields */}
           <View style={styles.compactRow}>
             <View style={[styles.fieldCard, styles.flexField]}>
-              <Text style={[styles.label, { color: theme.text }]}>Title *</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Title *</Text>
               <TextInput
-                style={[styles.compactInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+                style={[
+                  styles.compactInput,
+                  {
+                    backgroundColor: theme.surface,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
+                ]}
                 placeholderTextColor={theme.textMuted}
                 value={title}
                 onChangeText={setTitle}
@@ -924,7 +1079,7 @@ export const AddTransactionScreen = () => {
               />
             </View>
             <View style={[styles.fieldCard, styles.amountField]}>
-              <Text style={[styles.label, { color: theme.text }]}>Amount *</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Amount *</Text>
               <View style={styles.amountInputContainer}>
                 <View
                   style={[
@@ -933,7 +1088,9 @@ export const AddTransactionScreen = () => {
                     { backgroundColor: theme.surface, borderColor: amountError ? theme.expense : theme.border },
                   ]}
                 >
-                  <Text style={[styles.currencyText, { color: theme.textMuted }]}>{currencyCode}</Text>
+                  <Text style={[styles.currencyText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                    {currencyCode}
+                  </Text>
                 </View>
                 <TouchableOpacity
                   style={[
@@ -953,7 +1110,11 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Edit amount"
                 >
                   <TextInput
-                    style={[styles.amountTextInput, styles.compactAmountInput, { color: theme.text }]}
+                    style={[
+                      styles.amountTextInput,
+                      styles.compactAmountInput,
+                      { color: theme.text, fontSize: theme.scaleFont(14) },
+                    ]}
                     placeholderTextColor={theme.textMuted}
                     value={amount}
                     onChangeText={handleAmountChange}
@@ -966,17 +1127,23 @@ export const AddTransactionScreen = () => {
                 </TouchableOpacity>
               </View>
               {amountError ? (
-                <Text style={[styles.inlineErrorText, { color: theme.expense }]}>{amountError}</Text>
-              ) : scanConfidence ? (
-                <ConfidenceNotice level={scanConfidence.level} reasons={scanConfidence.reasons} />
+                <Text style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}>
+                  {amountError}
+                </Text>
               ) : null}
             </View>
           </View>
 
+          {!amountError && scanConfidence ? (
+            <View style={styles.confidenceWrap}>
+              <ConfidenceNotice level={scanConfidence.level} reasons={scanConfidence.reasons} />
+            </View>
+          ) : null}
+
           {/* Account(s) */}
           <View style={styles.compactRow}>
             <View style={[styles.fieldCard, styles.flexField]}>
-              <Text style={[styles.label, { color: theme.text }]}>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
                 {type === 'transfer' ? 'From' : type === 'income' ? 'To account' : 'From account'}
               </Text>
               <TouchableOpacity
@@ -985,7 +1152,7 @@ export const AddTransactionScreen = () => {
                 accessibilityRole="button"
                 accessibilityLabel={`Account: ${walletName(effectiveWalletId)}`}
               >
-                <Text style={[styles.iconInputText, { color: theme.text }]} numberOfLines={1}>
+                <Text style={[styles.iconInputText, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
                   {walletName(effectiveWalletId)}
                 </Text>
                 <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
@@ -995,14 +1162,20 @@ export const AddTransactionScreen = () => {
               <>
                 <Ionicons name="arrow-forward" size={18} color={theme.textMuted} style={styles.transferArrow} />
                 <View style={[styles.fieldCard, styles.flexField]}>
-                  <Text style={[styles.label, { color: theme.text }]}>To</Text>
+                  <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>To</Text>
                   <TouchableOpacity
                     style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
                     onPress={() => setAccountPicker('to')}
                     accessibilityRole="button"
                     accessibilityLabel={`Transfer to: ${walletName(effectiveToWalletId)}`}
                   >
-                    <Text style={[styles.iconInputText, { color: effectiveToWalletId ? theme.text : theme.textMuted }]} numberOfLines={1}>
+                    <Text
+                      style={[
+                        styles.iconInputText,
+                        { color: effectiveToWalletId ? theme.text : theme.textMuted, fontSize: theme.scaleFont(14) },
+                      ]}
+                      numberOfLines={1}
+                    >
                       {walletName(effectiveToWalletId)}
                     </Text>
                     <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
@@ -1015,24 +1188,24 @@ export const AddTransactionScreen = () => {
           {/* Category & Date Pickers */}
           <View style={styles.compactRow}>
             {type !== 'transfer' ? (
-            <View style={[styles.fieldCard, styles.flexField]}>
-              <Text style={[styles.label, { color: theme.text }]}>Category</Text>
-              <TouchableOpacity
-                style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
-                onPress={() => setCategoryModalVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Select category"
-              >
-                <Text style={[styles.iconInputText, { color: theme.text }]} numberOfLines={1}>
-                  {category || 'Select category'}
-                </Text>
-                <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
-              </TouchableOpacity>
-            </View>
+              <View style={[styles.fieldCard, styles.flexField]}>
+                <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Category</Text>
+                <TouchableOpacity
+                  style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                  onPress={() => setCategoryModalVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select category"
+                >
+                  <Text style={[styles.iconInputText, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
+                    {category || 'Select category'}
+                  </Text>
+                  <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
+                </TouchableOpacity>
+              </View>
             ) : null}
 
             <View style={[styles.fieldCard, type === 'transfer' ? styles.flexField : styles.dateGroup]}>
-              <Text style={[styles.label, { color: theme.text }]}>Date & Time</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Date & Time</Text>
               <View style={styles.inlineDateActions}>
                 <TouchableOpacity
                   style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border }]}
@@ -1041,7 +1214,9 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Pick date"
                 >
                   <Ionicons name="calendar-outline" size={15} color={theme.textMuted} />
-                  <Text style={[styles.miniActionText, { color: theme.text }]}>{compactDateLabel}</Text>
+                  <Text style={[styles.miniActionText, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                    {compactDateLabel}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.miniAction, { backgroundColor: theme.surface, borderColor: theme.border, marginLeft: 6 }]}
@@ -1050,42 +1225,55 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Pick time"
                 >
                   <Ionicons name="time-outline" size={15} color={theme.textMuted} />
-                  <Text style={[styles.miniActionText, { color: theme.text }]}>{compactTimeLabel}</Text>
+                  <Text style={[styles.miniActionText, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                    {compactTimeLabel}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
 
-          {!editingId ? (
-            <View style={styles.inputGroupCompact}>
-              <Text style={[styles.label, { color: theme.text }]}>Repeat</Text>
-              <View style={styles.repeatRow}>
-                {[{ key: null, label: 'Never' }, ...RECURRING_FREQUENCIES].map((option) => {
-                  const selected = repeat === option.key;
-                  return (
-                    <TouchableOpacity
-                      key={option.label}
+          {/* Repeat Schedule (visible in both Add and Edit modes) */}
+          <View style={styles.inputGroupCompact}>
+            <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Repeat</Text>
+            <View style={styles.repeatRow}>
+              {[{ key: null, label: 'Never' }, ...RECURRING_FREQUENCIES].map((option) => {
+                const selected = repeat === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.label}
+                    style={[
+                      styles.repeatChip,
+                      {
+                        borderColor: selected ? theme.primary : theme.border,
+                        backgroundColor: selected ? theme.primaryMuted : theme.surface,
+                      },
+                    ]}
+                    onPress={() => setRepeat(option.key as RecurringFrequency | null)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Repeat ${option.label}`}
+                  >
+                    <Text
                       style={[
-                        styles.repeatChip,
-                        { borderColor: selected ? theme.primary : theme.border, backgroundColor: selected ? theme.primaryMuted : theme.surface },
+                        styles.repeatChipText,
+                        { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
                       ]}
-                      onPress={() => setRepeat(option.key as RecurringFrequency | null)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      accessibilityLabel={`Repeat ${option.label}`}
                     >
-                      <Text style={[styles.repeatChipText, { color: selected ? theme.primary : theme.text }]}>{option.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-          ) : null}
+          </View>
 
           {/* Details Section (Note vs Items vs Both) */}
           <View style={styles.inputGroupCompact}>
             <View style={styles.inlineSectionHeader}>
-              <Text style={[styles.sectionTitleCompact, { color: theme.text }]}>Details</Text>
+              <Text style={[styles.sectionTitleCompact, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                Details
+              </Text>
               <View style={[styles.detailsModeToggle, styles.compactDetailsToggle, { borderColor: theme.border, backgroundColor: theme.surface }]}>
                 {detailModeOptions.map((option) => {
                   const isActive = detailsMode === option.key;
@@ -1102,7 +1290,12 @@ export const AddTransactionScreen = () => {
                       accessibilityLabel={`Show ${option.label} details`}
                       hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                     >
-                      <Text style={[styles.detailsModeText, { color: isActive ? '#fff' : theme.textMuted }]}>
+                      <Text
+                        style={[
+                          styles.detailsModeText,
+                          { color: isActive ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(12) },
+                        ]}
+                      >
                         {option.label}
                       </Text>
                     </TouchableOpacity>
@@ -1116,7 +1309,12 @@ export const AddTransactionScreen = () => {
                 style={[
                   styles.compactInput,
                   styles.noteInputCompact,
-                  { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text },
+                  {
+                    backgroundColor: theme.surface,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
                 ]}
                 value={note}
                 onChangeText={setNote}
@@ -1140,11 +1338,23 @@ export const AddTransactionScreen = () => {
           {/* Receipt / Invoice Photo Attachment */}
           <View style={styles.compactRow}>
             <View style={[styles.fieldCard, styles.flexField]}>
-              <Text style={[styles.label, { color: theme.text }]}>Receipt Photo</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Receipt Photo</Text>
               {imageUri ? (
                 <View style={[styles.attachmentCompact, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                   <View style={styles.imagePreviewWrap}>
-                    <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
+                    <TouchableOpacity
+                      style={styles.imageZoomTouch}
+                      onPress={() => setPhotoViewerVisible(true)}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="Zoom receipt photo"
+                    >
+                      <Image source={{ uri: imageUri }} style={styles.previewImageCompact} resizeMode="cover" />
+                      <View style={styles.zoomHintPill}>
+                        <Ionicons name="expand-outline" size={14} color="#fff" />
+                        <Text style={[styles.zoomHintText, { fontSize: theme.scaleFont(11) }]}>Tap to zoom</Text>
+                      </View>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.removeImageBtnCompact, { backgroundColor: theme.surface }]}
                       onPress={() => setImageUri(null)}
@@ -1165,7 +1375,9 @@ export const AddTransactionScreen = () => {
                 >
                   <View style={styles.attachmentCompactEmpty}>
                     <Ionicons name="camera-outline" size={22} color={theme.primary} />
-                    <Text style={[styles.attachmentCompactText, { color: theme.textMuted }]}>Attach receipt image</Text>
+                    <Text style={[styles.attachmentCompactText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                      Attach receipt image
+                    </Text>
                   </View>
                 </TouchableOpacity>
               )}
@@ -1184,7 +1396,9 @@ export const AddTransactionScreen = () => {
               >
                 <View style={styles.rawOcrHeaderLeft}>
                   <Ionicons name="document-text-outline" size={16} color={theme.primary} />
-                  <Text style={[styles.rawOcrTitle, { color: theme.text }]}>Raw OCR text</Text>
+                  <Text style={[styles.rawOcrTitle, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
+                    Raw OCR text
+                  </Text>
                 </View>
                 <Ionicons
                   name={isRawTextExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1194,7 +1408,7 @@ export const AddTransactionScreen = () => {
               </TouchableOpacity>
               {isRawTextExpanded && (
                 <View style={[styles.rawOcrBody, { borderTopColor: theme.border }]}>
-                  <Text selectable style={[styles.rawOcrContent, { color: theme.textMuted }]}>
+                  <Text selectable style={[styles.rawOcrContent, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                     {rawOcrText}
                   </Text>
                 </View>
@@ -1203,7 +1417,10 @@ export const AddTransactionScreen = () => {
           ) : null}
 
           {/* Save, Template, Duplicate & Delete Actions */}
-          <View style={styles.actionStack}>
+          <View
+            testID="add-transaction-actions"
+            style={[styles.actionStack, { paddingBottom: getBottomInsetPadding(insets.bottom, 12) }]}
+          >
             <TouchableOpacity
               style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]}
               onPress={handleSave}
@@ -1214,7 +1431,9 @@ export const AddTransactionScreen = () => {
               {isSaving ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>{editingId ? 'Update Transaction' : 'Save Transaction'}</Text>
+                <Text style={[styles.saveButtonText, { fontSize: theme.scaleFont(15) }]}>
+                  {editingId ? 'Update Transaction' : 'Save Transaction'}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -1228,7 +1447,9 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Duplicate transaction"
                 >
                   <Ionicons name="copy-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
-                  <Text style={[styles.secondaryActionText, { color: theme.primary }]}>Duplicate</Text>
+                  <Text style={[styles.secondaryActionText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+                    Duplicate
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.secondaryActionButton, { borderColor: theme.expense, backgroundColor: theme.surface }]}
@@ -1238,7 +1459,9 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Delete transaction"
                 >
                   <Ionicons name="trash-outline" size={18} color={theme.expense} style={{ marginRight: 6 }} />
-                  <Text style={[styles.secondaryActionText, { color: theme.expense }]}>Delete</Text>
+                  <Text style={[styles.secondaryActionText, { color: theme.expense, fontSize: theme.scaleFont(14) }]}>
+                    Delete
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -1251,18 +1474,21 @@ export const AddTransactionScreen = () => {
                   accessibilityLabel="Save as template"
                 >
                   <Ionicons name="bookmark-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
-                  <Text style={[styles.secondaryActionText, { color: theme.primary }]}>Save as template</Text>
+                  <Text style={[styles.secondaryActionText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+                    Save as template
+                  </Text>
                 </TouchableOpacity>
                 {templateFeedback ? (
-                  <Text style={[styles.templateFeedbackText, { color: theme.income }]} accessibilityRole="text">
+                  <Text
+                    style={[styles.templateFeedbackText, { color: theme.income, fontSize: theme.scaleFont(12) }]}
+                    accessibilityRole="text"
+                  >
                     {templateFeedback}
                   </Text>
                 ) : null}
               </>
             )}
           </View>
-
-          <View style={{ height: 80 }} />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1309,6 +1535,7 @@ export const AddTransactionScreen = () => {
         categories={availableCategories}
         selectedCategory={category}
         onSelectCategory={(name) => {
+          skipNextCategorySyncRef.current = true;
           setCategory(name);
           setPendingScannedCategory(null);
           setCategoryModalVisible(false);
@@ -1316,6 +1543,12 @@ export const AddTransactionScreen = () => {
         customCategory={customCategory}
         onChangeCustomCategory={setCustomCategory}
         onAddCustomCategory={handleAddCustomCategory}
+      />
+
+      <ReceiptPhotoModal
+        visible={photoViewerVisible}
+        imageUri={imageUri}
+        onClose={() => setPhotoViewerVisible(false)}
       />
     </SafeAreaView>
   );
@@ -1339,7 +1572,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerScreenTitle: { fontSize: 18, fontWeight: '700' },
+  reviewProgressText: { fontSize: 12, fontWeight: '700', marginTop: 2 },
   headerSpacer: { width: 44 },
   scanStatusBar: {
     flexDirection: 'row',
@@ -1354,6 +1592,7 @@ const styles = StyleSheet.create({
   scanStatusTitle: { fontSize: 13, fontWeight: '700' },
   scanStatusSub: { fontSize: 12, marginTop: 2 },
   compactRow: { flexDirection: 'row', marginBottom: 12 },
+  confidenceWrap: { marginTop: -6, marginBottom: 12 },
   typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   compactTypeToggle: { flex: 1, marginRight: 10 },
   toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -1374,7 +1613,7 @@ const styles = StyleSheet.create({
   amountField: { width: 160, marginLeft: 10 },
   dateGroup: { width: 180, marginLeft: 10 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 34, justifyContent: 'center' },
+  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 38, justifyContent: 'center' },
   repeatChipText: { fontSize: 13, fontWeight: '600' },
   transferArrow: { alignSelf: 'flex-end', marginHorizontal: 6, marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
@@ -1436,7 +1675,21 @@ const styles = StyleSheet.create({
   attachmentCompactEmpty: { alignItems: 'center', justifyContent: 'center', padding: 12 },
   attachmentCompactText: { marginTop: 4, fontSize: 12 },
   imagePreviewWrap: { width: '100%', height: 140, position: 'relative' },
+  imageZoomTouch: { width: '100%', height: '100%' },
   previewImageCompact: { width: '100%', height: '100%' },
+  zoomHintPill: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  zoomHintText: { color: '#fff', fontWeight: '700' },
   removeImageBtnCompact: {
     position: 'absolute',
     top: 8,

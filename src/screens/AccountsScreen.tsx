@@ -27,6 +27,7 @@ import {
 } from '../features/transactions/amount';
 import type { Wallet, WalletType } from '../features/transactions/types';
 import { WALLET_TYPE_META } from '../components/AccountPickerModal';
+import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
 
 interface Draft {
@@ -42,6 +43,7 @@ const EMPTY_DRAFT: Draft = { id: null, name: '', type: 'bank', openingBalance: '
 export const AccountsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
   const wallets = useTransactionStore((s) => s.wallets);
@@ -121,22 +123,36 @@ export const AccountsScreen = () => {
         <Ionicons name={WALLET_TYPE_META[wallet.type].icon} size={20} color={theme.primary} />
       </View>
       <View style={styles.rowBody}>
-        <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>
+        <Text style={[styles.rowTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
           {wallet.name}
         </Text>
-        <Text style={[styles.rowSub, { color: theme.textMuted }]}>{WALLET_TYPE_META[wallet.type].label}</Text>
+        <Text style={[styles.rowSub, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+          {WALLET_TYPE_META[wallet.type].label}
+        </Text>
       </View>
-      <Text style={[styles.rowAmount, { color: wallet.balance < 0 ? theme.expense : theme.text }]}>{money(wallet.balance)}</Text>
+      <Text
+        style={[
+          styles.rowAmount,
+          { color: wallet.balance < 0 ? theme.expense : theme.text, fontSize: theme.scaleFont(15) },
+        ]}
+      >
+        {money(wallet.balance)}
+      </Text>
     </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Go back">
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="chevron-back" size={22} color={theme.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: theme.text }]}>Accounts</Text>
+        <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(20) }]}>Accounts</Text>
         <TouchableOpacity
           style={[styles.addBtn, { backgroundColor: theme.primary }]}
           onPress={() => openEditor()}
@@ -144,17 +160,32 @@ export const AccountsScreen = () => {
           accessibilityLabel="Add account"
         >
           <Ionicons name="add" size={18} color={theme.onPrimary} />
-          <Text style={[styles.addText, { color: theme.onPrimary }]}>Add</Text>
+          <Text style={[styles.addText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>Add</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: getBottomInsetPadding(insets.bottom, 40) }]}
+      >
         <View style={[styles.summary, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Net worth</Text>
-          <Text style={[styles.netWorth, { color: netWorth < 0 ? theme.expense : theme.text }]}>{money(netWorth)}</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+            Net worth
+          </Text>
+          <Text
+            style={[
+              styles.netWorth,
+              { color: netWorth < 0 ? theme.expense : theme.text, fontSize: theme.scaleFont(26) },
+            ]}
+          >
+            {money(netWorth)}
+          </Text>
           <View style={styles.summaryRow}>
-            <Text style={[styles.summarySub, { color: theme.income }]}>Assets {money(assets)}</Text>
-            <Text style={[styles.summarySub, { color: theme.expense }]}>Debts {money(debts)}</Text>
+            <Text style={[styles.summarySub, { color: theme.income, fontSize: theme.scaleFont(12) }]}>
+              Assets {money(assets)}
+            </Text>
+            <Text style={[styles.summarySub, { color: theme.expense, fontSize: theme.scaleFont(12) }]}>
+              Debts {money(debts)}
+            </Text>
           </View>
         </View>
 
@@ -162,102 +193,149 @@ export const AccountsScreen = () => {
 
         {archived.length > 0 ? (
           <TouchableOpacity onPress={() => setShowArchived((v) => !v)} style={styles.archivedToggle} accessibilityRole="button">
-            <Text style={[styles.archivedText, { color: theme.textMuted }]}>
+            <Text style={[styles.archivedText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
               {showArchived ? 'Hide' : 'Show'} archived ({archived.length})
             </Text>
           </TouchableOpacity>
         ) : null}
         {showArchived ? archived.map(renderWallet) : null}
 
-        <Text style={[styles.hint, { color: theme.textMuted }]}>
+        <Text style={[styles.hint, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
           Pick the account on each transaction. Use Transfer to move money between accounts, e.g. topping up GoPay from
-          your bank; transfers don't count as income or spending.
+          your bank; transfers don&apos;t count as income or spending.
         </Text>
       </ScrollView>
 
       <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlay}>
-          <View style={[styles.sheet, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.sheetTitle, { color: theme.text }]}>{draft?.id == null ? 'New account' : 'Edit account'}</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.overlay}>
+          <View
+            testID="account-editor-sheet"
+            style={[
+              styles.sheet,
+              { backgroundColor: theme.surface, paddingBottom: getBottomInsetPadding(insets.bottom, 24) },
+            ]}
+          >
+            <ScrollView
+              testID="account-editor-scroll"
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.sheetTitle, { color: theme.text, fontSize: theme.scaleFont(17) }]}>
+                {draft?.id == null ? 'New account' : 'Edit account'}
+              </Text>
 
-            <Text style={[styles.label, { color: theme.text }]}>Name</Text>
-            <TextInput
-              style={[styles.input, { borderColor: theme.border, color: theme.text }]}
-              value={draft?.name ?? ''}
-              onChangeText={(name) => setDraft((d) => (d ? { ...d, name } : d))}
-              placeholder="e.g. BCA, GoPay, Wallet"
-              placeholderTextColor={theme.textMuted}
-              accessibilityLabel="Account name"
-            />
-
-            <Text style={[styles.label, { color: theme.text }]}>Type</Text>
-            <View style={styles.chips}>
-              {(Object.keys(WALLET_TYPE_META) as WalletType[]).map((t) => {
-                const selected = draft?.type === t;
-                return (
-                  <TouchableOpacity
-                    key={t}
-                    style={[styles.chip, { borderColor: selected ? theme.primary : theme.border, backgroundColor: selected ? theme.primaryMuted : 'transparent' }]}
-                    onPress={() => setDraft((d) => (d ? { ...d, type: t } : d))}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                  >
-                    <Ionicons name={WALLET_TYPE_META[t].icon} size={14} color={selected ? theme.primary : theme.textMuted} />
-                    <Text style={[styles.chipText, { color: selected ? theme.primary : theme.text }]}>{WALLET_TYPE_META[t].label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={[styles.label, { color: theme.text }]}>Opening balance</Text>
-            <View style={styles.balanceRow}>
-              <TouchableOpacity
-                style={[styles.signBtn, { borderColor: theme.border }]}
-                onPress={() => setDraft((d) => (d ? { ...d, openingNegative: !d.openingNegative } : d))}
-                accessibilityRole="button"
-                accessibilityLabel={draft?.openingNegative ? 'Balance is owed (negative). Tap to make positive' : 'Balance is positive. Tap if you owe this amount'}
-              >
-                <Text style={[styles.signText, { color: draft?.openingNegative ? theme.expense : theme.income }]}>
-                  {draft?.openingNegative ? 'Owe' : 'Have'}
-                </Text>
-              </TouchableOpacity>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Name</Text>
               <TextInput
-                style={[styles.input, styles.flex, { borderColor: theme.border, color: theme.text }]}
-                value={draft?.openingBalance ?? ''}
-                onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v, currencyCode) } : d))}
-                keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
-                placeholder="0"
+                style={[styles.input, { borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(15) }]}
+                value={draft?.name ?? ''}
+                onChangeText={(name) => setDraft((d) => (d ? { ...d, name } : d))}
+                placeholder="e.g. BCA, GoPay, Wallet"
                 placeholderTextColor={theme.textMuted}
-                accessibilityLabel="Opening balance"
+                accessibilityLabel="Account name"
               />
-            </View>
 
-            <View style={styles.actions}>
-              {draft?.id != null ? (
-                <TouchableOpacity onPress={remove} style={styles.secondaryBtn} accessibilityRole="button">
-                  <Text style={[styles.secondaryText, { color: theme.expense }]}>Remove</Text>
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Type</Text>
+              <View style={styles.chips}>
+                {(Object.keys(WALLET_TYPE_META) as WalletType[]).map((t) => {
+                  const selected = draft?.type === t;
+                  return (
+                    <TouchableOpacity
+                      key={t}
+                      style={[
+                        styles.chip,
+                        {
+                          borderColor: selected ? theme.primary : theme.border,
+                          backgroundColor: selected ? theme.primaryMuted : 'transparent',
+                        },
+                      ]}
+                      onPress={() => setDraft((d) => (d ? { ...d, type: t } : d))}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                    >
+                      <Ionicons name={WALLET_TYPE_META[t].icon} size={14} color={selected ? theme.primary : theme.textMuted} />
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
+                        ]}
+                      >
+                        {WALLET_TYPE_META[t].label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Opening balance</Text>
+              <View style={styles.balanceRow}>
+                <TouchableOpacity
+                  style={[styles.signBtn, { borderColor: theme.border }]}
+                  onPress={() => setDraft((d) => (d ? { ...d, openingNegative: !d.openingNegative } : d))}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    draft?.openingNegative
+                      ? 'Balance is owed (negative). Tap to make positive'
+                      : 'Balance is positive. Tap if you owe this amount'
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.signText,
+                      { color: draft?.openingNegative ? theme.expense : theme.income, fontSize: theme.scaleFont(13) },
+                    ]}
+                  >
+                    {draft?.openingNegative ? 'Owe' : 'Have'}
+                  </Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={[styles.input, styles.flex, { borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(15) }]}
+                  value={draft?.openingBalance ?? ''}
+                  onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v, currencyCode) } : d))}
+                  keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                  placeholder="0"
+                  placeholderTextColor={theme.textMuted}
+                  accessibilityLabel="Opening balance"
+                />
+              </View>
+
+              <View style={styles.actions}>
+                {draft?.id != null ? (
+                  <TouchableOpacity onPress={remove} style={styles.secondaryBtn} accessibilityRole="button">
+                    <Text style={[styles.secondaryText, { color: theme.expense, fontSize: theme.scaleFont(14) }]}>
+                      Remove
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                <View style={styles.flex} />
+                <TouchableOpacity onPress={() => setDraft(null)} style={styles.secondaryBtn} accessibilityRole="button">
+                  <Text style={[styles.secondaryText, { color: theme.textMuted, fontSize: theme.scaleFont(14) }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={save}
+                  style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.primaryText, { color: theme.onPrimary, fontSize: theme.scaleFont(14) }]}>Save</Text>
+                </TouchableOpacity>
+              </View>
+              {draft?.id != null && !wallets.find((w) => w.id === draft.id)?.isActive ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    updateWallet(draft.id!, { isActive: true });
+                    setDraft(null);
+                  }}
+                  style={styles.restore}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.secondaryText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+                    Restore from archive
+                  </Text>
                 </TouchableOpacity>
               ) : null}
-              <View style={styles.flex} />
-              <TouchableOpacity onPress={() => setDraft(null)} style={styles.secondaryBtn} accessibilityRole="button">
-                <Text style={[styles.secondaryText, { color: theme.textMuted }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={save} style={[styles.primaryBtn, { backgroundColor: theme.primary }]} accessibilityRole="button">
-                <Text style={[styles.primaryText, { color: theme.onPrimary }]}>Save</Text>
-              </TouchableOpacity>
-            </View>
-            {draft?.id != null && !wallets.find((w) => w.id === draft.id)?.isActive ? (
-              <TouchableOpacity
-                onPress={() => {
-                  updateWallet(draft.id!, { isActive: true });
-                  setDraft(null);
-                }}
-                style={styles.restore}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.secondaryText, { color: theme.primary }]}>Restore from archive</Text>
-              </TouchableOpacity>
-            ) : null}
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -287,7 +365,7 @@ const styles = StyleSheet.create({
   archivedText: { fontSize: 13, fontWeight: '600' },
   hint: { fontSize: 12, lineHeight: 18, marginTop: 8 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 28 },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 28, maxHeight: '88%' },
   sheetTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   input: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },

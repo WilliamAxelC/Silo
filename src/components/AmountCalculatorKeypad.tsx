@@ -12,6 +12,7 @@ import {
   parseSignedAmount,
   roundCurrency,
 } from '../features/transactions/amount';
+import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -54,6 +55,7 @@ export const AmountCalculatorKeypad: React.FC<AmountCalculatorKeypadProps> = ({
   onCancel,
 }) => {
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
   const allowDecimals = currencyHasDecimals(currencyCode);
   const decimals = getCurrencyDecimals(currencyCode);
@@ -215,7 +217,13 @@ export const AmountCalculatorKeypad: React.FC<AmountCalculatorKeypadProps> = ({
         {options?.icon ? (
           <Ionicons name={options.icon} size={20} color={textColor} />
         ) : (
-          <Text style={[styles.keyText, variant === 'operator' && styles.opKeyText, { color: textColor }]}>
+          <Text
+            style={[
+              styles.keyText,
+              variant === 'operator' && styles.opKeyText,
+              { color: textColor, fontSize: theme.scaleFont(variant === 'operator' ? 20 : 18) },
+            ]}
+          >
             {label}
           </Text>
         )}
@@ -228,13 +236,22 @@ export const AmountCalculatorKeypad: React.FC<AmountCalculatorKeypadProps> = ({
       style={
         embedded
           ? styles.embeddedPanel
-          : [styles.panel, { backgroundColor: theme.surface, borderColor: theme.border }]
+          : [
+              styles.panel,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                paddingBottom: getBottomInsetPadding(insets.bottom, 20),
+              },
+            ]
       }
     >
       {/* Header + Expression Display */}
       <View style={[styles.displayBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
         <View style={styles.displayTopRow}>
-          <Text style={[styles.currencyTag, { color: theme.textMuted }]}>{currencyCode}</Text>
+          <Text style={[styles.currencyTag, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+            {currencyCode}
+          </Text>
           {onCancel ? (
             <TouchableOpacity
               onPress={onCancel}
@@ -248,7 +265,7 @@ export const AmountCalculatorKeypad: React.FC<AmountCalculatorKeypadProps> = ({
           ) : null}
         </View>
         <Text
-          style={[styles.expressionText, { color: theme.text }]}
+          style={[styles.expressionText, { color: theme.text, fontSize: theme.scaleFont(22) }]}
           numberOfLines={1}
           adjustsFontSizeToFit
           accessibilityLabel={`Expression ${formattedExpression || '0'}`}
@@ -256,7 +273,7 @@ export const AmountCalculatorKeypad: React.FC<AmountCalculatorKeypadProps> = ({
           {formattedExpression || '0'}
         </Text>
         <Text
-          style={[styles.resultText, { color: statusColor }]}
+          style={[styles.resultText, { color: statusColor, fontSize: theme.scaleFont(13) }]}
           numberOfLines={1}
           accessibilityRole={statusInfo.tone === 'error' ? 'alert' : 'text'}
         >

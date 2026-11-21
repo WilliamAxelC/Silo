@@ -20,11 +20,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-import { documentDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
-import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import { createBackupFile, restoreBackupFile } from '../services/backup';
+import {
+  BACKUP_PICKER_MIME_TYPES,
+  createBackupFile,
+  isLikelyBackupFile,
+  restoreBackupFile,
+} from '../services/backup';
 import { buildTransactionsCsv } from '../services/csvExport';
+import {
+  deleteLocalFileQuietly,
+  isAndroidSafSupported,
+  saveBinaryFileToDevice,
+  saveTextFileToDevice,
+  shareLocalFile,
+  writeLocalTextFile,
+} from '../services/fileExport';
+import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import {
   cancelDailyReminder,
   formatReminderTime,
@@ -79,6 +91,7 @@ const MONTH_START_DAYS = Array.from(
 export const SettingsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
+  const insets = useSafeInsets();
 
   const themeMode = useSettingsStore((s) => s.themeMode);
   const currencyCode = useSettingsStore((s) => s.currencyCode);
@@ -177,9 +190,9 @@ export const SettingsScreen = () => {
 
   const expenseCategories = useMemo(() => getCategoriesByType('expense'), [categories, getCategoriesByType]);
   const incomeCategories = useMemo(() => getCategoriesByType('income'), [categories, getCategoriesByType]);
-  const textScale = useMemo(() => ({ fontSize: 14 * fontScale }), [fontScale]);
-  const captionScale = useMemo(() => ({ fontSize: 12 * fontScale }), [fontScale]);
-  const headingScale = useMemo(() => ({ fontSize: 17 * fontScale }), [fontScale]);
+  const textScale = useMemo(() => ({ fontSize: theme.scaleFont(14) }), [theme]);
+  const captionScale = useMemo(() => ({ fontSize: theme.scaleFont(12) }), [theme]);
+  const headingScale = useMemo(() => ({ fontSize: theme.scaleFont(17) }), [theme]);
 
   const progressPercent = useMemo(() => {
     if (provisioning.totalBytes && provisioning.totalBytes > 0) {
@@ -361,6 +374,23 @@ export const SettingsScreen = () => {
     }
   };
 
+  const handleCurrencySelect = (nextCurrency: string) => {
+    if (nextCurrency === currencyCode) return;
+    Alert.alert(
+      'Change display currency?',
+      `Switching from ${currencyCode} to ${nextCurrency} changes the currency label and formatting only. Existing amounts will not be converted.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Use ${nextCurrency}`,
+          onPress: () => {
+            void setCurrencyCode(nextCurrency);
+          },
+        },
+      ]
+    );
+  };
+
   const handleReminderTimeChange = async (event: { type?: string }, picked?: Date) => {
     setShowReminderTimePicker(false);
     if (event?.type === 'dismissed' || !picked) {
@@ -377,9 +407,15 @@ export const SettingsScreen = () => {
 
     if (dailyReminderEnabled) {
       try {
-        const scheduledId = await scheduleDailyReminder(nextTime);
-        if (!scheduledId) {
-          setReminderNotice('Reminder time saved, but the notification could not be rescheduled on this device.');
+        const syncResult = await syncDailyReminder(true, nextTime);
+        if (!syncResult.ok) {
+          if (syncResult.reason === 'permission-denied') {
+            setReminderNotice(
+              'Reminder time saved, but notifications are turned off in phone Settings. Enable notifications to receive daily reminders.'
+            );
+          } else {
+            setReminderNotice('Reminder time saved, but the notification could not be rescheduled on this device.');
+          }
         }
       } catch {
         setReminderNotice('Reminder time saved, but the notification could not be rescheduled on this device.');
@@ -387,18 +423,79 @@ export const SettingsScreen = () => {
     }
   };
 
+  const handleShareBackupFile = async (existingFileUri?: string) => {
+    setIsBackingUp(true);
+    let createdTempUri: string | null = null;
+    let shouldCleanupTemp = false;
+    try {
+      const fileUri = existingFileUri ?? (await createBackupFile());
+      if (!existingFileUri) {
+        createdTempUri = fileUri;
+      }
+      const shared = await shareLocalFile(fileUri, {
+        mimeType: 'application/octet-stream',
+        dialogTitle: 'Share your Silo backup',
+      });
+      if (!shared) {
+        shouldCleanupTemp = true;
+        Alert.alert('Sharing unavailable', 'No sharing apps are available on this device. Use Back Up All Data to save directly to a folder.');
+      }
+    } catch (error) {
+      shouldCleanupTemp = true;
+      Alert.alert('Share failed', getErrorMessage(error, 'Could not share the backup.'));
+    } finally {
+      if (shouldCleanupTemp && createdTempUri) {
+        await deleteLocalFileQuietly(createdTempUri);
+      }
+      setIsBackingUp(false);
+    }
+  };
+
   const handleBackup = async () => {
     setIsBackingUp(true);
+    let tempFileUri: string | null = null;
+    let shouldCleanupTemp = false;
     try {
       const fileUri = await createBackupFile();
-      if (!(await isAvailableAsync())) {
-        Alert.alert('Backup created', 'Sharing is not available on this device.');
+      tempFileUri = fileUri;
+      const fileName = fileUri.split('/').pop() || `silo-backup-${new Date().toISOString().slice(0, 10)}.db`;
+
+      if (isAndroidSafSupported()) {
+        shouldCleanupTemp = true;
+        const saved = await saveBinaryFileToDevice({
+          sourceUri: fileUri,
+          fileName,
+          mimeType: 'application/octet-stream',
+        });
+        if (saved.status === 'cancelled') {
+          return;
+        }
+        Alert.alert(
+          'Backup saved',
+          `Saved ${fileName} to the selected folder.`,
+          [
+            { text: 'Share', onPress: () => void handleShareBackupFile() },
+            { text: 'OK', style: 'cancel' },
+          ]
+        );
         return;
       }
-      await shareAsync(fileUri, { mimeType: 'application/octet-stream', dialogTitle: 'Save your Silo backup' });
+
+      const shared = await shareLocalFile(fileUri, {
+        mimeType: 'application/octet-stream',
+        dialogTitle: 'Save your Silo backup',
+      });
+      if (!shared) {
+        shouldCleanupTemp = true;
+        Alert.alert('Backup created', 'Sharing is not available on this device.');
+      }
     } catch (error) {
+      shouldCleanupTemp = true;
       Alert.alert('Backup failed', getErrorMessage(error, 'Could not create the backup.'));
     } finally {
+      if (shouldCleanupTemp && tempFileUri) {
+        await deleteLocalFileQuietly(tempFileUri);
+      }
       setIsBackingUp(false);
     }
   };
@@ -409,7 +506,8 @@ export const SettingsScreen = () => {
       const { transactions } = await restoreBackupFile(uri);
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
-      await Promise.all([store.fetchTransactions(), store.fetchCategories(), store.fetchBudgets()]);
+      await Promise.all([store.fetchTransactions(), store.fetchCategories()]);
+      await store.fetchBudgets();
 
       const restoredSettings = useSettingsStore.getState();
       let reminderWarning: string | null = null;
@@ -428,6 +526,7 @@ export const SettingsScreen = () => {
         reminderWarning = 'Daily reminder could not be rescheduled on this device.';
       }
 
+      await useSettingsStore.getState().setHasCompletedOnboarding(true);
       setReminderNotice(reminderWarning);
       const restoredSummary = `${transactions} transaction${transactions === 1 ? '' : 's'} restored.`;
       Alert.alert(
@@ -442,12 +541,29 @@ export const SettingsScreen = () => {
   };
 
   const handleRestore = async () => {
-    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    if (isBackingUp) return;
+    let picked: DocumentPicker.DocumentPickerResult;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: BACKUP_PICKER_MIME_TYPES,
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+    } catch (error) {
+      Alert.alert('Could not open file picker', getErrorMessage(error, 'Unable to open your files to pick a backup.'));
+      return;
+    }
     if (picked.canceled || !picked.assets?.[0]?.uri) return;
-    const uri = picked.assets[0].uri;
+    const asset = picked.assets[0];
+    if (!isLikelyBackupFile(asset.name)) {
+      Alert.alert('Not a backup file', 'Please select a Silo backup (.db) file.');
+      return;
+    }
+    const uri = asset.uri;
+    const fileLabel = asset.name ? ` "${asset.name}"` : '';
     Alert.alert(
       'Replace all data?',
-      'Everything in Silo on this phone will be replaced by the backup. Back up first if you might need the current data.',
+      `Everything in Silo on this phone will be overwritten by backup${fileLabel}. Back up first if you might need the current data.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Restore', style: 'destructive', onPress: () => void runRestore(uri) },
@@ -455,13 +571,53 @@ export const SettingsScreen = () => {
     );
   };
 
+  const handleShareCSV = async (prebuiltCsv?: string, prebuiltName?: string) => {
+    let tempFileUri: string | null = null;
+    let shouldCleanupTemp = false;
+    try {
+      setIsExporting(true);
+      if (!prebuiltCsv && (!transactionsList || transactionsList.length === 0)) {
+        Alert.alert('No Data', "You don't have any transactions to export yet.");
+        return;
+      }
+      const csvString =
+        prebuiltCsv ??
+        buildTransactionsCsv(transactionsList, {
+          wallets,
+          dateFormat,
+        });
+      const fileName = prebuiltName ?? `Silo_Transactions_${new Date().toISOString().split('T')[0]}.csv`;
+      const fileUri = await writeLocalTextFile(fileName, csvString);
+      tempFileUri = fileUri;
+      const shared = await shareLocalFile(fileUri, {
+        mimeType: 'text/csv',
+        dialogTitle: 'Share Silo Transactions CSV',
+        UTI: 'public.comma-separated-values-text',
+      });
+      if (!shared) {
+        shouldCleanupTemp = true;
+        Alert.alert('Sharing unavailable', 'No sharing apps are available on this device. Use Export Transactions CSV to save directly to a folder.');
+      }
+    } catch (error) {
+      shouldCleanupTemp = true;
+      console.error('Share CSV failed:', error);
+      Alert.alert('Share Failed', getErrorMessage(error, 'An error occurred while sharing your CSV file.'));
+    } finally {
+      if (shouldCleanupTemp && tempFileUri) {
+        await deleteLocalFileQuietly(tempFileUri);
+      }
+      setIsExporting(false);
+    }
+  };
+
   const handleExportCSV = async () => {
+    let tempFileUri: string | null = null;
+    let shouldCleanupTemp = false;
     try {
       setIsExporting(true);
 
       if (!transactionsList || transactionsList.length === 0) {
         Alert.alert('No Data', "You don't have any transactions to export yet.");
-        setIsExporting(false);
         return;
       }
 
@@ -470,27 +626,48 @@ export const SettingsScreen = () => {
         dateFormat,
       });
 
-      const fileName = `Silo_Transactions_${new Date().toISOString().split('T')[0]}.csv`;
-      const fileUri = `${documentDirectory}${fileName}`;
+      const baseName = `Silo_Transactions_${new Date().toISOString().split('T')[0]}`;
+      const fullFileName = `${baseName}.csv`;
 
-      await writeAsStringAsync(fileUri, csvString, {
-        encoding: EncodingType.UTF8,
-      });
-
-      const isAvailable = await isAvailableAsync();
-      if (isAvailable) {
-        await shareAsync(fileUri, {
+      if (isAndroidSafSupported()) {
+        const saved = await saveTextFileToDevice({
+          fileName: baseName,
           mimeType: 'text/csv',
-          dialogTitle: 'Export Silo Transactions',
-          UTI: 'public.comma-separated-values-text',
+          content: csvString,
         });
-      } else {
+        if (saved.status === 'cancelled') {
+          return;
+        }
+        Alert.alert(
+          'CSV exported',
+          `Saved ${fullFileName} to the selected folder.`,
+          [
+            { text: 'Share', onPress: () => void handleShareCSV(csvString, fullFileName) },
+            { text: 'OK', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+
+      const fileUri = await writeLocalTextFile(fullFileName, csvString);
+      tempFileUri = fileUri;
+      const shared = await shareLocalFile(fileUri, {
+        mimeType: 'text/csv',
+        dialogTitle: 'Export Silo Transactions',
+        UTI: 'public.comma-separated-values-text',
+      });
+      if (!shared) {
+        shouldCleanupTemp = true;
         Alert.alert('Error', 'Sharing is not supported on this device.');
       }
     } catch (error) {
+      shouldCleanupTemp = true;
       console.error('Export failed:', error);
-      Alert.alert('Export Failed', 'An error occurred while generating your CSV file.');
+      Alert.alert('Export Failed', getErrorMessage(error, 'An error occurred while generating your CSV file.'));
     } finally {
+      if (shouldCleanupTemp && tempFileUri) {
+        await deleteLocalFileQuietly(tempFileUri);
+      }
       setIsExporting(false);
     }
   };
@@ -676,7 +853,12 @@ export const SettingsScreen = () => {
                       color={isSelected ? theme.onPrimary : theme.textMuted}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={[styles.segmentBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.segmentBtnText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                      ]}
+                    >
                       {option.label}
                     </Text>
                   </TouchableOpacity>
@@ -713,8 +895,15 @@ export const SettingsScreen = () => {
                     ]}
                     onPress={() => setFontScale(option)}
                     accessibilityRole="button"
+                    accessibilityLabel={`Text scaling ${Math.round(option * 100)}%`}
+                    accessibilityState={{ selected: isSelected }}
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
                       {option === 1.0 ? '100% (Standard)' : `${Math.round(option * 100)}%`}
                     </Text>
                   </TouchableOpacity>
@@ -749,10 +938,19 @@ export const SettingsScreen = () => {
                         backgroundColor: isSelected ? theme.primary : theme.background,
                       },
                     ]}
-                    onPress={() => setCurrencyCode(option)}
+                    onPress={() => handleCurrencySelect(option)}
                     accessibilityRole="button"
+                    accessibilityLabel={`Select ${option} currency`}
+                    accessibilityState={{ selected: isSelected }}
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>{option}</Text>
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
+                      {option}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
@@ -785,7 +983,12 @@ export const SettingsScreen = () => {
                     onPress={() => setDateFormat(option.key)}
                     accessibilityRole="button"
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
                       {option.label}
                     </Text>
                   </TouchableOpacity>
@@ -846,7 +1049,12 @@ export const SettingsScreen = () => {
                     accessibilityLabel={`Week starts on ${option.label}`}
                     accessibilityState={{ selected: isSelected }}
                   >
-                    <Text style={[styles.segmentBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.segmentBtnText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                      ]}
+                    >
                       {option.label}
                     </Text>
                   </TouchableOpacity>
@@ -973,7 +1181,12 @@ export const SettingsScreen = () => {
                   color={aiInferenceMode === 'local' ? theme.onPrimary : theme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'local' ? theme.onPrimary : theme.text }]}>
+                <Text
+                  style={[
+                    styles.segmentBtnText,
+                    { color: aiInferenceMode === 'local' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                  ]}
+                >
                   On-Device (Offline)
                 </Text>
               </TouchableOpacity>
@@ -995,7 +1208,12 @@ export const SettingsScreen = () => {
                   color={aiInferenceMode === 'external' ? theme.onPrimary : theme.textMuted}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.segmentBtnText, { color: aiInferenceMode === 'external' ? theme.onPrimary : theme.text }]}>
+                <Text
+                  style={[
+                    styles.segmentBtnText,
+                    { color: aiInferenceMode === 'external' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                  ]}
+                >
                   External API
                 </Text>
               </TouchableOpacity>
@@ -1017,60 +1235,69 @@ export const SettingsScreen = () => {
                   },
                 ]}
               >
-                <View style={styles.modelCardHeader}>
+                <View style={styles.modelCardHeader} testID="model-card-header">
                   <View style={styles.modelCardTitleWrap}>
                     <View style={[styles.modelBadgeIcon, { backgroundColor: theme.primaryMuted }]}>
                       <Ionicons name="hardware-chip" size={18} color={theme.primary} />
                     </View>
-                    <View>
-                      <Text style={[styles.modelName, { color: theme.text }]}>{activeModel.displayName.replace(' (Offline)', '')} (GGUF)</Text>
-                      <Text style={[styles.modelSpec, { color: theme.textMuted }]}>
+                    <View style={styles.modelTitleCopy}>
+                      <Text
+                        style={[styles.modelName, { color: theme.text, fontSize: theme.scaleFont(15) }]}
+                        testID="model-card-name"
+                      >
+                        {activeModel.displayName.replace(' (Offline)', '')} (GGUF)
+                      </Text>
+                      <Text style={[styles.modelSpec, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                         {modelDownloadLabel} · {formatGb(activeModel.requiredRamBytes)} RAM required · {formatGb(activeModel.recommendedRamBytes)} recommended
                       </Text>
                     </View>
                   </View>
 
-                  <View
-                    style={[
-                      styles.statusPill,
-                      {
-                        backgroundColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
-                          ? theme.incomeMuted
-                          : provisioning.status === 'failed'
-                          ? theme.expenseMuted
-                          : isInProgress
-                          ? theme.primaryMuted
-                          : theme.surface,
-                        borderColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
-                          ? theme.income
-                          : provisioning.status === 'failed'
-                          ? theme.expense
-                          : isInProgress
-                          ? theme.primary
-                          : theme.border,
-                      },
-                    ]}
-                  >
-                    <Text
+                  <View style={styles.statusPillRow}>
+                    <View
+                      testID="model-status-pill"
                       style={[
-                        styles.statusPillText,
+                        styles.statusPill,
                         {
-                          color: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
+                          backgroundColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
+                            ? theme.incomeMuted
+                            : provisioning.status === 'failed'
+                            ? theme.expenseMuted
+                            : isInProgress
+                            ? theme.primaryMuted
+                            : theme.surface,
+                          borderColor: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
                             ? theme.income
                             : provisioning.status === 'failed'
                             ? theme.expense
                             : isInProgress
                             ? theme.primary
-                            : theme.textMuted,
+                            : theme.border,
                         },
                       ]}
                     >
-                      {modelStatusLabel}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          {
+                            color: isQwenDownloaded && provisioning.status !== 'failed' && !isInProgress
+                              ? theme.income
+                              : provisioning.status === 'failed'
+                              ? theme.expense
+                              : isInProgress
+                              ? theme.primary
+                              : theme.textMuted,
+                            fontSize: theme.scaleFont(11),
+                          },
+                        ]}
+                      >
+                        {modelStatusLabel}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
-                <Text style={[styles.modelDesc, { color: theme.textMuted }]}>
+                <Text style={[styles.modelDesc, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                   High-performance quantized edge language model. Runs 100% locally on Android without internet connection.
                 </Text>
 
@@ -1086,11 +1313,11 @@ export const SettingsScreen = () => {
                       />
                     </View>
                     <View style={styles.downloadMetaRow}>
-                      <Text style={[styles.downloadMetaText, { color: theme.textMuted }]}>
+                      <Text style={[styles.downloadMetaText, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                         {progressPercent}% completed{provisioning.status === 'paused' ? ' (Paused)' : ''}
                       </Text>
                       {isDownloading && throughputLabel && (
-                        <Text style={[styles.downloadMetaText, { color: theme.primary }]}>
+                        <Text style={[styles.downloadMetaText, { color: theme.primary, fontSize: theme.scaleFont(11) }]}>
                           Speed: {throughputLabel}
                         </Text>
                       )}
@@ -1098,9 +1325,25 @@ export const SettingsScreen = () => {
                   </View>
                 )}
 
+                {/* Indeterminate progress indicator during verification / unpacking / registering */}
+                {isInProgress && !isDownloading && (
+                  <View
+                    testID="model-verifying-progress"
+                    style={[styles.verifyingProgressRow, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                    accessibilityRole="progressbar"
+                  >
+                    <ActivityIndicator size="small" color={theme.primary} />
+                    <Text style={[styles.verifyingProgressText, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                      {provisioning.status === 'verifying'
+                        ? 'Verifying model integrity…'
+                        : `${modelStatusLabel}…`}
+                    </Text>
+                  </View>
+                )}
+
                 {/* Error message for failed */}
                 {provisioning.status === 'failed' && provisioning.lastError && (
-                  <Text style={[styles.modelErrorText, { color: theme.expense }]}>
+                  <Text style={[styles.modelErrorText, { color: theme.expense, fontSize: theme.scaleFont(12) }]}>
                     {provisioning.lastError}
                   </Text>
                 )}
@@ -1115,7 +1358,7 @@ export const SettingsScreen = () => {
                       accessibilityRole="button"
                     >
                       <Ionicons name="pause-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
-                      <Text style={[styles.modelActionText, { color: theme.primary }]}>Pause</Text>
+                      <Text style={[styles.modelActionText, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>Pause</Text>
                     </TouchableOpacity>
                   )}
 
@@ -1127,7 +1370,7 @@ export const SettingsScreen = () => {
                       accessibilityRole="button"
                     >
                       <Ionicons name="close-circle-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
-                      <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Cancel</Text>
+                      <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>Cancel</Text>
                     </TouchableOpacity>
                   )}
 
@@ -1143,7 +1386,7 @@ export const SettingsScreen = () => {
                       ) : (
                         <>
                           <Ionicons name="refresh-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
-                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Retry</Text>
+                          <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>Retry</Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -1166,7 +1409,7 @@ export const SettingsScreen = () => {
                             color={theme.onPrimary}
                             style={{ marginRight: 6 }}
                           />
-                          <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>
+                          <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>
                             {provisioning.status === 'paused' ? 'Resume' : 'Download Model'}
                           </Text>
                         </>
@@ -1182,7 +1425,7 @@ export const SettingsScreen = () => {
                       accessibilityRole="button"
                     >
                       <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 6 }} />
-                      <Text style={[styles.modelSecondaryActionText, { color: theme.expense }]}>Delete Weights</Text>
+                      <Text style={[styles.modelSecondaryActionText, { color: theme.expense, fontSize: theme.scaleFont(13) }]}>Delete Weights</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1231,7 +1474,12 @@ export const SettingsScreen = () => {
                       }}
                       accessibilityRole="button"
                     >
-                      <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                      <Text
+                        style={[
+                          styles.optionChipText,
+                          { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                        ]}
+                      >
                         {preset.label}
                       </Text>
                     </TouchableOpacity>
@@ -1239,11 +1487,18 @@ export const SettingsScreen = () => {
                 })}
               </View>
 
-              <Text style={[styles.inputLabel, { color: theme.textMuted }]}>Endpoint Base URL</Text>
+              <Text style={[styles.inputLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                Endpoint Base URL
+              </Text>
               <TextInput
                 style={[
                   styles.formInput,
-                  { backgroundColor: theme.background, borderColor: theme.border, color: theme.text },
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
                 ]}
                 placeholder="https://api.openai.com/v1"
                 placeholderTextColor={theme.textMuted}
@@ -1253,11 +1508,18 @@ export const SettingsScreen = () => {
                 autoCorrect={false}
               />
 
-              <Text style={[styles.inputLabel, { color: theme.textMuted }]}>Model Identifier</Text>
+              <Text style={[styles.inputLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                Model Identifier
+              </Text>
               <TextInput
                 style={[
                   styles.formInput,
-                  { backgroundColor: theme.background, borderColor: theme.border, color: theme.text },
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
                 ]}
                 placeholder="gpt-4o-mini"
                 placeholderTextColor={theme.textMuted}
@@ -1267,7 +1529,7 @@ export const SettingsScreen = () => {
                 autoCorrect={false}
               />
 
-              <Text style={[styles.inputLabel, { color: theme.textMuted }]}>
+              <Text style={[styles.inputLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
                 {EXTERNAL_API_PRESETS[externalApiProvider]?.requiresKey
                   ? 'API Key (Required)'
                   : 'API Key (Optional)'}
@@ -1275,7 +1537,12 @@ export const SettingsScreen = () => {
               <TextInput
                 style={[
                   styles.formInput,
-                  { backgroundColor: theme.background, borderColor: theme.border, color: theme.text },
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    color: theme.text,
+                    fontSize: theme.scaleFont(14),
+                  },
                 ]}
                 placeholder="sk-..."
                 placeholderTextColor={theme.textMuted}
@@ -1313,25 +1580,30 @@ export const SettingsScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel={mode.label}
                   >
-                    <Text style={[styles.optionChipText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
                       {mode.label}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <Text style={[styles.modelDesc, { color: theme.textMuted, marginTop: 6, marginBottom: 0 }]}>
+            <Text style={[styles.modelDesc, { color: theme.textMuted, marginTop: 6, marginBottom: 0, fontSize: theme.scaleFont(12) }]}>
               AI vision reads the photo directly: more accurate (90% vs 67% totals in our Indonesian receipt benchmark) but slower, and needs an extra 670 MB download.
             </Text>
 
             {receiptReadingMode === 'vision' && (
               <View style={{ marginTop: 10 }}>
                 {aiInferenceMode === 'external' ? (
-                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0 }]}>
+                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0, fontSize: theme.scaleFont(12) }]}>
                     External mode needs no download.
                   </Text>
                 ) : !isQwenDownloaded ? (
-                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0 }]}>
+                  <Text style={[styles.modelDesc, { color: theme.textMuted, marginBottom: 0, fontSize: theme.scaleFont(12) }]}>
                     AI model must be downloaded first (local mode).
                   </Text>
                 ) : isProjectorDownloading ? (
@@ -1349,7 +1621,7 @@ export const SettingsScreen = () => {
                         />
                       </View>
                       <View style={styles.downloadMetaRow}>
-                        <Text style={[styles.downloadMetaText, { color: theme.textMuted }]}>
+                        <Text style={[styles.downloadMetaText, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                           {`${Math.round(projectorProgress * 100)}% completed`}
                         </Text>
                       </View>
@@ -1362,7 +1634,7 @@ export const SettingsScreen = () => {
                         accessibilityLabel="Cancel vision download"
                       >
                         <Ionicons name="close-circle-outline" size={16} color={theme.onPrimary} style={{ marginRight: 6 }} />
-                        <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>Cancel</Text>
+                        <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>Cancel</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1390,13 +1662,13 @@ export const SettingsScreen = () => {
                       accessibilityRole="button"
                       accessibilityLabel="Remove vision add-on"
                     >
-                      <Text style={[styles.modelActionText, { color: theme.expense }]}>Remove</Text>
+                      <Text style={[styles.modelActionText, { color: theme.expense, fontSize: theme.scaleFont(13) }]}>Remove</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <View>
                     {projectorError && (
-                      <Text style={[styles.modelErrorText, { color: theme.expense, marginBottom: 8 }]}>
+                      <Text style={[styles.modelErrorText, { color: theme.expense, marginBottom: 8, fontSize: theme.scaleFont(12) }]}>
                         {projectorError}
                       </Text>
                     )}
@@ -1413,7 +1685,7 @@ export const SettingsScreen = () => {
                           color={theme.onPrimary}
                           style={{ marginRight: 6 }}
                         />
-                        <Text style={[styles.modelActionText, { color: theme.onPrimary }]}>
+                        <Text style={[styles.modelActionText, { color: theme.onPrimary, fontSize: theme.scaleFont(13) }]}>
                           {projectorError ? 'Retry' : 'Download vision add-on (670 MB)'}
                         </Text>
                       </TouchableOpacity>
@@ -1433,8 +1705,10 @@ export const SettingsScreen = () => {
           <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.categoryColumnHeader}>
               <View>
-                <Text style={[styles.categoryEyebrow, { color: theme.expense }]}>EXPENSE</Text>
-                <Text style={[styles.categoryHeading, { color: theme.text }]}>
+                <Text style={[styles.categoryEyebrow, { color: theme.expense, fontSize: theme.scaleFont(11) }]}>
+                  EXPENSE
+                </Text>
+                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
                   Spending ({expenseCategories.length})
                 </Text>
               </View>
@@ -1451,9 +1725,13 @@ export const SettingsScreen = () => {
             {expenseCategories.map((category) => (
               <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
                 <View style={styles.categoryPillLeft}>
-                  <Text style={[styles.categoryPillText, { color: theme.text }]}>{category.name}</Text>
+                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    {category.name}
+                  </Text>
                   {category.isSystem && (
-                    <Text style={[styles.badgeText, { color: theme.textMuted }]}>Default</Text>
+                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+                      Default
+                    </Text>
                   )}
                 </View>
                 <View style={styles.categoryActions}>
@@ -1482,8 +1760,10 @@ export const SettingsScreen = () => {
           <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 10 }]}>
             <View style={styles.categoryColumnHeader}>
               <View>
-                <Text style={[styles.categoryEyebrow, { color: theme.income }]}>INCOME</Text>
-                <Text style={[styles.categoryHeading, { color: theme.text }]}>
+                <Text style={[styles.categoryEyebrow, { color: theme.income, fontSize: theme.scaleFont(11) }]}>
+                  INCOME
+                </Text>
+                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
                   Earnings ({incomeCategories.length})
                 </Text>
               </View>
@@ -1500,9 +1780,13 @@ export const SettingsScreen = () => {
             {incomeCategories.map((category) => (
               <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
                 <View style={styles.categoryPillLeft}>
-                  <Text style={[styles.categoryPillText, { color: theme.text }]}>{category.name}</Text>
+                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    {category.name}
+                  </Text>
                   {category.isSystem && (
-                    <Text style={[styles.badgeText, { color: theme.textMuted }]}>Default</Text>
+                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+                      Default
+                    </Text>
                   )}
                 </View>
                 <View style={styles.categoryActions}>
@@ -1549,32 +1833,67 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity
-            style={styles.row}
-            onPress={handleExportCSV}
-            disabled={isExporting}
-            accessibilityRole="button"
-            accessibilityLabel="Export Transactions CSV"
-          >
-            <View style={styles.rowLeft}>
-              <Ionicons name="download-outline" size={18} color={theme.primary} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Export Transactions CSV</Text>
-            </View>
-            {isExporting ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
-          </TouchableOpacity>
+          <View style={styles.rowWithSecondary}>
+            <TouchableOpacity
+              style={styles.rowPrimaryArea}
+              onPress={handleExportCSV}
+              disabled={isExporting}
+              accessibilityRole="button"
+              accessibilityLabel="Export Transactions CSV"
+            >
+              <View style={styles.rowLeft}>
+                <Ionicons name="download-outline" size={18} color={theme.primary} />
+                <View style={styles.rowTextBlock}>
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Export Transactions CSV</Text>
+                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                    Save a CSV file directly to a folder on this device
+                  </Text>
+                </View>
+              </View>
+              {isExporting ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
+              onPress={() => void handleShareCSV()}
+              disabled={isExporting}
+              accessibilityRole="button"
+              accessibilityLabel="Share Transactions CSV"
+            >
+              <Ionicons name="share-outline" size={18} color={theme.primary} />
+            </TouchableOpacity>
+          </View>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity style={styles.row} onPress={handleBackup} disabled={isBackingUp} accessibilityRole="button">
-            <View style={styles.rowLeft}>
-              <Ionicons name="cloud-upload-outline" size={18} color={theme.primary} />
-              <View>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Back Up All Data</Text>
-                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Save a file to Drive, email or another app</Text>
+          <View style={styles.rowWithSecondary}>
+            <TouchableOpacity
+              style={styles.rowPrimaryArea}
+              onPress={handleBackup}
+              disabled={isBackingUp}
+              accessibilityRole="button"
+              accessibilityLabel="Back Up All Data"
+            >
+              <View style={styles.rowLeft}>
+                <Ionicons name="cloud-upload-outline" size={18} color={theme.primary} />
+                <View style={styles.rowTextBlock}>
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Back Up All Data</Text>
+                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                    Save a backup file directly to a folder on this device
+                  </Text>
+                </View>
               </View>
-            </View>
-            {isBackingUp ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
-          </TouchableOpacity>
+              {isBackingUp ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
+              onPress={() => void handleShareBackupFile()}
+              disabled={isBackingUp}
+              accessibilityRole="button"
+              accessibilityLabel="Share backup file"
+            >
+              <Ionicons name="share-outline" size={18} color={theme.primary} />
+            </TouchableOpacity>
+          </View>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
@@ -1587,7 +1906,12 @@ export const SettingsScreen = () => {
           >
             <View style={styles.rowLeft}>
               <Ionicons name="cloud-download-outline" size={18} color={theme.primary} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Pick a Silo backup (.db) file to replace local data
+                </Text>
+              </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
@@ -1617,11 +1941,11 @@ export const SettingsScreen = () => {
             accessibilityRole="image"
             accessibilityLabel="Silo app icon"
           />
-          <Text style={[styles.aboutAppName, { color: theme.text }]}>Silo</Text>
-          <Text style={[styles.aboutVersion, { color: theme.textMuted }]}>
+          <Text style={[styles.aboutAppName, { color: theme.text, fontSize: theme.scaleFont(18) }]}>Silo</Text>
+          <Text style={[styles.aboutVersion, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
             Version {appConfig.expo.version}
           </Text>
-          <Text style={[styles.aboutAuthor, { color: theme.primary }]}>Made by CDev</Text>
+          <Text style={[styles.aboutAuthor, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>Made by CDev</Text>
         </View>
       </ScrollView>
 
@@ -1633,7 +1957,7 @@ export const SettingsScreen = () => {
         onRequestClose={() => setMonthStartModalVisible(false)}
       >
         <TouchableOpacity
-          style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+          style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
           activeOpacity={1}
           onPress={() => setMonthStartModalVisible(false)}
         >
@@ -1680,7 +2004,12 @@ export const SettingsScreen = () => {
                     accessibilityLabel={`Month start day ${day}`}
                     accessibilityState={{ selected: isSelected }}
                   >
-                    <Text style={[styles.dayGridBtnText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                    <Text
+                      style={[
+                        styles.dayGridBtnText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                      ]}
+                    >
                       {day}
                     </Text>
                   </TouchableOpacity>
@@ -1709,7 +2038,11 @@ export const SettingsScreen = () => {
           style={styles.keyboardShell}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <TouchableOpacity style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }]} activeOpacity={1} onPress={closeModal}>
+          <TouchableOpacity
+            style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
+            activeOpacity={1}
+            onPress={closeModal}
+          >
             <TouchableOpacity
               activeOpacity={1}
               onPress={(event) => event.stopPropagation()}
@@ -1794,6 +2127,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  rowWithSecondary: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    minHeight: 56,
+  },
+  rowPrimaryArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 14,
+    paddingRight: 10,
+    paddingVertical: 12,
+  },
+  secondaryIconBtn: {
+    width: 48,
+    minHeight: 48,
+    borderLeftWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   rowTextBlock: { flex: 1 },
   rowValueRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
@@ -1841,12 +2195,12 @@ const styles = StyleSheet.create({
   cardSectionHeading: { fontWeight: '700', marginBottom: 8 },
   modelCard: { borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 4 },
   modelCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: 'column',
+    gap: 8,
     marginBottom: 8,
   },
-  modelCardTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 },
+  modelCardTitleWrap: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  modelTitleCopy: { flex: 1, minWidth: 0 },
   modelBadgeIcon: {
     width: 36,
     height: 36,
@@ -1854,9 +2208,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modelName: { fontSize: 15, fontWeight: '800' },
-  modelSpec: { fontSize: 11, marginTop: 2 },
-  statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  modelName: { fontSize: 15, fontWeight: '800', flexShrink: 1 },
+  modelSpec: { fontSize: 11, marginTop: 2, flexShrink: 1 },
+  statusPillRow: { flexDirection: 'row', alignItems: 'center' },
+  statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
   statusPillText: { fontSize: 11, fontWeight: '700' },
   modelDesc: { fontSize: 12, lineHeight: 18, marginBottom: 12 },
   downloadProgressWrap: { marginVertical: 8 },
@@ -1864,6 +2219,17 @@ const styles = StyleSheet.create({
   downloadFill: { height: '100%', borderRadius: 4 },
   downloadMetaRow: { flexDirection: 'row', justifyContent: 'space-between' },
   downloadMetaText: { fontSize: 11, fontWeight: '600' },
+  verifyingProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginVertical: 8,
+  },
+  verifyingProgressText: { flex: 1, fontWeight: '600' },
   modelErrorText: { fontSize: 12, fontWeight: '600', marginBottom: 8 },
   modelActionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   modelActionButton: {

@@ -21,14 +21,16 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import {
+  addAmounts,
   formatAmountForInput,
   formatAmountInput,
   formatDisplayCurrency,
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
-import { formatPeriodLabel } from '../features/transactions/periods';
+import { formatPeriodLabel, isSamePeriod, shiftPeriod } from '../features/transactions/periods';
 import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
@@ -72,10 +74,11 @@ const ProgressBar = ({ spent, limit, theme }: { spent: number; limit: number; th
 
 export const BudgetScreen = () => {
   const theme = useAppTheme();
-  const fontScale = useSettingsStore((state) => state.fontScale);
+  const insets = useSafeInsets();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
+  const monthStartDay = useSettingsStore((state) => state.monthStartDay);
   const {
     budgets,
     setBudget,
@@ -91,16 +94,28 @@ export const BudgetScreen = () => {
     () => formatPeriodLabel(periodBounds, dateFormat || 'en-GB'),
     [periodBounds, dateFormat]
   );
+  const isCurrentPeriodNow = isSamePeriod(currentDate, new Date(), monthStartDay);
   const expenseCategories = getCategoriesByType('expense');
 
-  const refreshMonthData = useCallback(async () => {
+  const changePeriod = useCallback(
+    (offset: number) => {
+      setCurrentDate((prev) => shiftPeriod(prev, offset, monthStartDay));
+    },
+    [monthStartDay]
+  );
+
+  const resetToCurrentPeriod = useCallback(() => {
     setCurrentDate(new Date());
-    await Promise.all([fetchTransactions(), fetchBudgets(), fetchCategories()]);
-  }, [fetchTransactions, fetchBudgets, fetchCategories]);
+  }, []);
+
+  const refreshMonthData = useCallback(async () => {
+    await Promise.all([fetchTransactions(), fetchCategories()]);
+    await fetchBudgets();
+  }, [fetchTransactions, fetchCategories, fetchBudgets]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshMonthData();
+      void refreshMonthData();
     }, [refreshMonthData])
   );
 
@@ -113,16 +128,20 @@ export const BudgetScreen = () => {
     }
   }, [refreshMonthData]);
 
-  const titleScale = useMemo(() => ({ fontSize: 24 * fontScale }), [fontScale]);
-  const bodyScale = useMemo(() => ({ fontSize: 13 * fontScale }), [fontScale]);
-  const smallScale = useMemo(() => ({ fontSize: 11.5 * fontScale }), [fontScale]);
-  const metricScale = useMemo(() => ({ fontSize: 17 * fontScale }), [fontScale]);
+  const titleScale = useMemo(() => ({ fontSize: theme.scaleFont(24) }), [theme]);
+  const bodyScale = useMemo(() => ({ fontSize: theme.scaleFont(13) }), [theme]);
+  const smallScale = useMemo(() => ({ fontSize: theme.scaleFont(11.5) }), [theme]);
+  const metricScale = useMemo(() => ({ fontSize: theme.scaleFont(17) }), [theme]);
 
-  const categorySpending = currentMonthExpenses.reduce((acc, curr) => {
-    const cat = curr.category || 'General';
-    acc[cat] = (acc[cat] || 0) + Math.abs(curr.totalAmount);
-    return acc;
-  }, {} as Record<string, number>);
+  const categorySpending = useMemo(
+    () =>
+      currentMonthExpenses.reduce((acc, curr) => {
+        const cat = curr.category || 'General';
+        acc[cat] = addAmounts(acc[cat] || 0, Math.abs(curr.totalAmount));
+        return acc;
+      }, {} as Record<string, number>),
+    [currentMonthExpenses]
+  );
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -138,7 +157,7 @@ export const BudgetScreen = () => {
         const spent = categorySpending[categoryName] || 0;
         const hasBudget = limit > 0;
         const percentage = hasBudget ? (spent / limit) * 100 : 0;
-        const remaining = hasBudget ? limit - spent : 0;
+        const remaining = hasBudget ? addAmounts(limit, -spent) : 0;
 
         return {
           category: categoryName,
@@ -152,8 +171,19 @@ export const BudgetScreen = () => {
     [budgets, expenseCategories, categorySpending]
   );
 
-  const totalBudgeted = budgetCards.reduce((sum, item) => sum + item.limit, 0);
-  const totalSpent = budgetCards.reduce((sum, item) => sum + item.spent, 0);
+  const totalBudgeted = useMemo(
+    () => budgetCards.reduce((sum, item) => addAmounts(sum, item.limit), 0),
+    [budgetCards]
+  );
+  const budgetedSpent = useMemo(
+    () => budgetCards.reduce((sum, item) => (item.hasBudget ? addAmounts(sum, item.spent) : sum), 0),
+    [budgetCards]
+  );
+  const totalAllSpent = useMemo(
+    () => currentMonthExpenses.reduce((sum, tx) => addAmounts(sum, Math.abs(tx.totalAmount)), 0),
+    [currentMonthExpenses]
+  );
+  const unbudgetedSpent = Math.max(0, addAmounts(totalAllSpent, -budgetedSpent));
   const activeBudgetCount = budgetCards.filter((item) => item.hasBudget).length;
   const overspentCount = budgetCards.filter((item) => item.hasBudget && item.spent > item.limit).length;
 
@@ -204,21 +234,71 @@ export const BudgetScreen = () => {
         <View style={styles.headerRow}>
           <View style={styles.headerTitleBlock}>
             <Text style={[styles.headerTitle, { color: theme.text }, titleScale]}>Monthly Plan</Text>
-            <Text style={[styles.periodSubtitle, { color: theme.textMuted }, smallScale]} numberOfLines={1}>
-              {periodLabel}
-            </Text>
           </View>
           <View style={[styles.headerPill, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text
               style={[
                 styles.headerPillText,
-                { color: overspentCount > 0 ? theme.expense : theme.income },
+                {
+                  color:
+                    activeBudgetCount === 0
+                      ? theme.textMuted
+                      : overspentCount > 0
+                        ? theme.expense
+                        : theme.income,
+                },
                 smallScale,
               ]}
             >
-              {overspentCount > 0 ? `${overspentCount} overspent` : 'Balanced'}
+              {activeBudgetCount === 0
+                ? 'No limits'
+                : overspentCount > 0
+                  ? `${overspentCount} overspent`
+                  : 'Balanced'}
             </Text>
           </View>
+        </View>
+
+        {/* Month / Period Navigation */}
+        <View style={[styles.periodBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity
+            onPress={() => changePeriod(-1)}
+            style={styles.periodArrowBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+          >
+            <Ionicons name="chevron-back" size={20} color={theme.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={resetToCurrentPeriod}
+            style={styles.periodCenterBtn}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Jump to current month"
+          >
+            <Text
+              style={[styles.periodSubtitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {periodLabel}
+            </Text>
+            {!isCurrentPeriodNow ? (
+              <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
+                <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10.5) }]}>
+                  Today
+                </Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => changePeriod(1)}
+            style={styles.periodArrowBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Next month"
+          >
+            <Ionicons name="chevron-forward" size={20} color={theme.text} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -245,9 +325,38 @@ export const BudgetScreen = () => {
             </View>
             <View style={[styles.metricDivider, { backgroundColor: theme.border }]} />
             <View style={styles.metricCell}>
-              <Text style={[styles.metricLabel, { color: theme.textMuted }, smallScale]}>Total Spent</Text>
-              <Text style={[styles.metricValue, { color: theme.text }, metricScale]}>
-                {formatDisplayCurrency(totalSpent, currencyCode, useThousandsSeparator)}
+              <Text style={[styles.metricLabel, { color: theme.textMuted }, smallScale]}>Budgeted Spent</Text>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: totalBudgeted > 0 && budgetedSpent > totalBudgeted ? theme.expense : theme.text },
+                  metricScale,
+                ]}
+              >
+                {formatDisplayCurrency(budgetedSpent, currencyCode, useThousandsSeparator)}
+              </Text>
+            </View>
+          </View>
+
+          <View
+            testID="budget-unbudgeted-row"
+            style={[styles.unbudgetedRow, { backgroundColor: theme.background, borderColor: theme.border }]}
+          >
+            <View style={styles.unbudgetedCopy}>
+              <Text style={[styles.unbudgetedLabel, { color: theme.textMuted }, smallScale]}>
+                Unbudgeted spending
+              </Text>
+              <Text style={[styles.unbudgetedValue, { color: theme.text }, bodyScale]}>
+                {formatDisplayCurrency(unbudgetedSpent, currencyCode, useThousandsSeparator)}
+              </Text>
+            </View>
+            <View style={[styles.unbudgetedDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.unbudgetedCopy}>
+              <Text style={[styles.unbudgetedLabel, { color: theme.textMuted }, smallScale]}>
+                All spending
+              </Text>
+              <Text style={[styles.unbudgetedValue, { color: theme.text }, bodyScale]}>
+                {formatDisplayCurrency(totalAllSpent, currencyCode, useThousandsSeparator)}
               </Text>
             </View>
           </View>
@@ -309,7 +418,11 @@ export const BudgetScreen = () => {
                       {item.category}
                     </Text>
                     <Text style={[styles.categoryMeta, { color: theme.textMuted }, smallScale]}>
-                      {item.hasBudget ? `${Math.round(item.percentage)}% of cap used` : 'No budget set'}
+                      {item.hasBudget
+                        ? `${Math.round(item.percentage)}% of cap used`
+                        : item.spent > 0
+                          ? `Spent ${formatDisplayCurrency(item.spent, currencyCode, useThousandsSeparator)} · No budget set`
+                          : 'No budget set'}
                     </Text>
                   </View>
                   <View style={[styles.editDotWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
@@ -378,7 +491,13 @@ export const BudgetScreen = () => {
             style={styles.keyboardShell}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           >
-            <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.58)' }]}>
+            <View
+              style={[
+                styles.modalOverlay,
+                { backgroundColor: 'rgba(0,0,0,0.58)' },
+                getModalOverlayInsetStyle(insets, 16),
+              ]}
+            >
               <TouchableOpacity
                 style={StyleSheet.absoluteFill}
                 activeOpacity={1}
@@ -532,9 +651,36 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   headerTitleBlock: { flex: 1 },
   headerTitle: { fontWeight: '800', letterSpacing: -0.5 },
-  periodSubtitle: { fontWeight: '600', marginTop: 2 },
   headerPill: { minHeight: 32, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, justifyContent: 'center' },
   headerPillText: { fontWeight: '700' },
+  periodBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 4,
+    minHeight: 46,
+  },
+  periodArrowBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodCenterBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 4,
+  },
+  periodSubtitle: { fontWeight: '700', flexShrink: 1 },
+  todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  todayBadgeText: { fontWeight: '700' },
   content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 28 },
   heroPanel: { borderWidth: 1, borderRadius: 20, padding: 14, marginBottom: 14 },
   heroMetricGrid: { flexDirection: 'row', alignItems: 'stretch' },
@@ -542,6 +688,19 @@ const styles = StyleSheet.create({
   metricDivider: { width: 1, marginHorizontal: 12 },
   metricLabel: { fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
   metricValue: { fontWeight: '800' },
+  unbudgetedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  unbudgetedCopy: { flex: 1 },
+  unbudgetedDivider: { width: 1, height: 28, marginHorizontal: 10 },
+  unbudgetedLabel: { fontWeight: '600', marginBottom: 2 },
+  unbudgetedValue: { fontWeight: '700' },
   miniStatRow: { flexDirection: 'row', marginTop: 12, gap: 8 },
   miniStatChip: {
     flexDirection: 'row',

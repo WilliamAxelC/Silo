@@ -41,12 +41,14 @@ const LogRow = React.memo(function LogRow({ entry, onCopy }: LogRowProps) {
     <View style={[styles.logCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.logHeader}>
         <View style={[styles.levelBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
-          <Text style={[styles.levelBadgeText, { color: badgeColor }]}>{entry.level.toUpperCase()}</Text>
+          <Text style={[styles.levelBadgeText, { color: badgeColor, fontSize: theme.scaleFont(9) }]}>
+            {entry.level.toUpperCase()}
+          </Text>
         </View>
-        <Text style={[styles.logEvent, { color: theme.text }]} numberOfLines={1}>
+        <Text style={[styles.logEvent, { color: theme.text, fontSize: theme.scaleFont(12) }]} numberOfLines={1}>
           {entry.event}
         </Text>
-        <Text style={[styles.logTime, { color: theme.textMuted }]}>
+        <Text style={[styles.logTime, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
           {new Date(entry.timestamp).toLocaleTimeString()}
         </Text>
         <TouchableOpacity
@@ -60,11 +62,11 @@ const LogRow = React.memo(function LogRow({ entry, onCopy }: LogRowProps) {
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.logMessage, { color: theme.text }]}>{entry.message}</Text>
+      <Text style={[styles.logMessage, { color: theme.text, fontSize: theme.scaleFont(12) }]}>{entry.message}</Text>
 
       {entry.details ? (
         <View style={[styles.detailsBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
-          <Text style={[styles.logDetails, { color: theme.textMuted }]}>
+          <Text style={[styles.logDetails, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
             {JSON.stringify(entry.details, null, 2)}
           </Text>
         </View>
@@ -171,8 +173,8 @@ export const SystemLogsScreen = () => {
           <Ionicons name="chevron-back" size={24} color={theme.text} />
         </TouchableOpacity>
         <View style={styles.headerCopy}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>System Logs</Text>
-          <Text style={[styles.headerSubtitle, { color: theme.textMuted }]}>
+          <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(17) }]}>System Logs</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
             Runtime, model & inference diagnostics
           </Text>
         </View>
@@ -217,7 +219,12 @@ export const SystemLogsScreen = () => {
                 accessibilityRole="button"
                 accessibilityLabel={`Filter ${level} logs (${count})`}
               >
-                <Text style={[styles.filterPillText, { color: isSelected ? theme.onPrimary : theme.text }]}>
+                <Text
+                  style={[
+                    styles.filterPillText,
+                    { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(11) },
+                  ]}
+                >
                   {level.toUpperCase()}
                 </Text>
                 <View
@@ -228,7 +235,12 @@ export const SystemLogsScreen = () => {
                     },
                   ]}
                 >
-                  <Text style={[styles.filterCountText, { color: isSelected ? theme.onPrimary : theme.textMuted }]}>
+                  <Text
+                    style={[
+                      styles.filterCountText,
+                      { color: isSelected ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(10) },
+                    ]}
+                  >
                     {count}
                   </Text>
                 </View>
@@ -241,7 +253,7 @@ export const SystemLogsScreen = () => {
         <View style={[styles.searchWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
           <Ionicons name="search-outline" size={16} color={theme.textMuted} style={{ marginRight: 6 }} />
           <TextInput
-            style={[styles.searchInput, { color: theme.text }]}
+            style={[styles.searchInput, { color: theme.text, fontSize: theme.scaleFont(13) }]}
             placeholder="Search events or messages..."
             placeholderTextColor={theme.textMuted}
             value={searchQuery}
@@ -272,24 +284,40 @@ export const SystemLogsScreen = () => {
           <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.summaryHeader}>
               <Ionicons name="hardware-chip-outline" size={16} color={theme.primary} />
-              <Text style={[styles.summaryTitle, { color: theme.text }]}>Runtime Diagnostics</Text>
+              <Text style={[styles.summaryTitle, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
+                Runtime Diagnostics
+              </Text>
             </View>
             <View style={styles.summaryGrid}>
               <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Provisioning:</Text>
-                <Text style={[styles.summaryValue, { color: theme.text }]}>{provisioningStatus}</Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Provisioning:
+                </Text>
+                <Text style={[styles.summaryValue, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                  {provisioningStatus}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Runtime State:</Text>
-                <Text style={[styles.summaryValue, { color: theme.text }]}>{runtimeState}</Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Runtime State:
+                </Text>
+                <Text style={[styles.summaryValue, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                  {runtimeState}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Active Status:</Text>
-                <Text style={[styles.summaryValue, { color: theme.text }]}>{activeStatusLabel ?? 'Idle'}</Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Active Status:
+                </Text>
+                <Text style={[styles.summaryValue, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                  {activeStatusLabel ?? 'Idle'}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Streaming Buffer:</Text>
-                <Text style={[styles.summaryValue, { color: theme.text }]}>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Streaming Buffer:
+                </Text>
+                <Text style={[styles.summaryValue, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
                   {streamingBufferLength > 0 ? `${streamingBufferLength} chars` : 'Empty'}
                 </Text>
               </View>
@@ -299,8 +327,10 @@ export const SystemLogsScreen = () => {
         ListEmptyComponent={
           <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Ionicons name="document-text-outline" size={32} color={theme.textMuted} style={{ marginBottom: 8 }} />
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>No matching logs</Text>
-            <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+            <Text style={[styles.emptyTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
+              No matching logs
+            </Text>
+            <Text style={[styles.emptyText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
               {logs.length === 0
                 ? 'Runtime, model, and inference events will appear here once active.'
                 : 'No logs match your filter criteria.'}

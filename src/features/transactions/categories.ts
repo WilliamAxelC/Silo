@@ -119,6 +119,7 @@ export function getInitialAppSettings(): AppSettings {
     dailyReminderTime: DEFAULT_APP_SETTINGS.dailyReminderTime,
     monthStartDay: DEFAULT_APP_SETTINGS.monthStartDay,
     weekStartDay: DEFAULT_APP_SETTINGS.weekStartDay,
+    hasCompletedOnboarding: DEFAULT_APP_SETTINGS.hasCompletedOnboarding,
   };
 }
 
@@ -210,6 +211,9 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         if (row.value === 'monday' || row.value === 'sunday') {
           base.weekStartDay = row.value;
         }
+        break;
+      case APP_SETTING_KEYS.hasCompletedOnboarding:
+        base.hasCompletedOnboarding = row.value === 'true';
         break;
       case RECEIPT_READING_MODE_KEY:
         if (row.value === 'ocr' || row.value === 'vision') {

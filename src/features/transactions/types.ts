@@ -94,6 +94,8 @@ export interface AppSettings {
   monthStartDay: number;
   /** First day of the week shown in calendar views ('monday' | 'sunday'). */
   weekStartDay: WeekStartDay;
+  /** Whether the user has completed or skipped the first-launch welcome setup sheet. */
+  hasCompletedOnboarding: boolean;
 }
 
 export type TransactionInput = Omit<Transaction, 'id'>;

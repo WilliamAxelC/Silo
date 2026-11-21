@@ -26,7 +26,7 @@ export const MoreScreen = () => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>More</Text>
+        <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(17) }]}>More</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -36,14 +36,19 @@ export const MoreScreen = () => {
               <Ionicons name="sparkles" size={20} color={theme.primary} />
             </View>
             <View style={styles.aiHeaderText}>
-              <Text style={[styles.aiTitle, { color: theme.text }]}>Silo AI Chatbot</Text>
-              <Text style={[styles.aiDesc, { color: theme.textMuted }]}>Ask about spending or budgets.</Text>
+              <Text style={[styles.aiTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]}>Silo AI Chatbot</Text>
+              <Text style={[styles.aiDesc, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                Ask about spending or budgets.
+              </Text>
             </View>
           </View>
 
           <View style={styles.aiInputRow}>
             <TextInput
-              style={[styles.input, { backgroundColor: theme.background, borderColor: theme.border, color: theme.text }]}
+              style={[
+                styles.input,
+                { backgroundColor: theme.background, borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(14) },
+              ]}
               placeholderTextColor={theme.textMuted}
               placeholder="Ask a finance question"
               value={dummyQuery}
@@ -83,7 +88,7 @@ export const MoreScreen = () => {
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Accounts')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="wallet-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text }]}>Accounts</Text>
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Accounts</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
@@ -93,7 +98,7 @@ export const MoreScreen = () => {
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Recurring')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="repeat-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text }]}>Recurring</Text>
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Recurring</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
@@ -103,7 +108,7 @@ export const MoreScreen = () => {
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('ReceiptInbox')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="receipt-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text }]}>Receipt Inbox</Text>
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Receipt Inbox</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
@@ -113,7 +118,7 @@ export const MoreScreen = () => {
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('SystemLogs')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="document-text-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text }]}>System Logs</Text>
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>System Logs</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
@@ -123,14 +128,14 @@ export const MoreScreen = () => {
           <TouchableOpacity style={styles.menuRow} onPress={() => navigation.navigate('Settings')} accessibilityRole="button">
             <View style={styles.settingRowLeft}>
               <Ionicons name="settings-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text }]}>App Settings</Text>
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>App Settings</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
         </View>
 
         <View style={styles.footerWrap}>
-          <Text style={[styles.footerText, { color: theme.textMuted }]}>Silo · by CDev</Text>
+          <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by CDev</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

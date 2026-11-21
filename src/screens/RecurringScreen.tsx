@@ -47,14 +47,22 @@ export const RecurringScreen = () => {
     return (
       <View style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: item.isActive ? 1 : 0.6 }]}>
         <View style={styles.rowBody}>
-          <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>
+          <Text style={[styles.rowTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
             {item.template.merchantName}
           </Text>
-          <Text style={[styles.rowSub, { color: theme.textMuted }]}>
+          <Text style={[styles.rowSub, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
             {label} · {item.isActive ? `next ${next}` : 'paused'}
           </Text>
         </View>
-        <Text style={[styles.amount, { color: item.template.type === 'transfer' ? theme.primary : isIncome ? theme.income : theme.expense }]}>
+        <Text
+          style={[
+            styles.amount,
+            {
+              color: item.template.type === 'transfer' ? theme.primary : isIncome ? theme.income : theme.expense,
+              fontSize: theme.scaleFont(14),
+            },
+          ]}
+        >
           {formatDisplayCurrency(Math.abs(item.template.totalAmount), currencyCode, useThousands)}
         </Text>
         <Switch
@@ -74,12 +82,12 @@ export const RecurringScreen = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Go back">
           <Ionicons name="chevron-back" size={22} color={theme.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: theme.text }]}>Recurring</Text>
+        <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(20) }]}>Recurring</Text>
       </View>
       <FlatList
         data={rules}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
 
 interface SourceSelectorModalProps {
@@ -13,13 +14,20 @@ interface SourceSelectorModalProps {
 
 export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visible, onClose, onPickImage, scanMode }) => {
   const theme = useAppTheme();
+  const insets = useSafeInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
+      <TouchableOpacity
+        style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 20)]}
+        activeOpacity={1}
+        onPress={onClose}
+      >
         <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.modalTitle, { color: theme.text }]}>{scanMode ? 'Add receipts' : 'Select a Source'}</Text>
+          <Text style={[styles.modalTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
+            {scanMode ? 'Add receipts' : 'Select a Source'}
+          </Text>
           {scanMode ? (
-            <Text style={[styles.modalHint, { color: theme.textMuted }]}>
+            <Text style={[styles.modalHint, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
               Scan or pick several at once; they are read in the background.
             </Text>
           ) : null}
@@ -31,7 +39,7 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
               accessibilityLabel="Select from gallery"
             >
               <Ionicons name="images" size={34} color="#fff" />
-              <Text style={styles.modalBtnText}>Gallery</Text>
+              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14) }]}>Gallery</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.modalBtn, { backgroundColor: theme.primary }]}
@@ -40,7 +48,9 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
               accessibilityLabel="Take photo with camera"
             >
               <Ionicons name={scanMode ? 'scan' : 'camera'} size={34} color="#fff" />
-              <Text style={styles.modalBtnText}>{scanMode ? 'Scan' : 'Camera'}</Text>
+              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14) }]}>
+                {scanMode ? 'Scan' : 'Camera'}
+              </Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
@@ -49,7 +59,7 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
             accessibilityRole="button"
             accessibilityLabel="Cancel"
           >
-            <Text style={[styles.cancelBtnText, { color: theme.expense }]}>Cancel</Text>
+            <Text style={[styles.cancelBtnText, { color: theme.expense, fontSize: theme.scaleFont(14) }]}>Cancel</Text>
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>

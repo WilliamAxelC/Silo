@@ -1,7 +1,8 @@
 import React from 'react';
-import { FlatList } from 'react-native';
+import { FlatList, StyleSheet, Text } from 'react-native';
 import { SystemLogsScreen } from '../SystemLogsScreen';
 import { useAIStore, createInitialProvisioningSnapshot, createInitialRuntimeSnapshot } from '../../store/useAIStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -57,6 +58,43 @@ describe('SystemLogsScreen', () => {
 
     const copySingleBtn = renderer.root.findByProps({ accessibilityLabel: 'Copy this log' });
     expect(copySingleBtn.props.accessibilityRole).toBe('button');
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('scales filter pills, runtime diagnostics summary, and log rows with fontScale (R3A-08)', () => {
+    useSettingsStore.setState({ fontScale: 1.0 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<SystemLogsScreen />);
+    });
+
+    const getSize = (label: string) => {
+      const node = renderer.root.findAllByType(Text).find((t: any) => {
+        const text = Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '');
+        return text === label;
+      });
+      return StyleSheet.flatten(node.props.style).fontSize;
+    };
+
+    const sizes100 = {
+      filterPill: getSize('ALL'),
+      summaryTitle: getSize('Runtime Diagnostics'),
+      logEvent: getSize('model.load'),
+      logMessage: getSize('Loaded model cleanly'),
+    };
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ fontScale: 1.2 });
+    });
+
+    expect(getSize('ALL')).toBeGreaterThan(sizes100.filterPill);
+    expect(getSize('Runtime Diagnostics')).toBeGreaterThan(sizes100.summaryTitle);
+    expect(getSize('model.load')).toBeGreaterThan(sizes100.logEvent);
+    expect(getSize('Loaded model cleanly')).toBeGreaterThan(sizes100.logMessage);
 
     ReactTestRenderer.act(() => {
       renderer.unmount();

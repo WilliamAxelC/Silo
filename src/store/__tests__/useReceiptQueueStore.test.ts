@@ -18,6 +18,7 @@ jest.mock('expo-file-system/legacy', () => ({
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
   copyAsync: jest.fn(() => Promise.resolve()),
   deleteAsync: jest.fn(() => Promise.resolve()),
+  getInfoAsync: jest.fn((uri: string) => Promise.resolve({ exists: true, size: 1024, md5: `hash-${uri}` })),
 }));
 const mockAnalyze = jest.fn();
 jest.mock('../../services/ai/agent', () => ({ analyzeReceiptImage: (...args: unknown[]) => mockAnalyze(...args) }));
@@ -36,7 +37,7 @@ describe('useReceiptQueueStore', () => {
   beforeAll(() => {
     // Same table as db/index.ts createReceiptQueueTable (db/index is mocked here).
     rawDb.exec(`CREATE TABLE receipt_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, image_uri TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending', result_json TEXT, error TEXT, created_at INTEGER NOT NULL);`);
+      image_hash TEXT, status TEXT NOT NULL DEFAULT 'pending', result_json TEXT, error TEXT, created_at INTEGER NOT NULL);`);
   });
 
   beforeEach(() => {
@@ -105,5 +106,56 @@ describe('useReceiptQueueStore', () => {
     expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(1);
     expect(FileSystem.deleteAsync).toHaveBeenCalledWith(discarded.imageUri, { idempotent: true });
     expect(useReceiptQueueStore.getState().items).toEqual([]);
+  });
+
+  it('detects and skips duplicate receipt imports by image content hash across picker URIs (F-07)', async () => {
+    mockAnalyze.mockResolvedValue({ merchantName: 'Coffee Shop', totalAmount: 30000, confidence: 'high' });
+    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => {
+      if (uri.includes('same-photo')) {
+        return { exists: true, size: 4096, md5: 'deadbeef1234' };
+      }
+      return { exists: true, size: 2048, md5: `unique-${uri}` };
+    });
+
+    const first = await useReceiptQueueStore
+      .getState()
+      .enqueue(['file:///picker/same-photo-1.jpg', 'file:///picker/other.jpg']);
+    await waitIdle();
+    expect(first).toEqual({ added: 2, skippedDuplicates: 0 });
+    expect(useReceiptQueueStore.getState().items).toHaveLength(2);
+
+    // Re-importing the same photo via a new temporary gallery URI is skipped
+    const second = await useReceiptQueueStore
+      .getState()
+      .enqueue(['file:///picker/same-photo-2.jpg', 'file:///picker/same-photo-3.jpg']);
+    await waitIdle();
+    expect(second).toEqual({ added: 0, skippedDuplicates: 2 });
+    expect(useReceiptQueueStore.getState().items).toHaveLength(2);
+    // Only the 2 unique files were copied into storage
+    expect(FileSystem.copyAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('supports clearByStatus and removeMany for bulk inbox cleanup (F-08)', async () => {
+    mockAnalyze
+      .mockResolvedValueOnce({ merchantName: 'Done 1', totalAmount: 10000 })
+      .mockRejectedValueOnce(new Error('NO_TEXT_DETECTED'))
+      .mockResolvedValueOnce({ merchantName: 'Done 2', totalAmount: 20000 });
+
+    await useReceiptQueueStore
+      .getState()
+      .enqueue(['file:///cache/1.jpg', 'file:///cache/2.jpg', 'file:///cache/3.jpg']);
+    await waitIdle();
+
+    expect(useReceiptQueueStore.getState().items.map((i) => i.status)).toEqual(['done', 'failed', 'done']);
+
+    const clearedCount = await useReceiptQueueStore.getState().clearByStatus(['done']);
+    expect(clearedCount).toBe(2);
+    const remaining = useReceiptQueueStore.getState().items;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].status).toBe('failed');
+
+    await useReceiptQueueStore.getState().removeMany([remaining[0].id]);
+    expect(useReceiptQueueStore.getState().items).toEqual([]);
+    expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(3);
   });
 });

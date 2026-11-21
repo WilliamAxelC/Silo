@@ -1,4 +1,12 @@
-import { buildReceiptRows, extractAmounts, isGrounded, pickTotalFromRows } from '../receiptText';
+import {
+  buildReceiptRows,
+  extractAmounts,
+  isGrounded,
+  isNonItemLine,
+  isSuspiciousMerchantName,
+  pickMerchantFromRows,
+  pickTotalFromRows,
+} from '../receiptText';
 
 describe('receiptText', () => {
   describe('buildReceiptRows', () => {
@@ -122,6 +130,159 @@ describe('receiptText', () => {
       expect(isGrounded(25000, rows)).toBe(true);
       expect(isGrounded(26000, rows)).toBe(false);
       expect(isGrounded(0, rows)).toBe(false);
+    });
+  });
+
+  describe('isNonItemLine (F-07)', () => {
+    it('filters subtotal, tax, cash, change, Indonesian tenders, and OCR-garbled total lines', () => {
+      const nonItems = [
+        'SUBTOTAL',
+        'Sub Total',
+        'SUS T8TAL',
+        'S8BTOTAL',
+        'TAX 10%',
+        'PB1 10%',
+        'PPN 11%',
+        'TOTAL',
+        'GRAND TOTAL',
+        'TOTAL BELANJA',
+        'CASH',
+        'CAS8',
+        'CHANGE',
+        'CHNGE',
+        'TUNAI',
+        'KEMBALIAN',
+        'KEMBALI',
+        'QRIS',
+        'ROUNDING',
+        'DISCOUNT',
+        'HARGA JUAL',
+        'TOTAL ITEM 3',
+      ];
+      for (const line of nonItems) {
+        expect(isNonItemLine(line)).toBe(true);
+      }
+    });
+
+    it('keeps legitimate receipt items including foods with similar substrings', () => {
+      const realItems = [
+        'Tuna Sandwich',
+        'Nasi Goreng Kampung',
+        'Ayam Bakar Madu',
+        'Es Kopi Susu',
+        'Iced Americano',
+        'Toast Kaya Butter',
+        'Item 1',
+      ];
+      for (const line of realItems) {
+        expect(isNonItemLine(line)).toBe(false);
+      }
+    });
+
+    it('never drops real Indonesian and English item names containing summary/payment keywords or close edit-distance food words (R3A-01)', () => {
+      const realItemsWithKeywords = [
+        'Cash Back Burger  45.000',
+        'Cash Back Burger',
+        'Potongan Ayam  22.000',
+        'Potongan Ayam',
+        'Paket Hemat  35.000',
+        'Paket Hemat Keluarga  95.000',
+        'Tip Top Cake  25.000',
+        'Tip Top Cake',
+        'Kopi Tunas  18.000',
+        'Kopi Tunas',
+        'Nasi Bajak  30.000',
+        'Nasi Bajak',
+        'Total Care Toothpaste  24.000',
+        'Master Cheese Pizza  85.000',
+        'Table Water 600ml  8.000',
+        'Menu Promo Ayam Geprek  28.000',
+        'Change Purse Leather  120.000',
+        'Dana White Tea  22.000',
+        'Voucher Game Steam  50.000',
+        '1x Paket Hemat  35.000',
+      ];
+      for (const line of realItemsWithKeywords) {
+        expect(isNonItemLine(line)).toBe(false);
+      }
+
+      // True summary / discount / payment / tax / metadata lines are still dropped
+      const trueSummaryLines = [
+        'SUBTOTAL  55.000',
+        'PB1 (10%)  17,460',
+        'PB-1  8900',
+        'DISKON MEMBER  5.000',
+        'POTONGAN HARGA  5.000',
+        'POTONGAN  -5.000',
+        'ANDA HEMAT  3.000',
+        'HEMAT  2.000',
+        'QRIS CPM LAWSON  13,000',
+        'DEBIT BCA  97900',
+        'TUN4I  50.000',
+        'P4J4K  5.000',
+        'TABLE 14',
+        'ORDER #1042',
+      ];
+      for (const line of trueSummaryLines) {
+        expect(isNonItemLine(line)).toBe(true);
+      }
+    });
+  });
+
+  describe('isSuspiciousMerchantName & pickMerchantFromRows (F-07)', () => {
+    it('rejects promo lines, quantity+item+price lines, totals, and disclaimers as merchant names', () => {
+      expect(isSuspiciousMerchantName('J.STB PROMO 17500')).toBe(true);
+      expect(isSuspiciousMerchantName('1 EG6 TART 13,000')).toBe(true);
+      expect(isSuspiciousMerchantName('TRAD KY TOAST CARTE  28.182')).toBe(true);
+      expect(isSuspiciousMerchantName('sudah termasuk asuransi')).toBe(true);
+      expect(isSuspiciousMerchantName('Sponsored by HARI KE-6')).toBe(true);
+      expect(isSuspiciousMerchantName('TOTAL 230,000')).toBe(true);
+      expect(isSuspiciousMerchantName('SUBTOTAL 45.000')).toBe(true);
+      expect(isSuspiciousMerchantName('SUS T8TAL 45.000')).toBe(true);
+      expect(isSuspiciousMerchantName('TERIMA KASIH')).toBe(true);
+    });
+
+    it('accepts realistic Indonesian merchant titles including 4-digit branch IDs and brand names containing Total (R3A-01)', () => {
+      expect(isSuspiciousMerchantName('INDOMARET POINT')).toBe(false);
+      expect(isSuspiciousMerchantName('ALFAMART 1024')).toBe(false);
+      expect(isSuspiciousMerchantName('INDOMARET 0412')).toBe(false);
+      expect(isSuspiciousMerchantName('TOTAL BUAH SEGAR')).toBe(false);
+      expect(isSuspiciousMerchantName('SPBU PERTAMINA 31.129.02')).toBe(false);
+      expect(isSuspiciousMerchantName('APOTEK KIMIA FARMA 124')).toBe(false);
+      expect(isSuspiciousMerchantName('KOPI KENANGAN')).toBe(false);
+      expect(isSuspiciousMerchantName('TOAST BOX')).toBe(false);
+
+      expect(pickMerchantFromRows(['ALFAMART 1024', 'JL. MERDEKA NO. 1', 'Paket Hemat  35.000', 'TOTAL  35.000'])).toBe(
+        'ALFAMART 1024'
+      );
+      expect(pickMerchantFromRows(['TOTAL BUAH SEGAR', 'Mangga Harum Manis  40.000', 'TOTAL  40.000'])).toBe(
+        'TOTAL BUAH SEGAR'
+      );
+    });
+
+    it('skips top promo/disclaimer/item lines and picks the real merchant header', () => {
+      const rows = [
+        'Sponsored by HARI KE-6',
+        'sudah termasuk asuransi',
+        'KOPI KENANGAN',
+        'Jl. Jend. Sudirman No. 10',
+        '1x Kopi Kenangan Mantan  24.000',
+        'SUS T8TAL  24.000',
+        'TOTAL  24.000',
+        'TUNAI  50.000',
+        'KEMBALIAN  26.000',
+      ];
+      expect(pickMerchantFromRows(rows)).toBe('KOPI KENANGAN');
+    });
+
+    it('returns null instead of a garbled item or total line when no clean merchant exists', () => {
+      const rows = [
+        '1 EG6 TART 13,000',
+        'J.STB PROMO 17500',
+        'SUS T8TAL 30,500',
+        'TOTAL 30,500',
+      ];
+      expect(pickMerchantFromRows(rows)).toBeNull();
     });
   });
 });

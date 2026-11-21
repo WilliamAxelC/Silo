@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { CashflowScreen } from '../CashflowScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -25,6 +25,29 @@ jest.mock('react-native-safe-area-context', () => {
 
 jest.mock('@react-native-community/datetimepicker', () => 'DateTimePicker');
 
+jest.mock('../../db/index', () => ({
+  db: {
+    select: jest.fn(() => ({
+      from: jest.fn(() => []),
+    })),
+    insert: jest.fn(() => ({
+      values: jest.fn(() => ({
+        onConflictDoUpdate: jest.fn(() => Promise.resolve()),
+      })),
+    })),
+    delete: jest.fn(() => ({
+      where: jest.fn(() => Promise.resolve()),
+    })),
+  },
+  expoDb: {
+    execSync: jest.fn(),
+    getAllSync: jest.fn(() => []),
+    getFirstSync: jest.fn(() => null),
+    runSync: jest.fn(() => ({ lastInsertRowId: 1, changes: 1 })),
+    withTransactionSync: jest.fn((cb: () => void) => cb()),
+  },
+}));
+
 describe('CashflowScreen', () => {
   const mockClearError = jest.fn();
   const mockFetchTransactions = jest.fn().mockResolvedValue(undefined);
@@ -43,6 +66,8 @@ describe('CashflowScreen', () => {
       useThousandsSeparator: true,
       monthStartDay: 1,
       weekStartDay: 'monday',
+      isLoaded: false,
+      hasCompletedOnboarding: true,
     });
     useTransactionStore.setState({
       transactionsList: [
@@ -402,5 +427,71 @@ describe('CashflowScreen', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('shows the first-launch WelcomeSheet once settings finish loading when onboarding is incomplete, and hides once completed (F-14)', async () => {
+    useSettingsStore.setState({
+      isLoaded: true,
+      hasCompletedOnboarding: false,
+    });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+
+    expect(renderer.root.findByProps({ testID: 'welcome-sheet' })).toBeTruthy();
+
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'Skip welcome setup' }).props.onPress();
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(true);
+    expect(renderer.root.findAllByProps({ testID: 'welcome-sheet' })).toHaveLength(0);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('scales filter chips, filter sheet options, and search summary text with fontScale (R3A-08)', async () => {
+    useSettingsStore.setState({ fontScale: 1.0, isLoaded: true, hasCompletedOnboarding: true });
+    mockSearchTransactions.mockResolvedValue([]);
+    mockSummarizeSearchTransactions.mockResolvedValue({ count: 0, totalIn: 0, totalOut: 0, net: 0 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+
+    // Open type filter sheet
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Filter by type' }).props.onPress();
+    });
+
+    const getSize = (label: string) => {
+      const node = renderer.root.findAllByType(Text).find((t: any) => {
+        const text = Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '');
+        return text === label;
+      });
+      return StyleSheet.flatten(node.props.style).fontSize;
+    };
+
+    const chip100 = getSize('Type');
+    const sheetTitle100 = getSize('Filter by type');
+    const sheetOption100 = getSize('Expense');
+
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ fontScale: 1.2 });
+    });
+
+    expect(getSize('Type')).toBeGreaterThan(chip100);
+    expect(getSize('Filter by type')).toBeGreaterThan(sheetTitle100);
+    expect(getSize('Expense')).toBeGreaterThan(sheetOption100);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
   });
 });
