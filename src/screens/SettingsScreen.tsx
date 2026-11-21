@@ -22,6 +22,7 @@ import { documentDirectory, writeAsStringAsync, EncodingType } from 'expo-file-s
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { createBackupFile, restoreBackupFile } from '../services/backup';
+import { buildTransactionsCsv } from '../services/csvExport';
 import { authenticateUser, canUseAppLock } from '../components/AppLockGate';
 
 import { NavigationProps } from '../navigation/types';
@@ -88,7 +89,7 @@ export const SettingsScreen = () => {
   const setAiWifiOnlyDownload = useSettingsStore((s) => s.setAiWifiOnlyDownload);
 
   const { provisioning, localModelDisplayName, runtime, runtimeReady, warmupPending, logs } = useAIStore();
-  const { transactionsList, categories, addCategory, renameCategory, deleteCategory, getCategoriesByType } =
+  const { transactionsList, wallets, categories, addCategory, renameCategory, deleteCategory, getCategoriesByType } =
     useTransactionStore();
 
   const [isExporting, setIsExporting] = useState(false);
@@ -310,22 +311,9 @@ export const SettingsScreen = () => {
         return;
       }
 
-      const headers = ['Date', 'Merchant Name', 'Category', 'Amount', 'Type', 'Description', 'Receipt Items'];
-      let csvString = headers.join(',') + '\n';
-
-      transactionsList.forEach((tx) => {
-        const dateStr = new Date(tx.date).toLocaleDateString(dateFormat || 'en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        });
-        const merchant = `"${(tx.merchantName || '').replace(/"/g, '""')}"`;
-        const category = `"${(tx.category || '').replace(/"/g, '""')}"`;
-        const lineItemsText = `"${(tx.lineItemsText || '').replace(/"/g, '""')}"`;
-        const note = `"${(tx.note || '').replace(/"/g, '""')}"`;
-        const type = (tx.totalAmount || 0) > 0 ? 'Income' : 'Expense';
-
-        csvString += `${dateStr},${merchant},${category},${tx.totalAmount},${type},${note},${lineItemsText}\n`;
+      const csvString = buildTransactionsCsv(transactionsList, {
+        wallets,
+        dateFormat,
       });
 
       const fileName = `Silo_Transactions_${new Date().toISOString().split('T')[0]}.csv`;
@@ -1293,6 +1281,7 @@ export const SettingsScreen = () => {
             onPress={handleExportCSV}
             disabled={isExporting}
             accessibilityRole="button"
+            accessibilityLabel="Export Transactions CSV"
           >
             <View style={styles.rowLeft}>
               <Ionicons name="download-outline" size={18} color={theme.primary} />

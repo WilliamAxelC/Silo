@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -17,11 +18,17 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-import { formatAmountInput, parseSignedAmount } from '../features/transactions/amount';
+import {
+  formatAmountForInput,
+  formatAmountInput,
+  formatDisplayCurrency,
+  isAmountWithinRange,
+  parseSignedAmount,
+} from '../features/transactions/amount';
 import { getCategoryTypeForTransaction } from '../features/transactions/categories';
 import { createTransactionInput, deriveEditableTransactionType, normalizeTransactionInput } from '../features/transactions/factories';
 import { buildEditableTransactionInput } from '../features/transactions/mappers';
-import type { TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
+import type { Transaction, TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
 import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
 import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfidence';
@@ -29,7 +36,14 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
 import { scanReceiptDocuments } from '../services/ocr/documentScanner';
 import { AccountPickerModal } from '../components/AccountPickerModal';
+import { AmountCalculatorModal } from '../components/AmountCalculatorKeypad';
 import { RECURRING_FREQUENCIES, createRecurringRule, type RecurringFrequency } from '../services/recurring';
+import {
+  createTransactionTemplate,
+  deleteTransactionTemplate,
+  listTransactionTemplates,
+  type TransactionTemplate,
+} from '../services/templates';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -91,9 +105,11 @@ export const AddTransactionScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<AddTransactionScreenRouteProp>();
   const editingId = route.params?.transactionId;
+  const duplicateFromId = route.params?.duplicateFromId;
   const receiptQueueId = route.params?.receiptQueueId;
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
+  const useThousandsSeparator = useSettingsStore((s) => s.useThousandsSeparator);
   const dateFormat = useSettingsStore((s) => s.dateFormat);
 
   const {
@@ -118,8 +134,21 @@ export const AddTransactionScreen = () => {
   const [toWalletId, setToWalletId] = useState<number | null>(null);
   const [accountPicker, setAccountPicker] = useState<'from' | 'to' | null>(null);
   const [repeat, setRepeat] = useState<RecurringFrequency | null>(null);
-  const effectiveWalletId = walletId ?? defaultWalletId;
-  const walletName = (id: number | null) => wallets.find((w) => w.id === id)?.name ?? 'Choose account';
+  const isSelectableWallet = (id: number | null) => {
+    if (id == null) return false;
+    if (wallets.length === 0) return true;
+    const match = wallets.find((w) => w.id === id);
+    if (!match) return false;
+    return Boolean(editingId) || match.isActive;
+  };
+  const effectiveWalletId = isSelectableWallet(walletId) ? walletId : defaultWalletId;
+  const effectiveToWalletId =
+    isSelectableWallet(toWalletId) && toWalletId !== effectiveWalletId ? toWalletId : null;
+  const walletName = (id: number | null) => {
+    const match = wallets.find((w) => w.id === id);
+    if (!match) return 'Choose account';
+    return match.isActive ? match.name : `${match.name} (archived)`;
+  };
   const [category, setCategory] = useState('');
   const [pendingScannedCategory, setPendingScannedCategory] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -141,6 +170,23 @@ export const AddTransactionScreen = () => {
 
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatusLabel, setScanStatusLabel] = useState<string | null>(null);
+  const [calculatorVisible, setCalculatorVisible] = useState(false);
+  const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
+  const [templateFeedback, setTemplateFeedback] = useState<string | null>(null);
+
+  const refreshTemplates = useCallback(() => {
+    try {
+      setTemplates(listTransactionTemplates());
+    } catch {
+      setTemplates([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!editingId) {
+      refreshTemplates();
+    }
+  }, [editingId, refreshTemplates]);
 
   const activeCategoryType = getCategoryTypeForTransaction(type);
   const availableCategories = useMemo(
@@ -181,32 +227,74 @@ export const AddTransactionScreen = () => {
     setWalletId(null);
     setToWalletId(null);
     setRepeat(null);
+    setTemplateFeedback(null);
+  };
+
+  const prevTypeRef = React.useRef(type);
+
+  const populateFormFromTransaction = (
+    tx: Partial<Transaction>,
+    options: { preserveDateAndPhoto: boolean }
+  ) => {
+    const editableTransaction = buildEditableTransactionInput(tx);
+    const editableType = deriveEditableTransactionType(editableTransaction.totalAmount, editableTransaction.type);
+    prevTypeRef.current = editableType;
+    setTitle(editableTransaction.merchantName);
+    setAmount(
+      editableTransaction.totalAmount !== 0
+        ? formatAmountForInput(editableTransaction.totalAmount, currencyCode)
+        : ''
+    );
+    setAmountError(null);
+    setScanConfidence(null);
+    setType(editableType);
+    setCategory(normalizeCategoryForType(editableTransaction.category, editableType));
+    setPendingScannedCategory(null);
+    setNote(editableTransaction.note || '');
+    setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
+    setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
+    setSelectedDate(options.preserveDateAndPhoto ? new Date(editableTransaction.date) : new Date());
+    setImageUri(options.preserveDateAndPhoto ? editableTransaction.imageUri || null : null);
+    const knownWallets = useTransactionStore.getState().wallets;
+    const activeDefaultWalletId = knownWallets.find((w) => w.isActive)?.id ?? null;
+    const resolveWalletId = (id?: number | null) => {
+      if (id == null) return null;
+      if (knownWallets.length === 0) return id;
+      return knownWallets.some((w) =>
+        options.preserveDateAndPhoto ? w.id === id : w.id === id && w.isActive
+      )
+        ? id
+        : null;
+    };
+    const resolvedFromId = resolveWalletId(editableTransaction.walletId);
+    const effectiveFromId = resolvedFromId ?? activeDefaultWalletId;
+    const rawToId = editableType === 'transfer' ? resolveWalletId(editableTransaction.toWalletId) : null;
+    const resolvedToId =
+      !options.preserveDateAndPhoto && rawToId != null && rawToId === effectiveFromId
+        ? null
+        : rawToId;
+    setWalletId(resolvedFromId);
+    setToWalletId(resolvedToId);
+    setRepeat(null);
+    setRawOcrText(null);
+    setIsRawTextExpanded(false);
+    setTemplateFeedback(null);
   };
 
   useEffect(() => {
     if (editingId) {
       const latestTransactions = useTransactionStore.getState().transactionsList;
       const tx = latestTransactions.find((transaction) => transaction.id === editingId);
-
       if (tx) {
-        const editableTransaction = buildEditableTransactionInput(tx);
-        const editableType = deriveEditableTransactionType(editableTransaction.totalAmount, editableTransaction.type);
-        setTitle(editableTransaction.merchantName);
-        setAmount(formatAmountInput(Math.round(Math.abs(editableTransaction.totalAmount)).toString()));
-        setAmountError(null);
-        setScanConfidence(null);
-        setType(editableType);
-        setCategory(normalizeCategoryForType(editableTransaction.category, editableType));
-        setPendingScannedCategory(null);
-        setNote(editableTransaction.note || '');
-        setLineItems(parseReceiptLineItemsText(editableTransaction.lineItemsText || ''));
-        setDetailsMode(editableTransaction.lineItemsText ? (editableTransaction.note ? 'both' : 'receipt') : 'note');
-        setSelectedDate(new Date(editableTransaction.date));
-        setImageUri(editableTransaction.imageUri || null);
-        setWalletId(editableTransaction.walletId ?? null);
-        setToWalletId(editableTransaction.toWalletId ?? null);
-        setRawOcrText(null);
-        setIsRawTextExpanded(false);
+        populateFormFromTransaction(tx, { preserveDateAndPhoto: true });
+      }
+    } else if (duplicateFromId) {
+      const latestTransactions = useTransactionStore.getState().transactionsList;
+      const tx = latestTransactions.find((transaction) => transaction.id === duplicateFromId);
+      if (tx) {
+        populateFormFromTransaction(tx, { preserveDateAndPhoto: false });
+      } else {
+        resetForm();
       }
     } else {
       resetForm();
@@ -218,9 +306,8 @@ export const AddTransactionScreen = () => {
         applyScanResult(queued.result);
       }
     }
-  }, [editingId, receiptQueueId]);
+  }, [editingId, duplicateFromId, receiptQueueId]);
 
-  const prevTypeRef = React.useRef(type);
   useEffect(() => {
     const typeChanged = prevTypeRef.current !== type;
     prevTypeRef.current = type;
@@ -263,12 +350,14 @@ export const AddTransactionScreen = () => {
 
   const handleAmountChange = (text: string) => {
     setScanConfidence(null);
-    const formatted = formatAmountInput(text);
+    const formatted = formatAmountInput(text, currencyCode);
     setAmount(formatted);
     if (text.trim().length > 0) {
-      const parsed = Math.abs(parseSignedAmount(text));
+      const parsed = Math.abs(parseSignedAmount(text, undefined, currencyCode));
       if (parsed === 0 || Number.isNaN(parsed)) {
         setAmountError('Amount must be greater than 0');
+      } else if (!isAmountWithinRange(parsed)) {
+        setAmountError('Amount is too large');
       } else {
         setAmountError(null);
       }
@@ -293,7 +382,7 @@ export const AddTransactionScreen = () => {
   const updateReceiptItemRow = (id: string, field: keyof Omit<ReceiptLineItemDraft, 'id'>, value: string) => {
     setLineItems((current) =>
       current.map((item) =>
-        item.id === id ? { ...item, [field]: field === 'price' ? formatAmountInput(value) : value } : item
+        item.id === id ? { ...item, [field]: field === 'price' ? formatAmountInput(value, currencyCode) : value } : item
       )
     );
   };
@@ -375,8 +464,8 @@ export const AddTransactionScreen = () => {
     }
     if (parsedData.merchantName) setTitle(parsedData.merchantName);
     if (parsedData.totalAmount) {
-      setAmount(formatAmountInput(Math.round(Math.abs(parsedData.totalAmount)).toString()));
-      setAmountError(null);
+      setAmount(formatAmountForInput(parsedData.totalAmount, currencyCode));
+      setAmountError(isAmountWithinRange(parsedData.totalAmount) ? null : 'Amount is too large');
     }
     if (parsedData.category) {
       const detectedCategory = parsedData.category.trim();
@@ -465,7 +554,7 @@ export const AddTransactionScreen = () => {
     return normalizeTransactionInput(
       createTransactionInput({
         merchantName: title.trim() || (type === 'transfer' ? 'Transfer' : title),
-        totalAmount: parseSignedAmount(amount, signedType),
+        totalAmount: parseSignedAmount(amount, signedType, currencyCode),
         type,
         category: (categoryOverride ?? category).trim() || normalizeCategoryForType('', type),
         date: selectedDate.getTime(),
@@ -473,14 +562,14 @@ export const AddTransactionScreen = () => {
         lineItemsText,
         imageUri: imageUri || null,
         walletId: effectiveWalletId ?? undefined,
-        toWalletId: type === 'transfer' ? toWalletId : null,
+        toWalletId: type === 'transfer' ? effectiveToWalletId : null,
       })
     );
   };
 
   const handleSave = async () => {
     if (type === 'transfer') {
-      if (!toWalletId || toWalletId === effectiveWalletId) {
+      if (!effectiveToWalletId || effectiveToWalletId === effectiveWalletId) {
         Alert.alert('Choose accounts', 'Pick the account the money goes to (different from the one it leaves).');
         return;
       }
@@ -490,9 +579,13 @@ export const AddTransactionScreen = () => {
       return;
     }
 
-    const parsedAmt = Math.abs(parseSignedAmount(amount));
+    const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, currencyCode));
     if (!amount || parsedAmt === 0 || Number.isNaN(parsedAmt)) {
       setAmountError('Amount must be greater than 0');
+      return;
+    }
+    if (!isAmountWithinRange(parsedAmt)) {
+      setAmountError('Amount is too large');
       return;
     }
 
@@ -532,6 +625,79 @@ export const AddTransactionScreen = () => {
     } catch (error: any) {
       Alert.alert('Save Failed', error?.message || 'Failed to save transaction. Please try again.');
     }
+  };
+
+  const handleDuplicate = () => {
+    if (!editingId) return;
+    navigation.navigate('AddTransactionStack', { duplicateFromId: editingId });
+  };
+
+  const handleSaveAsTemplate = () => {
+    if (type === 'transfer') {
+      if (!effectiveToWalletId || effectiveToWalletId === effectiveWalletId) {
+        Alert.alert('Choose accounts', 'Pick the account the money goes to (different from the one it leaves).');
+        return;
+      }
+    } else if (!title.trim()) {
+      Alert.alert('Missing Title', 'Please enter a title before saving as a template.');
+      return;
+    }
+
+    if (amount.trim().length > 0) {
+      const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, currencyCode));
+      if (parsedAmt === 0 || Number.isNaN(parsedAmt)) {
+        setAmountError('Amount must be greater than 0');
+        return;
+      }
+      if (!isAmountWithinRange(parsedAmt)) {
+        setAmountError('Amount is too large');
+        return;
+      }
+    }
+
+    try {
+      const payload = buildTransactionPayload();
+      const saved = createTransactionTemplate(payload.merchantName, {
+        merchantName: payload.merchantName,
+        totalAmount: payload.totalAmount,
+        type: payload.type,
+        category: payload.category,
+        note: payload.note,
+        lineItemsText: payload.lineItemsText,
+        walletId: payload.walletId,
+        toWalletId: payload.toWalletId,
+      });
+      refreshTemplates();
+      setTemplateFeedback(`Saved "${saved.name}" as template`);
+    } catch (error) {
+      Alert.alert('Template Error', getErrorMessage(error, 'Could not save template.'));
+    }
+  };
+
+  const handleApplyTemplate = (item: TransactionTemplate) => {
+    populateFormFromTransaction(
+      {
+        ...item.template,
+        date: Date.now(),
+        imageUri: null,
+      },
+      { preserveDateAndPhoto: false }
+    );
+  };
+
+  const confirmDeleteTemplate = (item: TransactionTemplate) => {
+    Alert.alert('Delete Template', `Remove "${item.name}" from your templates?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deleteTransactionTemplate(item.id);
+          refreshTemplates();
+          setTemplateFeedback(null);
+        },
+      },
+    ]);
   };
 
   const handleDelete = () => {
@@ -604,6 +770,60 @@ export const AddTransactionScreen = () => {
             </Text>
             <View style={styles.headerSpacer} />
           </View>
+
+          {/* Quick-entry Templates Strip */}
+          {!editingId && templates.length > 0 ? (
+            <View style={styles.templatesSection}>
+              <View style={styles.templatesHeaderRow}>
+                <Text style={[styles.label, styles.templatesLabel, { color: theme.text }]}>Templates</Text>
+                <Text style={[styles.templatesHint, { color: theme.textMuted }]}>Tap to fill · hold to remove</Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.templatesScroll}
+                keyboardShouldPersistTaps="handled"
+              >
+                {templates.map((tpl) => {
+                  const dotColor =
+                    tpl.template.type === 'transfer'
+                      ? theme.primary
+                      : tpl.template.type === 'income'
+                        ? theme.income
+                        : theme.expense;
+                  const amountPreview =
+                    tpl.template.totalAmount !== 0
+                      ? formatDisplayCurrency(Math.abs(tpl.template.totalAmount), currencyCode, useThousandsSeparator)
+                      : null;
+                  return (
+                    <TouchableOpacity
+                      key={tpl.id}
+                      style={[
+                        styles.templateChip,
+                        { backgroundColor: theme.surface, borderColor: theme.border },
+                      ]}
+                      onPress={() => handleApplyTemplate(tpl)}
+                      onLongPress={() => confirmDeleteTemplate(tpl)}
+                      activeOpacity={0.8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use template ${tpl.name}`}
+                      accessibilityHint="Long press to delete template"
+                    >
+                      <View style={[styles.templateDot, { backgroundColor: dotColor }]} />
+                      <Text style={[styles.templateChipName, { color: theme.text }]} numberOfLines={1}>
+                        {tpl.name}
+                      </Text>
+                      {amountPreview ? (
+                        <Text style={[styles.templateChipAmount, { color: theme.textMuted }]} numberOfLines={1}>
+                          {amountPreview}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : null}
 
           {/* Real-time Scan Status Feedback Banner */}
           {isScanning && (
@@ -699,22 +919,35 @@ export const AddTransactionScreen = () => {
                 >
                   <Text style={[styles.currencyText, { color: theme.textMuted }]}>{currencyCode}</Text>
                 </View>
-                <TextInput
+                <TouchableOpacity
                   style={[
                     styles.amountInput,
-                    styles.compactAmountInput,
+                    styles.amountPressable,
                     {
                       backgroundColor: theme.surface,
                       borderColor: amountError ? theme.expense : theme.border,
-                      color: theme.text,
                     },
                   ]}
-                  placeholderTextColor={theme.textMuted}
-                  value={amount}
-                  onChangeText={handleAmountChange}
-                  keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
-                  placeholder="0"
-                />
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setCalculatorVisible(true);
+                  }}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit amount"
+                >
+                  <TextInput
+                    style={[styles.amountTextInput, styles.compactAmountInput, { color: theme.text }]}
+                    placeholderTextColor={theme.textMuted}
+                    value={amount}
+                    onChangeText={handleAmountChange}
+                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                    showSoftInputOnFocus={false}
+                    pointerEvents="none"
+                    placeholder="0"
+                  />
+                  <Ionicons name="calculator-outline" size={16} color={theme.textMuted} />
+                </TouchableOpacity>
               </View>
               {amountError ? (
                 <Text style={[styles.inlineErrorText, { color: theme.expense }]}>{amountError}</Text>
@@ -751,10 +984,10 @@ export const AddTransactionScreen = () => {
                     style={[styles.compactPicker, { backgroundColor: theme.surface, borderColor: theme.border }]}
                     onPress={() => setAccountPicker('to')}
                     accessibilityRole="button"
-                    accessibilityLabel={`Transfer to: ${walletName(toWalletId)}`}
+                    accessibilityLabel={`Transfer to: ${walletName(effectiveToWalletId)}`}
                   >
-                    <Text style={[styles.iconInputText, { color: toWalletId ? theme.text : theme.textMuted }]} numberOfLines={1}>
-                      {walletName(toWalletId)}
+                    <Text style={[styles.iconInputText, { color: effectiveToWalletId ? theme.text : theme.textMuted }]} numberOfLines={1}>
+                      {walletName(effectiveToWalletId)}
                     </Text>
                     <Ionicons name="chevron-down-outline" size={18} color={theme.textMuted} />
                   </TouchableOpacity>
@@ -953,20 +1186,8 @@ export const AddTransactionScreen = () => {
             </View>
           ) : null}
 
-          {/* Save & Delete Action Row */}
-          <View style={styles.actionRow}>
-            {editingId ? (
-              <TouchableOpacity
-                style={[styles.deleteButtonCompact, { borderColor: theme.expense, backgroundColor: theme.surface }]}
-                onPress={handleDelete}
-                disabled={isSaving}
-                accessibilityRole="button"
-                accessibilityLabel="Delete transaction"
-              >
-                <Ionicons name="trash-outline" size={18} color={theme.expense} style={{ marginRight: 6 }} />
-                <Text style={[styles.deleteButtonTextCompact, { color: theme.expense }]}>Delete</Text>
-              </TouchableOpacity>
-            ) : null}
+          {/* Save, Template, Duplicate & Delete Actions */}
+          <View style={styles.actionStack}>
             <TouchableOpacity
               style={[styles.saveButton, styles.saveButtonCompact, { backgroundColor: theme.primary }]}
               onPress={handleSave}
@@ -980,6 +1201,49 @@ export const AddTransactionScreen = () => {
                 <Text style={styles.saveButtonText}>{editingId ? 'Update Transaction' : 'Save Transaction'}</Text>
               )}
             </TouchableOpacity>
+
+            {editingId ? (
+              <View style={styles.secondaryActionRow}>
+                <TouchableOpacity
+                  style={[styles.secondaryActionButton, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                  onPress={handleDuplicate}
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Duplicate transaction"
+                >
+                  <Ionicons name="copy-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                  <Text style={[styles.secondaryActionText, { color: theme.primary }]}>Duplicate</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.secondaryActionButton, { borderColor: theme.expense, backgroundColor: theme.surface }]}
+                  onPress={handleDelete}
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete transaction"
+                >
+                  <Ionicons name="trash-outline" size={18} color={theme.expense} style={{ marginRight: 6 }} />
+                  <Text style={[styles.secondaryActionText, { color: theme.expense }]}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.templateSaveButton, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                  onPress={handleSaveAsTemplate}
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save as template"
+                >
+                  <Ionicons name="bookmark-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                  <Text style={[styles.secondaryActionText, { color: theme.primary }]}>Save as template</Text>
+                </TouchableOpacity>
+                {templateFeedback ? (
+                  <Text style={[styles.templateFeedbackText, { color: theme.income }]} accessibilityRole="text">
+                    {templateFeedback}
+                  </Text>
+                ) : null}
+              </>
+            )}
           </View>
 
           <View style={{ height: 80 }} />
@@ -990,18 +1254,26 @@ export const AddTransactionScreen = () => {
         <DateTimePicker value={selectedDate} mode={pickerMode} display="default" onChange={onDateChange} />
       )}
 
+      <AmountCalculatorModal
+        visible={calculatorVisible}
+        initialValue={amount}
+        currencyCode={currencyCode}
+        onDone={(formatted) => handleAmountChange(formatted)}
+        onClose={() => setCalculatorVisible(false)}
+      />
+
       <AccountPickerModal
         visible={accountPicker !== null}
         title={accountPicker === 'to' ? 'Transfer to' : 'Account'}
         wallets={wallets}
-        selectedId={accountPicker === 'to' ? toWalletId : effectiveWalletId}
+        selectedId={accountPicker === 'to' ? effectiveToWalletId : effectiveWalletId}
         excludeId={accountPicker === 'to' ? effectiveWalletId : null}
         onSelect={(id) => {
           if (accountPicker === 'to') {
             setToWalletId(id);
           } else {
             setWalletId(id);
-            if (id === toWalletId) setToWalletId(null);
+            if (id === effectiveToWalletId) setToWalletId(null);
           }
         }}
         onClose={() => setAccountPicker(null)}
@@ -1095,7 +1367,9 @@ const styles = StyleSheet.create({
   currencyBadge: { borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   compactCurrencyBadge: { width: 50, height: 46, marginRight: 8 },
   currencyText: { fontSize: 12, fontWeight: '700' },
-  amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12 },
+  amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10 },
+  amountPressable: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  amountTextInput: { flex: 1, minHeight: 44, paddingVertical: 0, marginRight: 4 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
   inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   inlineWarningText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
@@ -1188,19 +1462,53 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
-  actionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  deleteButtonCompact: {
+  templatesSection: { marginBottom: 12 },
+  templatesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  templatesLabel: { marginBottom: 0 },
+  templatesHint: { fontSize: 11, fontWeight: '500' },
+  templatesScroll: { gap: 8, paddingVertical: 2 },
+  templateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    gap: 6,
+    maxWidth: 220,
+  },
+  templateDot: { width: 8, height: 8, borderRadius: 4 },
+  templateChipName: { fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  templateChipAmount: { fontSize: 12, fontWeight: '600' },
+  actionStack: { marginTop: 8, gap: 10 },
+  secondaryActionRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  secondaryActionButton: {
+    flex: 1,
     minHeight: 48,
     borderWidth: 1,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    paddingHorizontal: 18,
-    marginRight: 10,
+    paddingHorizontal: 14,
   },
-  deleteButtonTextCompact: { fontSize: 14, fontWeight: '700' },
-  saveButton: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  templateSaveButton: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 14,
+  },
+  secondaryActionText: { fontSize: 14, fontWeight: '700' },
+  templateFeedbackText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  saveButton: { minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   saveButtonCompact: { paddingHorizontal: 18 },
   saveButtonText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

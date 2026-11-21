@@ -18,7 +18,13 @@ import { useNavigation } from '@react-navigation/native';
 import { NavigationProps } from '../navigation/types';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { formatAmountInput, formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
+import {
+  formatAmountForInput,
+  formatAmountInput,
+  formatDisplayCurrency,
+  isAmountWithinRange,
+  parseSignedAmount,
+} from '../features/transactions/amount';
 import type { Wallet, WalletType } from '../features/transactions/types';
 import { WALLET_TYPE_META } from '../components/AccountPickerModal';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -63,7 +69,7 @@ export const AccountsScreen = () => {
             id: wallet.id,
             name: wallet.name,
             type: wallet.type,
-            openingBalance: wallet.initialBalance ? formatAmountInput(String(Math.abs(wallet.initialBalance))) : '',
+            openingBalance: wallet.initialBalance ? formatAmountForInput(wallet.initialBalance, currencyCode) : '',
             openingNegative: wallet.initialBalance < 0,
           }
         : EMPTY_DRAFT,
@@ -71,7 +77,11 @@ export const AccountsScreen = () => {
 
   const save = () => {
     if (!draft) return;
-    const magnitude = Math.abs(parseSignedAmount(draft.openingBalance || '0'));
+    const magnitude = Math.abs(parseSignedAmount(draft.openingBalance || '0', undefined, currencyCode));
+    if (!isAmountWithinRange(magnitude)) {
+      Alert.alert('Amount too large', 'Enter an opening balance within the supported range.');
+      return;
+    }
     const initialBalance = draft.openingNegative ? -magnitude : magnitude;
     try {
       if (draft.id === null) addWallet({ name: draft.name, type: draft.type, initialBalance });
@@ -214,8 +224,8 @@ export const AccountsScreen = () => {
               <TextInput
                 style={[styles.input, styles.flex, { borderColor: theme.border, color: theme.text }]}
                 value={draft?.openingBalance ?? ''}
-                onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v) } : d))}
-                keyboardType="numeric"
+                onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v, currencyCode) } : d))}
+                keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                 placeholder="0"
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Opening balance"

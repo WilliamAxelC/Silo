@@ -1,8 +1,15 @@
 import { create } from 'zustand';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
-import { db, expoDb, searchTransactions as searchTransactionsDb } from '../db/index';
+import {
+  db,
+  expoDb,
+  searchTransactions as searchTransactionsDb,
+  summarizeSearchTransactions as summarizeSearchTransactionsDb,
+  type SearchTransactionsOptions,
+} from '../db/index';
 import { aiTransactionsView, budgets, categories, transactionItems, transactions } from '../db/schema';
+import { roundCurrency, type TransactionFilterSummary } from '../features/transactions/amount';
 import { DEFAULT_WALLET_ID, TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
 import {
@@ -43,7 +50,8 @@ interface TransactionState {
   updateWallet: (id: number, input: Partial<WalletInput> & { isActive?: boolean }) => void;
   /** Deletes an unused account; one with transactions is archived instead. Returns what happened. */
   removeWallet: (id: number) => { ok: boolean; archived?: boolean; message?: string };
-  searchTransactions: (query: string, options?: { limit?: number; offset?: number; type?: TransactionType }) => Promise<Transaction[]>;
+  searchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<Transaction[]>;
+  summarizeSearchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<TransactionFilterSummary>;
   addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
   updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
@@ -93,7 +101,7 @@ function readWallets(): Wallet[] {
     type: WALLET_TYPES.has(row.type as WalletType) ? (row.type as WalletType) : 'cash',
     isActive: row.isActive !== 0,
     initialBalance: row.initialBalance ?? 0,
-    balance: Math.round((row.balance ?? 0) * 100) / 100,
+    balance: roundCurrency(row.balance ?? 0),
   }));
 }
 
@@ -243,6 +251,16 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       console.error('Failed to search transactions:', error);
       set({ error: error instanceof Error ? error.message : String(error) });
       return [];
+    }
+  },
+
+  summarizeSearchTransactions: async (query, options) => {
+    try {
+      return summarizeSearchTransactionsDb(query, options);
+    } catch (error) {
+      console.error('Failed to summarize search transactions:', error);
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return { count: 0, totalIn: 0, totalOut: 0, net: 0 };
     }
   },
 

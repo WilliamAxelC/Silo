@@ -250,4 +250,45 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     const texts = renderer.root.findAllByType(Text).map((t: any) => t.props.children).flat().join(' ');
     expect(texts).toContain('External mode needs no download.');
   });
+
+  it('exports CSV with Transfer type and Account / To Account columns', async () => {
+    const { writeAsStringAsync } = require('expo-file-system/legacy');
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ dateFormat: 'en-GB' });
+      useTransactionStore.setState({
+        wallets: [
+          { id: 1, name: 'BCA', type: 'bank', isActive: true, initialBalance: 0, balance: 0 },
+          { id: 2, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0 },
+        ],
+        transactionsList: [
+          {
+            id: 1,
+            merchantName: 'Top up',
+            totalAmount: -250000,
+            type: 'transfer',
+            category: 'Transfer',
+            date: new Date(2026, 10, 15).getTime(),
+            note: '',
+            lineItemsText: '',
+            walletId: 1,
+            toWalletId: 2,
+          },
+        ],
+      } as any);
+    });
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+
+    const exportBtn = renderer.root.findByProps({ accessibilityLabel: 'Export Transactions CSV' });
+    await ReactTestRenderer.act(async () => {
+      await exportBtn.props.onPress();
+    });
+
+    expect(writeAsStringAsync).toHaveBeenCalledTimes(1);
+    const writtenCsv: string = (writeAsStringAsync as jest.Mock).mock.calls[0][1];
+    expect(writtenCsv).toContain('Date,Merchant Name,Category,Amount,Type,Account,To Account,Description,Receipt Items');
+    expect(writtenCsv).toContain(',Transfer,"BCA","GoPay",');
+  });
 });

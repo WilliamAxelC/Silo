@@ -5,6 +5,8 @@ import {
   runMigrations,
   buildFtsSearchQuery,
   searchTransactions,
+  summarizeSearchTransactions,
+  DEFAULT_SEARCH_LIMIT,
   rebuildFtsIndex,
 } from '../index';
 
@@ -139,7 +141,34 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(11);
+      expect(versionRow?.user_version).toBe(12);
+
+      const templatesTable = testDb.getFirstSync<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
+      );
+      expect(templatesTable?.name).toBe('transaction_templates');
+    });
+
+    it('migrates an existing v11 database to v12 by adding transaction_templates without losing data', () => {
+      // Simulate a v11 database that predates transaction_templates
+      testDb.execSync('DROP TABLE IF EXISTS transaction_templates;');
+      testDb.runSync(
+        `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (?, ?, ?, ?, ?, ?);`,
+        [500, 1, 'Legacy Entry', -15000, 'expense', 1710000000000]
+      );
+      testDb.execSync('PRAGMA user_version = 11;');
+
+      runMigrations(testDb as any);
+
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(12);
+      const tbl = testDb.getFirstSync<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
+      );
+      expect(tbl?.name).toBe('transaction_templates');
+      const existing = testDb.getFirstSync<{ merchant_name: string }>(
+        'SELECT merchant_name FROM transactions WHERE id = 500;'
+      );
+      expect(existing?.merchant_name).toBe('Legacy Entry');
     });
 
     it('skips migrations, seeding, and view recreation on steady-state launch when user_version is current', () => {
@@ -369,6 +398,205 @@ describe('Database Layer and SQLite Operations', () => {
 
         const outOfRange = searchTransactions('Superindo', { limit: 10, offset: 50 }, testDb as any);
         expect(outOfRange.length).toBe(0);
+      });
+
+      it('filters transactions with an empty query by type, account (wallet_id OR to_wallet_id), category, and date range', () => {
+        // Add a second account and a transfer between account 1 -> account 2 plus an expense on account 2
+        testDb.runSync(`INSERT INTO wallets (id, name, type) VALUES (?, ?, ?);`, [2, 'GoPay', 'ewallet']);
+        testDb.runSync(
+          `INSERT INTO transactions (id, wallet_id, to_wallet_id, merchant_name, total_amount, type, date, note, line_items_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [4, 1, 2, 'Top up GoPay', -200000, 'transfer', 1710000005000, 'Wallet top-up', '']
+        );
+        testDb.runSync(`INSERT INTO transaction_items (transaction_id, category, amount) VALUES (?, ?, ?);`, [4, 'Transfer', 200000]);
+
+        testDb.runSync(
+          `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date, note, line_items_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          [5, 2, 'GoFood Lunch', -55000, 'expense', 1710000010000, 'Nasi padang', '']
+        );
+        testDb.runSync(`INSERT INTO transaction_items (transaction_id, category, amount) VALUES (?, ?, ?);`, [5, 'Food & Dining', 55000]);
+
+        // Empty query + type filter
+        const transfers = searchTransactions('', { type: 'transfer' }, testDb as any);
+        expect(transfers.map((t) => t.id)).toEqual([4]);
+        expect(transfers[0].walletId).toBe(1);
+        expect(transfers[0].toWalletId).toBe(2);
+
+        // Empty query + account filter matches wallet_id OR to_wallet_id
+        const wallet2Txns = searchTransactions('', { walletId: 2 }, testDb as any);
+        expect(wallet2Txns.map((t) => t.id)).toEqual([5, 4]);
+
+        const wallet1Transfers = searchTransactions('', { walletId: 1, type: 'transfer' }, testDb as any);
+        expect(wallet1Transfers.map((t) => t.id)).toEqual([4]);
+
+        // Empty query + category filter
+        const foodTxns = searchTransactions('', { category: 'Food & Dining' }, testDb as any);
+        expect(foodTxns.map((t) => t.id)).toEqual([5, 3]);
+
+        // Empty query + date range filter (inclusive bounds)
+        const ranged = searchTransactions(
+          '',
+          { dateFrom: 1710000001000, dateTo: 1710000005000 },
+          testDb as any
+        );
+        expect(ranged.map((t) => t.id)).toEqual([4, 3, 2]);
+
+        // Search text combined with account & category filters
+        const combined = searchTransactions(
+          'GoFood',
+          { walletId: 2, category: 'Food & Dining', type: 'expense' },
+          testDb as any
+        );
+        expect(combined.map((t) => t.id)).toEqual([5]);
+
+        const combinedMiss = searchTransactions('GoFood', { walletId: 1 }, testDb as any);
+        expect(combinedMiss).toEqual([]);
+      });
+
+      it('drives FTS+filter queries from FTS on 5,000 rows and computes uncapped SQL summary totals', () => {
+        // Seed 5,000 additional transactions where every merchant matches "Merchant"
+        // so an inverted join plan (secondary index -> FTS virtual table scan) degrades to O(N^2).
+        testDb.runSync(`INSERT OR IGNORE INTO wallets (id, name, type) VALUES (?, ?, ?);`, [2, 'GoPay', 'ewallet']);
+
+        let expectedExpenseCount = 0;
+        let expectedExpenseOut = 0;
+        let expectedWallet2Count = 0;
+        let expectedWallet2In = 0;
+        let expectedWallet2Out = 0;
+        let expectedFoodWallet1Count = 0;
+        let expectedFoodWallet1Out = 0;
+
+        testDb.withTransactionSync(() => {
+          for (let i = 1; i <= 5000; i++) {
+            const type = i % 10 === 0 ? 'income' : i % 15 === 0 ? 'transfer' : 'expense';
+            const walletId = i % 3 === 0 ? 2 : 1;
+            const toWalletId = type === 'transfer' ? (walletId === 1 ? 2 : 1) : null;
+            const amount = type === 'income' ? 50000 : type === 'transfer' ? -20000 : -15000;
+            const category =
+              type === 'income'
+                ? 'Salary'
+                : type === 'transfer'
+                  ? 'Transfer'
+                  : i % 2 === 0
+                    ? 'Food & Dining'
+                    : 'Groceries';
+
+            const res = testDb.runSync(
+              `INSERT INTO transactions (wallet_id, to_wallet_id, merchant_name, total_amount, type, date, note, line_items_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+              [walletId, toWalletId, `Merchant ${i}`, amount, type, 1720000000000 + i * 1000, `note ${i}`, '']
+            );
+            testDb.runSync(
+              `INSERT INTO transaction_items (transaction_id, category, amount) VALUES (?, ?, ?);`,
+              [res.lastInsertRowId, category, Math.abs(amount)]
+            );
+
+            if (type === 'expense') {
+              expectedExpenseCount += 1;
+              expectedExpenseOut += 15000;
+            }
+            if (walletId === 2 || toWalletId === 2) {
+              expectedWallet2Count += 1;
+              if (type === 'income') expectedWallet2In += 50000;
+              if (type === 'expense') expectedWallet2Out += 15000;
+            }
+            if (category === 'Food & Dining' && walletId === 1) {
+              expectedFoodWallet1Count += 1;
+              expectedFoodWallet1Out += 15000;
+            }
+          }
+        });
+
+        // Verify FTS+type query plan drives from transactions_fts, not idx_transactions_type
+        const plan = testDb.getAllSync<{ detail: string }>(
+          `EXPLAIN QUERY PLAN
+          WITH fts_matches AS (
+            SELECT rowid AS id, rank
+            FROM transactions_fts
+            WHERE transactions_fts MATCH ?
+          )
+          SELECT t.id
+          FROM fts_matches fts
+          CROSS JOIN transactions t ON fts.id = t.id
+          LEFT JOIN transaction_items i ON t.id = i.transaction_id
+          WHERE t.type = ?
+          ORDER BY fts.rank, t.date DESC
+          LIMIT 500 OFFSET 0;`,
+          ['"Merchant"*', 'expense']
+        );
+        expect(plan[0]?.detail).toMatch(/SCAN transactions_fts VIRTUAL TABLE/i);
+        expect(plan[1]?.detail).toMatch(/SEARCH t USING INTEGER PRIMARY KEY/i);
+
+        // R-01: FTS + type filter executes quickly and returns correct capped page
+        const t0 = performance.now();
+        const ftsExpensePage = searchTransactions('Merchant', { type: 'expense' }, testDb as any);
+        const ftsExpenseMs = performance.now() - t0;
+        expect(ftsExpensePage).toHaveLength(DEFAULT_SEARCH_LIMIT);
+        expect(ftsExpensePage.every((t) => t.type === 'expense')).toBe(true);
+        expect(ftsExpenseMs).toBeLessThan(250);
+
+        // R-01: FTS + walletId filter executes quickly and returns correct capped page
+        const t1 = performance.now();
+        const ftsWallet2Page = searchTransactions('Merchant', { walletId: 2 }, testDb as any);
+        const ftsWallet2Ms = performance.now() - t1;
+        expect(ftsWallet2Page).toHaveLength(DEFAULT_SEARCH_LIMIT);
+        expect(ftsWallet2Page.every((t) => t.walletId === 2 || t.toWalletId === 2)).toBe(true);
+        expect(ftsWallet2Ms).toBeLessThan(250);
+
+        // R-02: Uncapped SQL summary covers ALL matching transactions (> 500), not just the 500-row page
+        expect(expectedExpenseCount).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+        expect(expectedWallet2Count).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+
+        // FTS + type summary (must ignore limit/offset and match all 4,333 seeded Merchant expenses)
+        const ftsExpenseSummary = summarizeSearchTransactions(
+          'Merchant',
+          { type: 'expense', limit: 10, offset: 5 },
+          testDb as any
+        );
+        expect(ftsExpenseSummary).toEqual({
+          count: expectedExpenseCount,
+          totalIn: 0,
+          totalOut: expectedExpenseOut,
+          net: -expectedExpenseOut,
+        });
+
+        // FTS + walletId summary (includes transfers in count, excludes transfers from totalIn/totalOut)
+        const ftsWallet2Summary = summarizeSearchTransactions('Merchant', { walletId: 2 }, testDb as any);
+        expect(ftsWallet2Summary).toEqual({
+          count: expectedWallet2Count,
+          totalIn: expectedWallet2In,
+          totalOut: expectedWallet2Out,
+          net: expectedWallet2In - expectedWallet2Out,
+        });
+
+        // Filter-only (empty query) summary covers all wallet 2 transactions (> 500)
+        const filterOnlyWallet2Page = searchTransactions('', { walletId: 2 }, testDb as any);
+        expect(filterOnlyWallet2Page).toHaveLength(DEFAULT_SEARCH_LIMIT);
+        const filterOnlyWallet2Summary = summarizeSearchTransactions('', { walletId: 2 }, testDb as any);
+        expect(filterOnlyWallet2Summary).toEqual({
+          count: expectedWallet2Count,
+          totalIn: expectedWallet2In,
+          totalOut: expectedWallet2Out,
+          net: expectedWallet2In - expectedWallet2Out,
+        });
+
+        // LIKE fallback summary (category substring "Dining" not indexed in FTS) covers all > 500 matches
+        // (+1 for the initial Kopi Kenangan Food & Dining row on wallet 1 from beforeEach, total -45000)
+        expect(expectedFoodWallet1Count).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+        const likeCategorySummary = summarizeSearchTransactions('Dining', { walletId: 1 }, testDb as any);
+        expect(likeCategorySummary.count).toBe(expectedFoodWallet1Count + 1);
+        expect(likeCategorySummary.totalOut).toBe(expectedFoodWallet1Out + 45000);
+        expect(likeCategorySummary.totalIn).toBe(0);
+        expect(likeCategorySummary.net).toBe(-(expectedFoodWallet1Out + 45000));
+
+        // Empty query with no filters returns zeros
+        expect(summarizeSearchTransactions('', undefined, testDb as any)).toEqual({
+          count: 0,
+          totalIn: 0,
+          totalOut: 0,
+          net: 0,
+        });
       });
     });
 

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Animated, RefreshControl, ScrollView, TextInput } from 'react-native';
+import { Animated, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { BudgetScreen } from '../BudgetScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -38,6 +39,7 @@ describe('BudgetScreen', () => {
         }) as any
     );
 
+    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true });
     useTransactionStore.setState({
       transactionsList: [],
       budgets: { Groceries: 1000000 },
@@ -109,6 +111,110 @@ describe('BudgetScreen', () => {
     });
 
     expect(mockSetBudget).toHaveBeenCalledWith('Groceries', 1500000);
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('opens calculator keypad in budget modal and saves decimal USD limits', async () => {
+    useSettingsStore.setState({ currencyCode: 'USD', useThousandsSeparator: true });
+    useTransactionStore.setState({
+      budgets: { Groceries: 250.5 },
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<BudgetScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Groceries budget limit' }).props.onPress();
+    });
+
+    // Preserves existing decimals when opening modal
+    expect(renderer.root.findByType(TextInput).props.value).toBe('250.5');
+
+    // Open inline calculator keypad and add 49.75 -> 300.25
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Edit budget amount' }).props.onPress();
+    });
+
+    for (const label of ['Add', '4', '9', 'Decimal point', '7', '5', 'Done']) {
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: label }).props.onPress();
+      });
+    }
+
+    expect(renderer.root.findByType(TextInput).props.value).toBe('300.25');
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save budget limit' }).props.onPress();
+    });
+
+    expect(mockSetBudget).toHaveBeenCalledWith('Groceries', 300.25);
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('bounds the budget modal height and scrolls its content when the inline calculator is open (R-03)', () => {
+    useSettingsStore.setState({ currencyCode: 'USD', useThousandsSeparator: true, fontScale: 1.2 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<BudgetScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Groceries budget limit' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Edit budget amount' }).props.onPress();
+    });
+
+    const modalCard = renderer.root.findByProps({ testID: 'budget-modal-card' });
+    const flattenedCardStyle = StyleSheet.flatten(modalCard.props.style);
+    expect(flattenedCardStyle.maxHeight).toBe('90%');
+
+    const modalScroll = renderer.root.findByProps({ testID: 'budget-modal-scroll' });
+    expect(modalScroll.type).toBe(ScrollView);
+    // Both header and bottom calculator Done key live inside the scrollable container
+    expect(modalScroll.findByProps({ accessibilityLabel: 'Done' })).toBeDefined();
+    expect(modalScroll.findByProps({ accessibilityLabel: 'Close' })).toBeDefined();
+
+    // Tapping the sibling backdrop closes the modal cleanly
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Close budget modal backdrop' }).props.onPress();
+    });
+    expect(renderer.root.findAllByProps({ testID: 'budget-modal-card' })).toHaveLength(0);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('blocks saving a budget limit above the safe maximum amount (R-05)', async () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<BudgetScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Groceries budget limit' }).props.onPress();
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByType(TextInput).props.onChangeText('999999999999998');
+    });
+
+    const texts = renderer.root.findAllByType(Text).map((t: any) => String(t.props.children ?? ''));
+    expect(texts).toContain('Amount is too large');
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save budget limit' }).props.onPress();
+    });
+    expect(mockSetBudget).not.toHaveBeenCalled();
+
     ReactTestRenderer.act(() => {
       renderer.unmount();
     });

@@ -8,6 +8,7 @@ import {
   TextInput,
   ScrollView,
   Animated,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -20,7 +21,14 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { formatAmountInput, formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
+import {
+  formatAmountForInput,
+  formatAmountInput,
+  formatDisplayCurrency,
+  isAmountWithinRange,
+  parseSignedAmount,
+} from '../features/transactions/amount';
+import { AmountCalculatorKeypad } from '../components/AmountCalculatorKeypad';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
   if (percentage > 100) {
@@ -113,6 +121,8 @@ export const BudgetScreen = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [budgetInput, setBudgetInput] = useState('');
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
 
   const budgetCards = useMemo(
     () =>
@@ -144,27 +154,41 @@ export const BudgetScreen = () => {
   const handleOpenModal = (category: string) => {
     setSelectedCategory(category);
     const existingLimit = budgets[category];
-    setBudgetInput(existingLimit && existingLimit > 0 ? formatAmountInput(Math.round(existingLimit).toString()) : '');
+    setBudgetInput(existingLimit && existingLimit > 0 ? formatAmountForInput(existingLimit, currencyCode) : '');
+    setBudgetError(null);
+    setCalculatorOpen(false);
     setModalVisible(true);
   };
 
   const handleSaveBudget = async () => {
-    const numericValue = Math.abs(parseSignedAmount(budgetInput));
+    const numericValue = Math.abs(parseSignedAmount(budgetInput, undefined, currencyCode));
+    if (!isAmountWithinRange(numericValue)) {
+      setBudgetError('Amount is too large');
+      return;
+    }
     if (numericValue > 0) {
       await setBudget(selectedCategory, numericValue);
     } else {
       // 0 or empty clears budget
       await setBudget(selectedCategory, 0);
     }
+    setBudgetError(null);
+    setCalculatorOpen(false);
     setModalVisible(false);
   };
 
   const handleClearBudget = async () => {
     await setBudget(selectedCategory, 0);
+    setBudgetError(null);
+    setCalculatorOpen(false);
     setModalVisible(false);
   };
 
-  const closeModal = () => setModalVisible(false);
+  const closeModal = () => {
+    setBudgetError(null);
+    setCalculatorOpen(false);
+    setModalVisible(false);
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -338,89 +362,152 @@ export const BudgetScreen = () => {
 
       {/* Edit / Clear Budget Modal */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
-        <KeyboardAvoidingView
-          style={styles.keyboardShell}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <TouchableOpacity style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.58)' }]} activeOpacity={1} onPress={closeModal}>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={(event) => event.stopPropagation()}
-              style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
-            >
-              <View style={styles.modalHeader}>
-                <View style={[styles.modalIconWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                  <Ionicons name="calculator-outline" size={20} color={theme.primary} />
-                </View>
-                <View style={styles.modalHeaderCopy}>
-                  <Text style={[styles.modalTitle, { color: theme.text }, bodyScale]}>Monthly Budget Cap</Text>
-                  <Text style={[styles.modalSubtitle, { color: theme.textMuted }, smallScale]} numberOfLines={1}>
-                    {selectedCategory}
+        {modalVisible ? (
+          <KeyboardAvoidingView
+            style={styles.keyboardShell}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.58)' }]}>
+              <TouchableOpacity
+                style={StyleSheet.absoluteFill}
+                activeOpacity={1}
+                onPress={closeModal}
+                accessibilityRole="button"
+                accessibilityLabel="Close budget modal backdrop"
+              />
+              <View
+                testID="budget-modal-card"
+                style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              >
+                <ScrollView
+                  testID="budget-modal-scroll"
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  <View style={styles.modalHeader}>
+                    <View style={[styles.modalIconWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                      <Ionicons name="calculator-outline" size={20} color={theme.primary} />
+                    </View>
+                    <View style={styles.modalHeaderCopy}>
+                      <Text style={[styles.modalTitle, { color: theme.text }, bodyScale]}>Monthly Budget Cap</Text>
+                      <Text style={[styles.modalSubtitle, { color: theme.textMuted }, smallScale]} numberOfLines={1}>
+                        {selectedCategory}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.modalCloseBtn}
+                      onPress={closeModal}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close"
+                    >
+                      <Ionicons name="close" size={22} color={theme.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.modalInputLabel, { color: theme.textMuted }, smallScale]}>
+                    Enter monthly limit amount (0 to remove budget):
                   </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.modalCloseBtn}
-                  onPress={closeModal}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close"
-                >
-                  <Ionicons name="close" size={22} color={theme.textMuted} />
-                </TouchableOpacity>
-              </View>
 
-              <Text style={[styles.modalInputLabel, { color: theme.textMuted }, smallScale]}>
-                Enter monthly limit amount (0 to remove budget):
-              </Text>
-
-              <View style={[styles.inputShell, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <Text style={[styles.currencyPrefix, { color: theme.textMuted }, bodyScale]}>{currencyCode}</Text>
-                <TextInput
-                  style={[styles.input, { color: theme.text }, metricScale]}
-                  keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
-                  value={budgetInput}
-                  onChangeText={(text) => {
-                    setBudgetInput(formatAmountInput(text));
-                  }}
-                  placeholder="0"
-                  placeholderTextColor={theme.textMuted}
-                  autoFocus
-                />
-              </View>
-
-              <View style={styles.modalActions}>
-                {budgets[selectedCategory] && budgets[selectedCategory] > 0 ? (
                   <TouchableOpacity
-                    style={[styles.clearBtn, { borderColor: theme.expense, backgroundColor: theme.background }]}
-                    onPress={handleClearBudget}
+                    style={[
+                      styles.inputShell,
+                      {
+                        borderColor: budgetError
+                          ? theme.expense
+                          : calculatorOpen
+                            ? theme.primary
+                            : theme.border,
+                        backgroundColor: theme.background,
+                      },
+                    ]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setCalculatorOpen(true);
+                    }}
+                    activeOpacity={0.85}
                     accessibilityRole="button"
-                    accessibilityLabel="Clear budget limit"
+                    accessibilityLabel="Edit budget amount"
                   >
-                    <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 4 }} />
-                    <Text style={[styles.clearBtnText, { color: theme.expense }, bodyScale]}>Clear</Text>
+                    <Text style={[styles.currencyPrefix, { color: theme.textMuted }, bodyScale]}>{currencyCode}</Text>
+                    <TextInput
+                      style={[styles.input, { color: theme.text }, metricScale]}
+                      keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                      showSoftInputOnFocus={false}
+                      pointerEvents="none"
+                      value={budgetInput}
+                      onChangeText={(text) => {
+                        const formatted = formatAmountInput(text, currencyCode);
+                        setBudgetInput(formatted);
+                        const parsed = Math.abs(parseSignedAmount(text, undefined, currencyCode));
+                        setBudgetError(!isAmountWithinRange(parsed) ? 'Amount is too large' : null);
+                      }}
+                      placeholder="0"
+                      placeholderTextColor={theme.textMuted}
+                    />
+                    <Ionicons name="calculator-outline" size={18} color={theme.textMuted} />
                   </TouchableOpacity>
-                ) : null}
 
-                <TouchableOpacity
-                  style={[styles.cancelBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
-                  onPress={closeModal}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel"
-                >
-                  <Text style={[styles.cancelText, { color: theme.textMuted }, bodyScale]}>Cancel</Text>
-                </TouchableOpacity>
+                  {budgetError ? (
+                    <Text style={[styles.budgetErrorText, { color: theme.expense }, smallScale]} accessibilityRole="alert">
+                      {budgetError}
+                    </Text>
+                  ) : null}
 
-                <TouchableOpacity
-                  style={[styles.saveBtn, { backgroundColor: theme.primary }]}
-                  onPress={handleSaveBudget}
-                  accessibilityRole="button"
-                  accessibilityLabel="Save budget limit"
-                >
-                  <Text style={[styles.saveText, bodyScale]}>Save Limit</Text>
-                </TouchableOpacity>
+                  {calculatorOpen ? (
+                    <View style={styles.calculatorWrap}>
+                      <AmountCalculatorKeypad
+                        initialValue={budgetInput}
+                        currencyCode={currencyCode}
+                        allowZero
+                        embedded
+                        onDone={(formatted) => {
+                          setBudgetInput(formatted);
+                          setBudgetError(null);
+                          setCalculatorOpen(false);
+                        }}
+                        onCancel={() => setCalculatorOpen(false)}
+                      />
+                    </View>
+                  ) : (
+                    <View style={styles.modalActions}>
+                      {budgets[selectedCategory] && budgets[selectedCategory] > 0 ? (
+                        <TouchableOpacity
+                          style={[styles.clearBtn, { borderColor: theme.expense, backgroundColor: theme.background }]}
+                          onPress={handleClearBudget}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear budget limit"
+                        >
+                          <Ionicons name="trash-outline" size={16} color={theme.expense} style={{ marginRight: 4 }} />
+                          <Text style={[styles.clearBtnText, { color: theme.expense }, bodyScale]}>Clear</Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      <TouchableOpacity
+                        style={[styles.cancelBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
+                        onPress={closeModal}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel"
+                      >
+                        <Text style={[styles.cancelText, { color: theme.textMuted }, bodyScale]}>Cancel</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+                        onPress={handleSaveBudget}
+                        accessibilityRole="button"
+                        accessibilityLabel="Save budget limit"
+                      >
+                        <Text style={[styles.saveText, bodyScale]}>Save Limit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </ScrollView>
               </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
+            </View>
+          </KeyboardAvoidingView>
+        ) : null}
       </Modal>
     </SafeAreaView>
   );
@@ -479,8 +566,10 @@ const styles = StyleSheet.create({
   emptyBudgetStrip: { minHeight: 46, borderWidth: 1, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   emptyBudgetStripText: { marginLeft: 8, fontWeight: '700' },
   bottomSpacer: { height: 92 },
-  modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
-  modalCard: { borderWidth: 1, borderRadius: 24, padding: 18 },
+  modalOverlay: { flex: 1, justifyContent: 'center', padding: 16 },
+  modalCard: { borderWidth: 1, borderRadius: 24, maxHeight: '90%', overflow: 'hidden' },
+  modalScrollContent: { padding: 18 },
+  budgetErrorText: { fontWeight: '600', marginTop: 6 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   modalIconWrap: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   modalHeaderCopy: { flex: 1 },
@@ -498,6 +587,7 @@ const styles = StyleSheet.create({
   },
   currencyPrefix: { fontWeight: '700', marginRight: 8 },
   input: { flex: 1, fontWeight: '700', minHeight: 44 },
+  calculatorWrap: { marginTop: 12 },
   modalActions: { flexDirection: 'row', marginTop: 18, gap: 8 },
   clearBtn: {
     minHeight: 46,

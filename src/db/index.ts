@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/expo-sqlite';
 import * as schema from './schema';
 import { DEFAULT_APP_SETTINGS } from '../features/transactions/constants';
 import { DEFAULT_CATEGORY_SEEDS, inferCategoryType, serializeSettingValue } from '../features/transactions/categories';
+import { addAmounts, roundCurrency, type TransactionFilterSummary } from '../features/transactions/amount';
 import { mapTransactionRowToModel, TransactionListRow } from '../features/transactions/mappers';
 import type { Transaction } from '../features/transactions/types';
 
@@ -19,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 11;
+const DB_SCHEMA_VERSION = 12;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -119,6 +120,22 @@ export function createBaseSchema(sqliteDb: typeof expoDb = expoDb) {
   `);
   createReceiptQueueTable(sqliteDb);
   createRecurringTable(sqliteDb);
+  createTransactionTemplatesTable(sqliteDb);
+}
+
+/**
+ * Reusable quick-entry templates shown as chips on Add Transaction.
+ * Stored as JSON without date or receipt photo, matching recurring_rules.
+ */
+export function createTransactionTemplatesTable(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS transaction_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      template_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
 }
 
 /**
@@ -370,6 +387,11 @@ function migrateToVersion10(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync('CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id);');
 }
 
+function migrateToVersion12(sqliteDb: typeof expoDb = expoDb) {
+  createTransactionTemplatesTable(sqliteDb);
+  sqliteDb.execSync('CREATE INDEX IF NOT EXISTS idx_transactions_to_wallet ON transactions(to_wallet_id);');
+}
+
 export function rebuildFtsIndex(sqliteDb: typeof expoDb = expoDb) {
   try {
     sqliteDb.execSync(`INSERT INTO transactions_fts(transactions_fts) VALUES('rebuild');`);
@@ -388,41 +410,158 @@ export function buildFtsSearchQuery(rawQuery: string): string {
   return tokens.map((token) => `"${token}"*`).join(' OR ');
 }
 
+export const DEFAULT_SEARCH_LIMIT = 500;
+
+export interface SearchTransactionsOptions {
+  limit?: number;
+  offset?: number;
+  type?: string;
+  walletId?: number;
+  category?: string;
+  dateFrom?: number;
+  dateTo?: number;
+}
+
+const SEARCH_SELECT_COLUMNS = `
+  t.id AS id,
+  t.merchant_name AS merchantName,
+  t.total_amount AS totalAmount,
+  t.type AS type,
+  t.date AS date,
+  t.image_uri AS imageUri,
+  t.note AS note,
+  t.line_items_text AS lineItemsText,
+  i.category AS category,
+  t.wallet_id AS walletId,
+  t.to_wallet_id AS toWalletId
+`;
+
+const SEARCH_SUMMARY_COLUMNS = `
+  COUNT(*) AS count,
+  COALESCE(SUM(CASE
+    WHEN t.type = 'transfer' THEN 0
+    WHEN t.type = 'income' THEN ABS(t.total_amount)
+    WHEN t.type != 'expense' AND t.total_amount > 0 THEN t.total_amount
+    ELSE 0
+  END), 0) AS totalIn,
+  COALESCE(SUM(CASE
+    WHEN t.type = 'transfer' THEN 0
+    WHEN t.type = 'expense' THEN ABS(t.total_amount)
+    WHEN t.type != 'income' AND t.total_amount < 0 THEN ABS(t.total_amount)
+    ELSE 0
+  END), 0) AS totalOut
+`;
+
+interface SearchSummaryRow {
+  count: number | null;
+  totalIn: number | null;
+  totalOut: number | null;
+}
+
+function emptySearchSummary(): TransactionFilterSummary {
+  return { count: 0, totalIn: 0, totalOut: 0, net: 0 };
+}
+
+function mapSummaryRow(row: SearchSummaryRow | null | undefined): TransactionFilterSummary {
+  if (!row) return emptySearchSummary();
+  const count = Number(row.count ?? 0);
+  const totalIn = roundCurrency(Number(row.totalIn ?? 0));
+  const totalOut = roundCurrency(Number(row.totalOut ?? 0));
+  return {
+    count,
+    totalIn,
+    totalOut,
+    net: addAmounts(totalIn, -totalOut),
+  };
+}
+
+function buildSearchFilterParts(options?: SearchTransactionsOptions): {
+  filterClauses: string[];
+  filterParams: (string | number)[];
+} {
+  const filterClauses: string[] = [];
+  const filterParams: (string | number)[] = [];
+
+  if (options?.type) {
+    filterClauses.push('t.type = ?');
+    filterParams.push(options.type);
+  }
+  if (typeof options?.walletId === 'number' && Number.isFinite(options.walletId)) {
+    filterClauses.push('(t.wallet_id = ? OR t.to_wallet_id = ?)');
+    filterParams.push(options.walletId, options.walletId);
+  }
+  if (options?.category && options.category.trim()) {
+    filterClauses.push('i.category = ?');
+    filterParams.push(options.category.trim());
+  }
+  if (typeof options?.dateFrom === 'number' && Number.isFinite(options.dateFrom)) {
+    filterClauses.push('t.date >= ?');
+    filterParams.push(options.dateFrom);
+  }
+  if (typeof options?.dateTo === 'number' && Number.isFinite(options.dateTo)) {
+    filterClauses.push('t.date <= ?');
+    filterParams.push(options.dateTo);
+  }
+
+  return { filterClauses, filterParams };
+}
+
 export function searchTransactions(
   query: string,
-  options?: { limit?: number; offset?: number; type?: string },
+  options?: SearchTransactionsOptions,
   sqliteDb: typeof expoDb = expoDb
 ): Transaction[] {
-  const trimmed = query.trim();
-  if (!trimmed) {
+  const trimmed = (query ?? '').trim();
+  const { filterClauses, filterParams } = buildSearchFilterParts(options);
+
+  if (!trimmed && filterClauses.length === 0) {
     return [];
   }
 
-  const limit = options?.limit ?? 50;
+  const limit = options?.limit ?? DEFAULT_SEARCH_LIMIT;
   const offset = options?.offset ?? 0;
+
+  // Filter-only query (empty search box)
+  if (!trimmed) {
+    try {
+      const rows = sqliteDb.getAllSync<TransactionListRow>(
+        `SELECT ${SEARCH_SELECT_COLUMNS}
+        FROM transactions t
+        LEFT JOIN transaction_items i ON t.id = i.transaction_id
+        WHERE ${filterClauses.join(' AND ')}
+        ORDER BY t.date DESC, t.id DESC
+        LIMIT ? OFFSET ?;`,
+        [...filterParams, limit, offset]
+      );
+      return rows.map(mapTransactionRowToModel);
+    } catch (error) {
+      console.error('Filtered search query failed:', error);
+      return [];
+    }
+  }
+
+  const whereClause = filterClauses.length > 0 ? `WHERE ${filterClauses.join(' AND ')}` : '';
+  const extraWhere = filterClauses.length > 0 ? `AND ${filterClauses.join(' AND ')}` : '';
   const matchQuery = buildFtsSearchQuery(trimmed);
 
   if (matchQuery) {
     try {
+      // Select FTS rowids first in a CTE and pin join order with CROSS JOIN so SQLite
+      // always drives from transactions_fts and looks up transactions by primary key.
       const rows = sqliteDb.getAllSync<TransactionListRow>(
-        `SELECT
-          t.id AS id,
-          t.merchant_name AS merchantName,
-          t.total_amount AS totalAmount,
-          t.type AS type,
-          t.date AS date,
-          t.image_uri AS imageUri,
-          t.note AS note,
-          t.line_items_text AS lineItemsText,
-          i.category AS category
-        FROM transactions_fts fts
-        JOIN transactions t ON fts.rowid = t.id
+        `WITH fts_matches AS (
+          SELECT rowid AS id, rank
+          FROM transactions_fts
+          WHERE transactions_fts MATCH ?
+        )
+        SELECT ${SEARCH_SELECT_COLUMNS}
+        FROM fts_matches fts
+        CROSS JOIN transactions t ON fts.id = t.id
         LEFT JOIN transaction_items i ON t.id = i.transaction_id
-        WHERE transactions_fts MATCH ?
-        ${options?.type ? 'AND t.type = ?' : ''}
+        ${whereClause}
         ORDER BY fts.rank, t.date DESC
         LIMIT ? OFFSET ?;`,
-        options?.type ? [matchQuery, options.type, limit, offset] : [matchQuery, limit, offset]
+        [matchQuery, ...filterParams, limit, offset]
       );
 
       if (rows && rows.length > 0) {
@@ -437,30 +576,99 @@ export function searchTransactions(
   try {
     const likePattern = `%${trimmed}%`;
     const rows = sqliteDb.getAllSync<TransactionListRow>(
-      `SELECT
-        t.id AS id,
-        t.merchant_name AS merchantName,
-        t.total_amount AS totalAmount,
-        t.type AS type,
-        t.date AS date,
-        t.image_uri AS imageUri,
-        t.note AS note,
-        t.line_items_text AS lineItemsText,
-        i.category AS category
+      `SELECT ${SEARCH_SELECT_COLUMNS}
       FROM transactions t
       LEFT JOIN transaction_items i ON t.id = i.transaction_id
       WHERE (t.merchant_name LIKE ? OR t.note LIKE ? OR t.line_items_text LIKE ? OR i.category LIKE ?)
-      ${options?.type ? 'AND t.type = ?' : ''}
+      ${extraWhere}
       ORDER BY t.date DESC
       LIMIT ? OFFSET ?;`,
-      options?.type
-        ? [likePattern, likePattern, likePattern, likePattern, options.type, limit, offset]
-        : [likePattern, likePattern, likePattern, likePattern, limit, offset]
+      [likePattern, likePattern, likePattern, likePattern, ...filterParams, limit, offset]
     );
     return rows.map(mapTransactionRowToModel);
   } catch (error) {
     console.error('Search query failed entirely:', error);
     return [];
+  }
+}
+
+/**
+ * Computes uncapped count, totalIn, totalOut, and net across ALL transactions matching
+ * the given search query and filter options (ignoring pagination limit/offset).
+ * Transfers are counted in `count` but excluded from `totalIn` and `totalOut`.
+ */
+export function summarizeSearchTransactions(
+  query: string,
+  options?: SearchTransactionsOptions,
+  sqliteDb: typeof expoDb = expoDb
+): TransactionFilterSummary {
+  const trimmed = (query ?? '').trim();
+  const { filterClauses, filterParams } = buildSearchFilterParts(options);
+
+  if (!trimmed && filterClauses.length === 0) {
+    return emptySearchSummary();
+  }
+
+  // Filter-only aggregate (empty search box)
+  if (!trimmed) {
+    try {
+      const row = sqliteDb.getFirstSync<SearchSummaryRow>(
+        `SELECT ${SEARCH_SUMMARY_COLUMNS}
+        FROM transactions t
+        LEFT JOIN transaction_items i ON t.id = i.transaction_id
+        WHERE ${filterClauses.join(' AND ')};`,
+        filterParams
+      );
+      return mapSummaryRow(row);
+    } catch (error) {
+      console.error('Filtered summary query failed:', error);
+      return emptySearchSummary();
+    }
+  }
+
+  const whereClause = filterClauses.length > 0 ? `WHERE ${filterClauses.join(' AND ')}` : '';
+  const extraWhere = filterClauses.length > 0 ? `AND ${filterClauses.join(' AND ')}` : '';
+  const matchQuery = buildFtsSearchQuery(trimmed);
+
+  if (matchQuery) {
+    try {
+      const row = sqliteDb.getFirstSync<SearchSummaryRow>(
+        `WITH fts_matches AS (
+          SELECT rowid AS id
+          FROM transactions_fts
+          WHERE transactions_fts MATCH ?
+        )
+        SELECT ${SEARCH_SUMMARY_COLUMNS}
+        FROM fts_matches fts
+        CROSS JOIN transactions t ON fts.id = t.id
+        LEFT JOIN transaction_items i ON t.id = i.transaction_id
+        ${whereClause};`,
+        [matchQuery, ...filterParams]
+      );
+      const summary = mapSummaryRow(row);
+      if (summary.count > 0) {
+        return summary;
+      }
+    } catch (e) {
+      console.warn('FTS summary failed or fell back:', e);
+    }
+  }
+
+  // Fallback to LIKE aggregate across merchant_name, note, line_items_text, or category
+  try {
+    const likePattern = `%${trimmed}%`;
+    const row = sqliteDb.getFirstSync<SearchSummaryRow>(
+      `SELECT ${SEARCH_SUMMARY_COLUMNS}
+      FROM transactions t
+      LEFT JOIN transaction_items i ON t.id = i.transaction_id
+      WHERE (t.merchant_name LIKE ? OR t.note LIKE ? OR t.line_items_text LIKE ? OR i.category LIKE ?)
+      ${extraWhere};`,
+      [likePattern, likePattern, likePattern, likePattern, ...filterParams]
+    );
+    return mapSummaryRow(row);
+  } catch (error) {
+    console.error('Search summary query failed entirely:', error);
+    return emptySearchSummary();
   }
 }
 
@@ -506,6 +714,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 10) {
     migrateToVersion10(sqliteDb);
+  }
+
+  if (currentVersion < 12) {
+    migrateToVersion12(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

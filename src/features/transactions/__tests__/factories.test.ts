@@ -151,5 +151,14 @@ describe('transaction factories', () => {
       const rounded = normalizeTransactionInput({ totalAmount: 123.4567, type: 'income' });
       expect(rounded.totalAmount).toBe(123.46);
     });
+
+    it('preserves exact large integer and boundary cent amounts without precision corruption (R-05)', () => {
+      expect(normalizeTransactionInput({ totalAmount: 9999999999999.99, type: 'expense' }).totalAmount).toBe(
+        -9999999999999.99
+      );
+      expect(normalizeTransactionInput({ totalAmount: 999999999999998, type: 'expense' }).totalAmount).toBe(
+        -999999999999998
+      );
+    });
   });
 });

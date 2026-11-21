@@ -1,5 +1,10 @@
 import {
+  MAX_TRANSACTION_AMOUNT,
+  isAmountWithinRange,
+  getCurrencyDecimals,
+  currencyHasDecimals,
   formatAmountInput,
+  formatAmountForInput,
   roundCurrency,
   parseSignedAmount,
   addAmounts,
@@ -7,6 +12,9 @@ import {
   splitAmount,
   calculatePercentage,
   formatDisplayCurrency,
+  evaluateAmountExpression,
+  formatCalculatorExpression,
+  summarizeTransactions,
 } from '../amount';
 
 describe('amount utilities', () => {
@@ -87,10 +95,27 @@ describe('amount utilities', () => {
     it('handles extreme integer bounds and very small decimal values', () => {
       expect(roundCurrency(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
       expect(roundCurrency(Number.MIN_SAFE_INTEGER)).toBe(Number.MIN_SAFE_INTEGER);
+      expect(roundCurrency(999999999999998, 2)).toBe(999999999999998);
+      expect(roundCurrency(-999999999999998, 2)).toBe(-999999999999998);
+      expect(roundCurrency(99999999999999.5, 2)).toBe(99999999999999.5);
       expect(roundCurrency(0.00001, 2)).toBe(0);
       expect(roundCurrency(0.00001, 5)).toBe(0.00001);
       expect(roundCurrency(0.07 * 100)).toBe(7);
       expect(roundCurrency(1.0000000000000002)).toBe(1);
+    });
+
+    it('keeps every cent exact up to MAX_TRANSACTION_AMOUNT (1e13)', () => {
+      expect(MAX_TRANSACTION_AMOUNT).toBe(1e13);
+      expect(isAmountWithinRange(MAX_TRANSACTION_AMOUNT)).toBe(true);
+      expect(isAmountWithinRange(-MAX_TRANSACTION_AMOUNT)).toBe(true);
+      expect(isAmountWithinRange(MAX_TRANSACTION_AMOUNT + 1)).toBe(false);
+      expect(isAmountWithinRange(999999999999998)).toBe(false);
+      expect(isAmountWithinRange(NaN)).toBe(false);
+
+      for (let cents = 0; cents < 100; cents++) {
+        const expected = Number(`9999999999999.${String(cents).padStart(2, '0')}`);
+        expect(roundCurrency(expected, 2)).toBe(expected);
+      }
     });
   });
 
@@ -305,6 +330,7 @@ describe('amount utilities', () => {
 
       const resultJpy = formatDisplayCurrency(1000, 'JPY');
       expect(resultJpy).toMatch(/¥|JPY/);
+      expect(resultJpy).not.toContain(',00');
     });
 
     it('handles useThousands=false properly', () => {
@@ -342,6 +368,159 @@ describe('amount utilities', () => {
       } finally {
         Intl.NumberFormat = originalIntl;
       }
+    });
+  });
+
+  describe('currency decimals & decimal-aware input/parsing', () => {
+    it('identifies zero-decimal vs minor-unit currencies accurately', () => {
+      expect(getCurrencyDecimals('IDR')).toBe(0);
+      expect(getCurrencyDecimals('JPY')).toBe(0);
+      expect(currencyHasDecimals('IDR')).toBe(false);
+      expect(currencyHasDecimals('JPY')).toBe(false);
+
+      expect(getCurrencyDecimals('USD')).toBe(2);
+      expect(getCurrencyDecimals('EUR')).toBe(2);
+      expect(getCurrencyDecimals('GBP')).toBe(2);
+      expect(getCurrencyDecimals('SGD')).toBe(2);
+      expect(currencyHasDecimals('USD')).toBe(true);
+      expect(currencyHasDecimals('eur')).toBe(true);
+    });
+
+    it('keeps decimals when formatting input for minor-unit currencies', () => {
+      expect(formatAmountInput('12.5', 'USD')).toBe('12.5');
+      expect(formatAmountInput('12.50', 'USD')).toBe('12.50');
+      expect(formatAmountInput('12.567', 'USD')).toBe('12.56');
+      expect(formatAmountInput('1234.56', 'USD')).toBe('1,234.56');
+      expect(formatAmountInput('1234.', 'EUR')).toBe('1,234.');
+      expect(formatAmountInput('.5', 'SGD')).toBe('0.5');
+      expect(formatAmountInput('.', 'GBP')).toBe('0.');
+      expect(formatAmountInput('12.3.4', 'USD')).toBe('12.34');
+      expect(formatAmountInput('$12,500.50', 'USD')).toBe('12,500.50');
+      // Backspacing "1,234" produces "1,23" -> must stay "123", not "1.23"
+      expect(formatAmountInput('1,23', 'USD')).toBe('123');
+    });
+
+    it('strips decimals for IDR and JPY', () => {
+      expect(formatAmountInput('50.000', 'IDR')).toBe('50.000');
+      expect(formatAmountInput('12.50', 'JPY')).toBe('1.250');
+    });
+
+    it('formats stored numeric amounts for input without rounding away cents in USD', () => {
+      expect(formatAmountForInput(-45000, 'IDR')).toBe('45.000');
+      expect(formatAmountForInput(1200, 'JPY')).toBe('1.200');
+      expect(formatAmountForInput(-12.5, 'USD')).toBe('12.5');
+      expect(formatAmountForInput(1234.56, 'USD')).toBe('1,234.56');
+      expect(formatAmountForInput(0.05, 'EUR')).toBe('0.05');
+      expect(formatAmountForInput(NaN, 'USD')).toBe('');
+    });
+
+    it('parses decimal-currency inputs end-to-end and rounds zero-decimal currencies', () => {
+      expect(parseSignedAmount('1,234.56', 'expense', 'USD')).toBe(-1234.56);
+      expect(parseSignedAmount('12.5', 'income', 'USD')).toBe(12.5);
+      expect(parseSignedAmount('0.05', 'expense', 'EUR')).toBe(-0.05);
+      expect(parseSignedAmount('12.345', 'expense', 'USD')).toBe(-12.35);
+      expect(parseSignedAmount('45.000', 'expense', 'IDR')).toBe(-45000);
+      expect(parseSignedAmount(45000.6, 'expense', 'IDR')).toBe(-45001);
+    });
+  });
+
+  describe('evaluateAmountExpression & formatCalculatorExpression', () => {
+    it('evaluates arithmetic with standard precedence and left-associativity', () => {
+      expect(evaluateAmountExpression('45000 + 18500', 0)).toEqual({ ok: true, value: 63500, isExpression: true });
+      expect(evaluateAmountExpression('10 + 5 × 2', 2)).toEqual({ ok: true, value: 20, isExpression: true });
+      expect(evaluateAmountExpression('100 - 20 ÷ 4', 2)).toEqual({ ok: true, value: 95, isExpression: true });
+      expect(evaluateAmountExpression('100 ÷ 2 ÷ 5', 2)).toEqual({ ok: true, value: 10, isExpression: true });
+      expect(evaluateAmountExpression('10 - 3 - 2', 2)).toEqual({ ok: true, value: 5, isExpression: true });
+      expect(evaluateAmountExpression('12.50 + 3.25', 2)).toEqual({ ok: true, value: 15.75, isExpression: true });
+      expect(evaluateAmountExpression('100 ÷ 3', 2)).toEqual({ ok: true, value: 33.33, isExpression: true });
+      expect(evaluateAmountExpression('10000 ÷ 3', 0)).toEqual({ ok: true, value: 3333, isExpression: true });
+      expect(evaluateAmountExpression('45000', 0)).toEqual({ ok: true, value: 45000, isExpression: false });
+    });
+
+    it('rejects division by zero without returning a numeric value', () => {
+      expect(evaluateAmountExpression('100 ÷ 0', 0)).toEqual({ ok: false, error: 'division_by_zero' });
+      expect(evaluateAmountExpression('100 / 0.00', 2)).toEqual({ ok: false, error: 'division_by_zero' });
+      expect(evaluateAmountExpression('50 + 10 ÷ 0', 2)).toEqual({ ok: false, error: 'division_by_zero' });
+      expect(evaluateAmountExpression('0 ÷ 0', 2)).toEqual({ ok: false, error: 'division_by_zero' });
+    });
+
+    it('rejects incomplete expressions so a wrong amount is never saved', () => {
+      expect(evaluateAmountExpression('50 +', 0)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('50 -', 0)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('50 ×', 0)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('50 ÷', 0)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('12.', 2)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('.', 2)).toEqual({ ok: false, error: 'incomplete' });
+      expect(evaluateAmountExpression('-', 2)).toEqual({ ok: false, error: 'incomplete' });
+    });
+
+    it('rejects empty, malformed, and overflowing inputs safely', () => {
+      expect(evaluateAmountExpression('', 0)).toEqual({ ok: false, error: 'empty' });
+      expect(evaluateAmountExpression('   ', 2)).toEqual({ ok: false, error: 'empty' });
+      expect(evaluateAmountExpression('12..5', 2)).toEqual({ ok: false, error: 'invalid' });
+      expect(evaluateAmountExpression('10 + × 5', 2)).toEqual({ ok: false, error: 'invalid' });
+      expect(evaluateAmountExpression('process.exit()', 2)).toEqual({ ok: false, error: 'invalid' });
+      expect(evaluateAmountExpression('999999999999999 × 999999', 0)).toEqual({ ok: false, error: 'overflow' });
+      // Safe precision cap (1e13): accepts exact values up to 1e13 and rejects values above it
+      expect(evaluateAmountExpression('9999999999999.99', 2)).toEqual({
+        ok: true,
+        value: 9999999999999.99,
+        isExpression: false,
+      });
+      expect(evaluateAmountExpression('10000000000000', 0)).toEqual({
+        ok: true,
+        value: 10000000000000,
+        isExpression: false,
+      });
+      expect(evaluateAmountExpression('10000000000001', 0)).toEqual({ ok: false, error: 'overflow' });
+      expect(evaluateAmountExpression('10000000000000.01', 2)).toEqual({ ok: false, error: 'overflow' });
+      expect(evaluateAmountExpression('999999999999998', 2)).toEqual({ ok: false, error: 'overflow' });
+    });
+
+    it('formats calculator expressions for IDR and USD display', () => {
+      expect(formatCalculatorExpression('45000+18500', 'IDR')).toBe('45.000 + 18.500');
+      expect(formatCalculatorExpression('1250.5*2', 'USD')).toBe('1,250.5 × 2');
+      expect(formatCalculatorExpression('100/', 'IDR')).toBe('100 ÷ ');
+    });
+  });
+
+  describe('summarizeTransactions', () => {
+    it('computes count, totalIn, totalOut, and net while excluding transfers from in/out', () => {
+      const summary = summarizeTransactions([
+        { type: 'income', totalAmount: 5000000 },
+        { type: 'expense', totalAmount: -1200000 },
+        { type: 'expense', totalAmount: -300000 },
+        { type: 'transfer', totalAmount: -2000000 },
+      ]);
+
+      expect(summary).toEqual({
+        count: 4,
+        totalIn: 5000000,
+        totalOut: 1500000,
+        net: 3500000,
+      });
+    });
+
+    it('handles transfer-only lists and decimal amounts accurately', () => {
+      expect(summarizeTransactions([{ type: 'transfer', totalAmount: -500 }])).toEqual({
+        count: 1,
+        totalIn: 0,
+        totalOut: 0,
+        net: 0,
+      });
+
+      expect(
+        summarizeTransactions([
+          { type: 'income', totalAmount: 10.1 },
+          { type: 'income', totalAmount: 0.2 },
+          { type: 'expense', totalAmount: -4.05 },
+        ])
+      ).toEqual({
+        count: 3,
+        totalIn: 10.3,
+        totalOut: 4.05,
+        net: 6.25,
+      });
     });
   });
 });

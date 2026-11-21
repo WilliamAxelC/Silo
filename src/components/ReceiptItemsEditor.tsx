@@ -31,10 +31,10 @@ export const ReceiptItemsEditor: React.FC<ReceiptItemsEditorProps> = ({
 
   const itemsTotal = useMemo(() => {
     return lineItems.reduce((sum, item) => {
-      const parsed = Math.abs(parseSignedAmount(item.price));
+      const parsed = Math.abs(parseSignedAmount(item.price, undefined, currencyCode));
       return sum + (isNaN(parsed) ? 0 : parsed);
     }, 0);
-  }, [lineItems]);
+  }, [lineItems, currencyCode]);
 
   return (
     <View style={styles.receiptEditorBlock}>

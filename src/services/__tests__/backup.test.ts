@@ -84,6 +84,23 @@ describe('restoreBackupFile', () => {
     const txId = Number(db.getFirstSync('SELECT id FROM transactions;')!.id);
     db.runSync(`INSERT INTO transaction_items (transaction_id, category, amount) VALUES (?, 'Food & Dining', -38500);`, [txId]);
     db.runSync(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('currencyCode', 'USD');`);
+    db.runSync(
+      `INSERT INTO transaction_templates (name, template_json, created_at) VALUES (?, ?, ?);`,
+      [
+        'Daily Coffee',
+        JSON.stringify({
+          merchantName: 'Kopi Kenangan',
+          totalAmount: -38500,
+          type: 'expense',
+          category: 'Food & Dining',
+          note: '',
+          lineItemsText: '',
+          walletId: 1,
+          toWalletId: null,
+        }),
+        1710000000000,
+      ]
+    );
     raw.close();
 
     const result = await restoreBackupFile(`file://${file}`);
@@ -92,8 +109,24 @@ describe('restoreBackupFile', () => {
     const merchants = mockMain.getAllSync('SELECT merchant_name FROM transactions;').map((r: any) => r.merchant_name);
     expect(merchants).toEqual(['Kopi Kenangan']);
     expect(mockMain.getFirstSync(`SELECT value FROM app_settings WHERE key = 'currencyCode';`)!.value).toBe('USD');
+    const templates = mockMain.getAllSync('SELECT name FROM transaction_templates;').map((r: any) => r.name);
+    expect(templates).toEqual(['Daily Coffee']);
     expect(mockMain.getAllSync(`SELECT rowid FROM transactions_fts WHERE transactions_fts MATCH 'kenangan';`)).toHaveLength(1);
     expect(mockMain.getFirstSync('PRAGMA foreign_keys;')!.foreign_keys).toBe(1);
+  });
+
+  it('restores older backups that predate transaction_templates cleanly', async () => {
+    const file = path.join(mockTmp, 'legacy.db');
+    const { raw, db } = makeDb(file);
+    db.execSync('DROP TABLE IF EXISTS transaction_templates;');
+    db.runSync(
+      `INSERT INTO transactions (wallet_id, merchant_name, total_amount, type, date) VALUES (1, 'Old Coffee', -20000, 'expense', 3);`
+    );
+    raw.close();
+
+    const result = await restoreBackupFile(`file://${file}`);
+    expect(result.transactions).toBe(1);
+    expect(mockMain.getAllSync('SELECT name FROM transaction_templates;')).toEqual([]);
   });
 
   it('rejects a file that is not a Silo backup and leaves current data alone', async () => {

@@ -5,11 +5,13 @@ import { AddTransactionScreen } from '../AddTransactionScreen';
 import { analyzeReceiptImage } from '../../services/ai/agent';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
+import * as templateService from '../../services/templates';
 
 const ReactTestRenderer = require('react-test-renderer');
 
 const mockNavigate = jest.fn();
-const mockRouteParams: { transactionId?: number } = {};
+const mockRouteParams: { transactionId?: number; duplicateFromId?: number } = {};
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
@@ -48,7 +50,9 @@ describe('AddTransactionScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete mockRouteParams.transactionId;
+    delete mockRouteParams.duplicateFromId;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    useSettingsStore.setState({ currencyCode: 'IDR', useThousandsSeparator: true });
 
     useTransactionStore.setState({
       transactionsList: [
@@ -383,5 +387,334 @@ describe('AddTransactionScreen', () => {
     });
     expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ merchantName: 'Netflix', totalAmount: -186000 }), 'monthly', expect.any(Number));
     createRule.mockRestore();
+  });
+
+  it('opens calculator keypad on amount tap and preserves USD decimals end-to-end', async () => {
+    useSettingsStore.setState({ currencyCode: 'USD', useThousandsSeparator: true });
+    mockAddTransaction.mockResolvedValue(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Brunch');
+    });
+
+    // Open calculator by tapping the amount field
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Edit amount' }).props.onPress();
+    });
+
+    // Compute 12.5 + 3.25 = 15.75
+    for (const label of ['1', '2', 'Decimal point', '5', 'Add', '3', 'Decimal point', '2', '5', 'Done']) {
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: label }).props.onPress();
+      });
+    }
+
+    expect(renderer.root.findByProps({ placeholder: '0' }).props.value).toBe('15.75');
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantName: 'Brunch',
+        totalAmount: -15.75,
+        type: 'expense',
+      })
+    );
+
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // Reloading an existing USD transaction with decimals keeps cents (no Math.round truncation)
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 101,
+          walletId: 1,
+          merchantName: 'Brunch',
+          totalAmount: -15.75,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: Date.now(),
+          note: '',
+          lineItemsText: '',
+          imageUri: null,
+        },
+      ],
+    } as any);
+    mockRouteParams.transactionId = 101;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findByProps({ placeholder: '0' }).props.value).toBe('15.75');
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('duplicates an edited transaction as a new entry dated today without copying the photo', async () => {
+    const oldDate = new Date(2025, 0, 10, 9, 0).getTime();
+    useTransactionStore.setState({
+      transactionsList: [
+        {
+          id: 99,
+          walletId: 1,
+          merchantName: 'Existing Cafe',
+          totalAmount: -45000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: oldDate,
+          note: 'Oat latte',
+          lineItemsText: '',
+          imageUri: 'file:///existing.jpg',
+        },
+      ],
+    } as any);
+
+    mockRouteParams.transactionId = 99;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Duplicate transaction' }).props.onPress();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('AddTransactionStack', { duplicateFromId: 99 });
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // Open duplicated entry screen
+    delete mockRouteParams.transactionId;
+    mockRouteParams.duplicateFromId = 99;
+    const beforeMount = Date.now();
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    expect(renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.value).toBe('Existing Cafe');
+    expect(renderer.root.findByProps({ placeholder: '0' }).props.value).toBe('45.000');
+    // Photo must NOT be copied
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Remove photo' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Add receipt photo' })).toBeDefined();
+
+    mockAddTransaction.mockResolvedValueOnce(undefined);
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockUpdateTransaction).not.toHaveBeenCalled();
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantName: 'Existing Cafe',
+        totalAmount: -45000,
+        note: 'Oat latte',
+        imageUri: null,
+      })
+    );
+    const savedDate = mockAddTransaction.mock.calls[0][0].date;
+    expect(savedDate).toBeGreaterThanOrEqual(beforeMount - 1000);
+    expect(savedDate).not.toBe(oldDate);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('saves, prefills, and deletes quick-entry templates on the add screen', () => {
+    const stored: templateService.TransactionTemplate[] = [];
+    const listSpy = jest.spyOn(templateService, 'listTransactionTemplates').mockImplementation(() => [...stored]);
+    const createSpy = jest.spyOn(templateService, 'createTransactionTemplate').mockImplementation((name, payload) => {
+      const created: templateService.TransactionTemplate = {
+        id: stored.length + 1,
+        name,
+        template: payload,
+        createdAt: Date.now(),
+      };
+      stored.unshift(created);
+      return created;
+    });
+    const deleteSpy = jest.spyOn(templateService, 'deleteTransactionTemplate').mockImplementation((id) => {
+      const idx = stored.findIndex((t) => t.id === id);
+      if (idx >= 0) stored.splice(idx, 1);
+    });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    // Fill fields and save as template
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Morning Coffee');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('28000');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Save as template' }).props.onPress();
+    });
+
+    expect(createSpy).toHaveBeenCalledWith(
+      'Morning Coffee',
+      expect.objectContaining({ merchantName: 'Morning Coffee', totalAmount: -28000, type: 'expense' })
+    );
+
+    // Clear fields, then tap the template chip to prefill
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('');
+    });
+    const chip = renderer.root.findByProps({ accessibilityLabel: 'Use template Morning Coffee' });
+    ReactTestRenderer.act(() => {
+      chip.props.onPress();
+    });
+
+    expect(renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.value).toBe('Morning Coffee');
+    expect(renderer.root.findByProps({ placeholder: '0' }).props.value).toBe('28.000');
+
+    // Long press template chip -> confirm delete
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Use template Morning Coffee' }).props.onLongPress();
+    });
+    const alertCall = (Alert.alert as jest.Mock).mock.calls.find((c) => c[0] === 'Delete Template');
+    expect(alertCall).toBeDefined();
+    const deleteBtn = alertCall[2].find((b: any) => b.text === 'Delete');
+    ReactTestRenderer.act(() => {
+      deleteBtn.onPress();
+    });
+
+    expect(deleteSpy).toHaveBeenCalledWith(1);
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Use template Morning Coffee' })).toHaveLength(0);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    listSpy.mockRestore();
+    createSpy.mockRestore();
+    deleteSpy.mockRestore();
+  });
+
+  it('never preselects archived accounts from templates or duplicates, while labeling them in edit mode (R-04)', async () => {
+    useTransactionStore.setState({
+      wallets: [
+        { id: 1, name: 'Old Card', type: 'card', isActive: false, initialBalance: 0, balance: 0 },
+        { id: 2, name: 'Main Bank', type: 'bank', isActive: true, initialBalance: 0, balance: 0 },
+        { id: 3, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0 },
+      ],
+      transactionsList: [
+        {
+          id: 201,
+          walletId: 1,
+          toWalletId: 2,
+          merchantName: 'Old Transfer',
+          totalAmount: -100000,
+          type: 'transfer',
+          category: 'Transfer',
+          date: new Date(2025, 2, 1).getTime(),
+          note: '',
+          lineItemsText: '',
+          imageUri: null,
+        },
+        {
+          id: 202,
+          walletId: 2,
+          toWalletId: 1,
+          merchantName: 'To Archived',
+          totalAmount: -75000,
+          type: 'transfer',
+          category: 'Transfer',
+          date: new Date(2025, 2, 2).getTime(),
+          note: '',
+          lineItemsText: '',
+          imageUri: null,
+        },
+      ],
+    } as any);
+
+    const listSpy = jest.spyOn(templateService, 'listTransactionTemplates').mockReturnValue([
+      {
+        id: 7,
+        name: 'Archived Expense',
+        template: {
+          merchantName: 'Archived Expense',
+          totalAmount: -35000,
+          type: 'expense',
+          category: 'Food & Dining',
+          note: '',
+          lineItemsText: '',
+          walletId: 1,
+          toWalletId: null,
+        },
+        createdAt: Date.now(),
+      },
+    ]);
+
+    // 1. Applying a template with archived walletId=1 falls back to active Main Bank (id=2)
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Use template Archived Expense' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Account: Main Bank' })).toBeDefined();
+
+    mockAddTransaction.mockResolvedValueOnce(undefined);
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+    expect(mockAddTransaction).toHaveBeenCalledWith(expect.objectContaining({ walletId: 2 }));
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // 2. Duplicating transfer from archived wallet 1 -> active wallet 2:
+    //    walletId falls back to Main Bank (2), and colliding toWalletId resets to Choose account (null)
+    mockRouteParams.duplicateFromId = 201;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Account: Main Bank' })).toBeDefined();
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Transfer to: Choose account' })).toBeDefined();
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // 3. Duplicating transfer to archived wallet 1 resets toWalletId to Choose account (null)
+    mockRouteParams.duplicateFromId = 202;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Account: Main Bank' })).toBeDefined();
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Transfer to: Choose account' })).toBeDefined();
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    // 4. Editing historical transaction keeps archived account visible with "(archived)" suffix
+    delete mockRouteParams.duplicateFromId;
+    mockRouteParams.transactionId = 201;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Account: Old Card (archived)' })).toBeDefined();
+    ReactTestRenderer.act(() => renderer.unmount());
+
+    listSpy.mockRestore();
+  });
+
+  it('rejects amounts exceeding the safe precision cap with an inline error (R-05)', async () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Huge Entry');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('999999999999998');
+    });
+
+    expect(
+      renderer.root.findAllByType(Text).some((t: any) => t.props.children === 'Amount is too large')
+    ).toBe(true);
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+    expect(mockAddTransaction).not.toHaveBeenCalled();
+
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 });

@@ -1,5 +1,9 @@
 import { useTransactionStore } from '../useTransactionStore';
-import { db, searchTransactions as searchTransactionsDb } from '../../db/index';
+import {
+  db,
+  searchTransactions as searchTransactionsDb,
+  summarizeSearchTransactions as summarizeSearchTransactionsDb,
+} from '../../db/index';
 import type { CategoryRecord, Transaction } from '../../features/transactions/types';
 
 // Mock DB
@@ -59,6 +63,7 @@ jest.mock('../../db/index', () => {
       transaction: jest.fn((cb) => cb(mockTxDb)),
     },
     searchTransactions: jest.fn(),
+    summarizeSearchTransactions: jest.fn(),
     expoDb: {
       getAllSync: jest.fn(() => []),
       getFirstSync: jest.fn(() => null),
@@ -75,6 +80,7 @@ const pristineMethods = {
   fetchCategories: initialStoreState.fetchCategories,
   fetchBudgets: initialStoreState.fetchBudgets,
   searchTransactions: initialStoreState.searchTransactions,
+  summarizeSearchTransactions: initialStoreState.summarizeSearchTransactions,
   addTransaction: initialStoreState.addTransaction,
   updateTransaction: initialStoreState.updateTransaction,
   deleteTransaction: initialStoreState.deleteTransaction,
@@ -470,6 +476,24 @@ describe('useTransactionStore', () => {
       const results = await useTransactionStore.getState().searchTransactions('Hero', { limit: 10 });
       expect(results).toEqual(mockResults);
       expect(searchTransactionsDb).toHaveBeenCalledWith('Hero', { limit: 10 });
+    });
+
+    it('summarizes search matches using summarizeSearchTransactionsDb and handles errors', async () => {
+      const mockSummary = { count: 1200, totalIn: 5000000, totalOut: 3200000, net: 1800000 };
+      (summarizeSearchTransactionsDb as jest.Mock).mockReturnValueOnce(mockSummary);
+
+      const summary = await useTransactionStore.getState().summarizeSearchTransactions('', { walletId: 1 });
+      expect(summary).toEqual(mockSummary);
+      expect(summarizeSearchTransactionsDb).toHaveBeenCalledWith('', { walletId: 1 });
+
+      (summarizeSearchTransactionsDb as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('Summary SQL failed');
+      });
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const fallback = await useTransactionStore.getState().summarizeSearchTransactions('Hero');
+      expect(fallback).toEqual({ count: 0, totalIn: 0, totalOut: 0, net: 0 });
+      expect(useTransactionStore.getState().error).toBe('Summary SQL failed');
+      errorSpy.mockRestore();
     });
 
     it('clears all transactions and budgets in DB via clearAllData()', async () => {

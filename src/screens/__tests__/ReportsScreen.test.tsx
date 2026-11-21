@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { ReportsScreen } from '../ReportsScreen';
+import { ReportsScreen, getCategoryColor } from '../ReportsScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../../features/transactions/constants';
@@ -131,6 +131,78 @@ describe('ReportsScreen', () => {
       Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')
     );
     expect(texts.some((t: string) => t === 'Total Expense')).toBe(true);
+
+    ReactTestRenderer.act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('assigns deterministic colors by category name that remain stable across months and rank changes', () => {
+    // Deterministic independent of case/whitespace
+    expect(getCategoryColor('Food & Dining', 'expense')).toBe(getCategoryColor('food & dining', 'expense'));
+    expect(getCategoryColor('Food & Dining', 'expense')).not.toBe(getCategoryColor('Groceries', 'expense'));
+
+    const now = new Date();
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    useTransactionStore.setState({
+      transactionsList: [
+        // Current month: Groceries is #1, Food & Dining is #2
+        {
+          id: 1,
+          merchantName: 'Supermarket',
+          totalAmount: -900000,
+          type: 'expense',
+          category: 'Groceries',
+          date: now.getTime(),
+        },
+        {
+          id: 2,
+          merchantName: 'Cafe',
+          totalAmount: -100000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: now.getTime(),
+        },
+        // Previous month: Food & Dining is #1, Transport is #2 (no Groceries)
+        {
+          id: 3,
+          merchantName: 'Dinner',
+          totalAmount: -500000,
+          type: 'expense',
+          category: 'Food & Dining',
+          date: prevMonth.getTime(),
+        },
+        {
+          id: 4,
+          merchantName: 'Train',
+          totalAmount: -150000,
+          type: 'expense',
+          category: 'Transport',
+          date: prevMonth.getTime(),
+        },
+      ],
+      fetchTransactions: mockFetchTransactions,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+
+    const pieCurrent = renderer.root.findByType('PieChart');
+    const foodSliceCurrent = pieCurrent.props.data.find((d: any) => d.category === 'Food & Dining');
+    expect(foodSliceCurrent).toBeDefined();
+
+    // Navigate to previous month
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Previous month' }).props.onPress();
+    });
+
+    const piePrev = renderer.root.findByType('PieChart');
+    const foodSlicePrev = piePrev.props.data.find((d: any) => d.category === 'Food & Dining');
+    expect(foodSlicePrev).toBeDefined();
+    expect(foodSlicePrev.color).toBe(foodSliceCurrent.color);
+    expect(foodSlicePrev.color).toBe(getCategoryColor('Food & Dining', 'expense'));
 
     ReactTestRenderer.act(() => {
       renderer.unmount();

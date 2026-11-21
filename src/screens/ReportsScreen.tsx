@@ -22,12 +22,35 @@ function formatLocaleDate(date: Date | number, locale: string, options: Intl.Dat
   }
 }
 
-const EXPENSE_PALETTE = ['#e11d48', '#ea580c', '#d97706', '#7c3aed', '#0284c7', '#059669', '#ec4899', '#475569'];
+const EXPENSE_PALETTE = [
+  '#e11d48',
+  '#ea580c',
+  '#d97706',
+  '#7c3aed',
+  '#0284c7',
+  '#059669',
+  '#ec4899',
+  '#0d9488',
+  '#4f46e5',
+  '#b45309',
+  '#475569',
+];
 const INCOME_PALETTE = ['#10b981', '#059669', '#0d9488', '#0284c7', '#3b82f6', '#6366f1', '#8b5cf6', '#14b8a6'];
 
-const getCategoryColor = (index: number, type: 'expense' | 'income') => {
+function hashCategoryName(name: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+export const getCategoryColor = (categoryName: string, type: 'expense' | 'income'): string => {
   const palette = type === 'expense' ? EXPENSE_PALETTE : INCOME_PALETTE;
-  return palette[index % palette.length];
+  const normalized = (categoryName || '').trim().toLowerCase();
+  const index = hashCategoryName(normalized) % palette.length;
+  return palette[index];
 };
 
 export const ReportsScreen = () => {
@@ -105,14 +128,14 @@ export const ReportsScreen = () => {
 
   const chartData = useMemo(() => {
     return Object.keys(categoryData)
-      .map((key, index) => {
+      .map((key) => {
         const total = categoryData[key].total;
         const rawPercentage = totalForType > 0 ? (total / totalForType) * 100 : 0;
         const isFocused = selectedCategoryName === key;
 
         return {
           value: total,
-          color: getCategoryColor(index, reportType),
+          color: getCategoryColor(key, reportType),
           text: `${rawPercentage.toFixed(0)}%`,
           numericPercentage: rawPercentage,
           category: key,
@@ -301,12 +324,12 @@ export const ReportsScreen = () => {
             CATEGORY BREAKDOWN ({chartData.length})
           </Text>
 
-          {chartData.map((item, index) => {
+          {chartData.map((item) => {
             const isExpanded = expandedCategories[item.category];
 
             return (
               <View
-                key={index}
+                key={item.category}
                 style={[
                   styles.legendCard,
                   { backgroundColor: theme.surface, borderColor: item.focused ? theme.primary : theme.border },
