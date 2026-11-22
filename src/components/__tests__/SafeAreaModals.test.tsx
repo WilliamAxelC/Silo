@@ -12,7 +12,8 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ goBack: jest.fn(), navigate: jest.fn() }),
+  useNavigation: () => ({ goBack: jest.fn(), navigate: jest.fn(), setParams: jest.fn() }),
+  useRoute: () => ({ params: undefined }),
 }));
 
 const ReactTestRenderer = require('react-test-renderer');
@@ -146,9 +147,7 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
     ReactTestRenderer.act(() => {
       showArchivedBtn.props.onPress();
     });
-    const archivedRow = renderer.root.findAll(
-      (n: any) => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.includes('Old Card')
-    )[0];
+    const archivedRow = renderer.root.findAllByProps({ accessibilityLabel: 'Edit Old Card' })[0];
     ReactTestRenderer.act(() => {
       archivedRow.props.onPress();
     });

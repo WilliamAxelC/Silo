@@ -2893,6 +2893,63 @@ function formatReceiptItemsText(items: unknown): string | undefined {
   return serialized ? serialized : undefined;
 }
 
+const GARBAGE_ITEM_NAME_REGEX = /@|www\.|https?:|\.(?:com|co\.id|id)\b|\b(?:jl|jalan|kel|kec|rt|rw)\.?\s/i;
+
+/**
+ * Model-read line items (vision or text model) kept only when they look like purchases on THIS receipt:
+ * the name is a real product label (not a phone number, address, website, summary/payment row or the
+ * merchant) and the price appears in the OCR text (directly, or as qty x unit price). Duplicates and a
+ * total echoed as an item are dropped. Returns undefined when nothing trustworthy is left, so callers
+ * fall back to the OCR-parsed items.
+ */
+export function groundModelItems(
+  items: unknown,
+  rows: string[],
+  total?: number | null,
+  merchantName?: string | null,
+): string | undefined {
+  if (!Array.isArray(items) || items.length === 0) return undefined;
+  const ocrAmounts = new Set(extractAmounts(rows.join('\n')));
+  const canGround = ocrAmounts.size > 0;
+  const merchant = merchantName?.trim().toLowerCase() ?? '';
+  const seen = new Set<string>();
+  const kept: Array<{ name: string; qty?: number; price: number }> = [];
+
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { name?: unknown; qty?: unknown; price?: unknown };
+    const name = typeof record.name === 'string' ? record.name.replace(/\s+/g, ' ').trim() : '';
+    const letters = (name.match(/\p{L}/gu) ?? []).length;
+    const visible = name.replace(/\s/g, '').length;
+    if (!name || letters < 2 || letters / Math.max(1, visible) < 0.4) continue;
+    if (isNonItemLine(name) || GARBAGE_ITEM_NAME_REGEX.test(name)) continue;
+    if (merchant && name.toLowerCase() === merchant) continue;
+
+    const qty = typeof record.qty === 'number' && Number.isFinite(record.qty) && record.qty > 1 ? Math.round(record.qty) : undefined;
+    const price =
+      typeof record.price === 'number' && Number.isFinite(record.price)
+        ? Math.round(Math.abs(record.price))
+        : typeof record.price === 'string'
+          ? Math.round(Math.abs(parseSignedAmount(record.price)))
+          : 0;
+    if (price <= 0) continue;
+    const grounded =
+      !canGround ||
+      ocrAmounts.has(price) ||
+      (qty !== undefined && (ocrAmounts.has(Math.round(price / qty)) || ocrAmounts.has(price * qty)));
+    if (!grounded) continue;
+
+    const key = `${name.toLowerCase()}|${price}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push({ name, qty, price });
+  }
+
+  // A receipt's total read back as one of several items is not a purchase.
+  const items2 = total && kept.length > 1 ? kept.filter((item) => item.price !== Math.round(total)) : kept;
+  return items2.length > 0 ? formatReceiptItemsText(items2) : undefined;
+}
+
 function isExternalConfiguredForReceipt(): boolean {
   const settings = useSettingsStore.getState();
   const url = (settings.externalApiUrl ?? '').trim();
@@ -3087,7 +3144,10 @@ export const analyzeReceiptImage = async (
           if (clean > 0) visionTotal = clean;
         }
 
-        const usedVisionTotal = typeof visionTotal === 'number' && visionTotal > 0;
+        // Small vision models misread or invent totals; prefer the OCR TOTAL line when theirs isn't on the receipt.
+        const visionTotalGrounded = typeof visionTotal === 'number' && visionTotal > 0 && isGrounded(visionTotal, rows);
+        const usedVisionTotal =
+          typeof visionTotal === 'number' && visionTotal > 0 && (visionTotalGrounded || heuristicTotal == null);
         const finalTotal = usedVisionTotal ? visionTotal : heuristicTotal;
 
         const rawVisionMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
@@ -3099,7 +3159,8 @@ export const analyzeReceiptImage = async (
             parsedData.date.trim()) ||
           ocrResult.extractedDate ||
           undefined;
-        const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
+        const lineItemsText =
+          groundModelItems(parsedData.items, rows, finalTotal, merchantName) || cleanOcrItems || undefined;
         const category =
           ocrResult.extractedCategory ||
           inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
@@ -3171,7 +3232,8 @@ export const analyzeReceiptImage = async (
             parsedData.date.trim()) ||
           ocrResult.extractedDate ||
           undefined;
-        const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
+        const lineItemsText =
+          groundModelItems(parsedData.items, rows, finalTotal, merchantName) || cleanOcrItems || undefined;
         const category =
           ocrResult.extractedCategory ||
           inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||

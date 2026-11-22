@@ -26,7 +26,9 @@ export type RootStackParamList = {
     initialDate?: number;
   };
   ReceiptInbox: undefined;
-  Accounts: undefined;
+  /** editWalletId: open the account editor for that account on arrival. */
+  Accounts: { editWalletId?: number } | undefined;
+  AccountDetail: { walletId: number };
   Recurring: undefined;
   Settings: undefined;
   SystemLogs: undefined;

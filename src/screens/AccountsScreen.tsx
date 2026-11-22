@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 
-import { NavigationProps } from '../navigation/types';
+import { NavigationProps, type RootStackParamList } from '../navigation/types';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import {
@@ -53,6 +53,8 @@ export const AccountsScreen = () => {
   const transactionsList = useTransactionStore((s) => s.transactionsList);
   const { addWallet, updateWallet, removeWallet } = useTransactionStore.getState();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const route = useRoute<RouteProp<RootStackParamList, 'Accounts'>>();
+  const editWalletId = route.params?.editWalletId;
   const [showArchived, setShowArchived] = useState(false);
 
   const active = wallets.filter((w) => w.isActive);
@@ -128,6 +130,14 @@ export const AccountsScreen = () => {
         : emptyDraft,
     );
 
+  useEffect(() => {
+    if (editWalletId == null) return;
+    const target = wallets.find((w) => w.id === editWalletId);
+    if (target) openEditor(target);
+    navigation.setParams?.({ editWalletId: undefined } as never);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editWalletId]);
+
   const save = () => {
     if (!draft) return;
     const magnitude = Math.abs(parseSignedAmount(draft.openingBalance || '0', undefined, draft.currency));
@@ -179,9 +189,10 @@ export const AccountsScreen = () => {
     <TouchableOpacity
       key={wallet.id}
       style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: wallet.isActive ? 1 : 0.6 }]}
-      onPress={() => openEditor(wallet)}
+      onPress={() => navigation.navigate('AccountDetail', { walletId: wallet.id })}
       accessibilityRole="button"
       accessibilityLabel={`${wallet.name}, ${WALLET_TYPE_META[wallet.type].label}, balance ${money(wallet.balance, code)}`}
+      accessibilityHint="Shows this account's transactions"
     >
       <View style={[styles.iconWrap, { backgroundColor: theme.primaryMuted }]}>
         <Ionicons name={WALLET_TYPE_META[wallet.type].icon} size={20} color={theme.primary} />
@@ -202,6 +213,15 @@ export const AccountsScreen = () => {
       >
         {money(wallet.balance, code)}
       </Text>
+      <TouchableOpacity
+        onPress={() => openEditor(wallet)}
+        style={styles.editBtn}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit ${wallet.name}`}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="create-outline" size={18} color={theme.textMuted} />
+      </TouchableOpacity>
     </TouchableOpacity>
     );
   };
@@ -477,6 +497,7 @@ export const AccountsScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  editBtn: { marginLeft: 8, width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1 },
   header: {
     flexDirection: 'row',

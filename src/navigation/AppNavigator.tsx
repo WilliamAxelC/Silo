@@ -29,6 +29,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { SystemLogsScreen } from '../screens/SystemLogsScreen';
 import { ReceiptInboxScreen } from '../screens/ReceiptInboxScreen';
 import { AccountsScreen } from '../screens/AccountsScreen';
+import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
 import { RecurringScreen } from '../screens/RecurringScreen';
@@ -47,6 +48,7 @@ export const APP_LINKING = {
       SystemLogs: 'logs',
       ReceiptInbox: 'receipts',
       Accounts: 'accounts',
+      AccountDetail: 'accounts/:walletId',
       Recurring: 'recurring',
     },
   },
@@ -215,6 +217,7 @@ export const AppNavigator = () => {
           <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
           <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
           <Stack.Screen name="Accounts" component={AccountsScreen} />
+          <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
           <Stack.Screen name="Recurring" component={RecurringScreen} />
         </Stack.Navigator>
       </NavigationContainer>

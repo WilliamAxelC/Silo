@@ -829,6 +829,23 @@ export const AddTransactionScreen = () => {
     );
   };
 
+  /**
+   * Back to the Receipt Inbox already under this screen (pop), instead of pushing another inbox on top,
+   * so Back from the inbox never reopens a receipt that was just reviewed and saved.
+   */
+  const returnToReceiptInbox = () => {
+    const navAny = navigation as unknown as {
+      getState?: () => { routes?: Array<{ name: string }> } | undefined;
+      popTo?: (name: string) => void;
+    };
+    const inStack = navAny.getState?.()?.routes?.some((route) => route.name === 'ReceiptInbox');
+    if (inStack && typeof navAny.popTo === 'function') {
+      navAny.popTo('ReceiptInbox');
+    } else {
+      navigation.navigate('ReceiptInbox');
+    }
+  };
+
   const returnToPreviousScreen = () => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -980,7 +997,7 @@ export const AddTransactionScreen = () => {
               navigation.navigate('AddTransactionStack', nextParams);
             }
           } else {
-            navigation.navigate('ReceiptInbox');
+            returnToReceiptInbox();
           }
           return;
         }
@@ -1156,7 +1173,7 @@ export const AddTransactionScreen = () => {
           onPress={() => {
             resetForm();
             if (receiptQueueId) {
-              navigation.navigate('ReceiptInbox');
+              returnToReceiptInbox();
             } else if (navigation.canGoBack()) {
               navigation.goBack();
             } else {

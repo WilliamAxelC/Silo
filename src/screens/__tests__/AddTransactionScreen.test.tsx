@@ -24,10 +24,14 @@ const mockRouteParams: {
   initialDate?: number;
 } = {};
 
+let mockNavState: any = undefined;
+const mockPopTo = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
     replace: mockReplace,
+    getState: () => mockNavState,
+    popTo: mockPopTo,
     canGoBack: () => mockCanGoBack,
     goBack: mockGoBack,
   }),
@@ -69,6 +73,7 @@ describe('AddTransactionScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCanGoBack = false;
+    mockNavState = undefined;
     delete mockRouteParams.transactionId;
     delete mockRouteParams.duplicateFromId;
     delete mockRouteParams.receiptQueueId;
@@ -1048,6 +1053,7 @@ describe('AddTransactionScreen', () => {
     ReactTestRenderer.act(() => renderer.unmount());
 
     // Now open receipt 11 (last one) and save -> navigates back to ReceiptInbox (NOT Cashflow)
+    mockNavState = { routes: [{ name: 'MainTabs' }, { name: 'ReceiptInbox' }, { name: 'AddTransactionStack' }] };
     mockNavigate.mockClear();
     mockReplace.mockClear();
     mockRouteParams.receiptQueueId = 11;
@@ -1064,8 +1070,11 @@ describe('AddTransactionScreen', () => {
     });
 
     expect(mockQueueRemove).toHaveBeenCalledWith(11, false);
-    expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
+    // Back to the inbox already in the stack, so Back from it can't reopen the saved receipt.
+    expect(mockPopTo).toHaveBeenCalledWith('ReceiptInbox');
+    expect(mockNavigate).not.toHaveBeenCalledWith('ReceiptInbox');
     expect(mockNavigate).not.toHaveBeenCalledWith('MainTabs', expect.anything());
+    mockNavState = undefined;
     ReactTestRenderer.act(() => renderer.unmount());
   });
 

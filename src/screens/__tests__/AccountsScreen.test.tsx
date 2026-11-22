@@ -9,11 +9,14 @@ const ReactTestRenderer = require('react-test-renderer');
 
 const mockGoBack = jest.fn();
 
+const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     goBack: mockGoBack,
-    navigate: jest.fn(),
+    navigate: mockNavigate,
+    setParams: jest.fn(),
   }),
+  useRoute: () => ({ params: undefined }),
 }));
 
 jest.mock('react-native-safe-area-context', () => {
@@ -88,12 +91,18 @@ describe('AccountsScreen (F-18, F-25)', () => {
     expect(noteText).toContain('Archived:');
     expect(noteText).toContain('250.000');
 
-    // Open account with history (BCA) -> button is "Archive"
+    // Tapping an account opens its transactions; the pencil opens the editor.
     const bcaRow = renderer.root.findAll(
       (n: any) => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('BCA,')
     )[0];
     ReactTestRenderer.act(() => {
       bcaRow.props.onPress();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('AccountDetail', { walletId: expect.any(Number) });
+
+    // Open account with history (BCA) -> button is "Archive"
+    ReactTestRenderer.act(() => {
+      renderer.root.findAllByProps({ accessibilityLabel: 'Edit BCA' })[0].props.onPress();
     });
 
     const archiveBtn = renderer.root.findByProps({ accessibilityLabel: 'Archive account' });
@@ -118,11 +127,8 @@ describe('AccountsScreen (F-18, F-25)', () => {
     alertSpy.mockClear();
 
     // Open unused account -> button is "Remove"
-    const unusedRow = renderer.root.findAll(
-      (n: any) => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('Unused E-Wallet,')
-    )[0];
     ReactTestRenderer.act(() => {
-      unusedRow.props.onPress();
+      renderer.root.findAllByProps({ accessibilityLabel: 'Edit Unused E-Wallet' })[0].props.onPress();
     });
 
     const removeBtn = renderer.root.findByProps({ accessibilityLabel: 'Remove account' });

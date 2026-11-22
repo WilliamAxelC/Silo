@@ -11,6 +11,7 @@ import {
   parseTimePeriod,
   parseGroundedQuery,
   analyzeReceiptImage,
+  groundModelItems,
   RECEIPT_SCAN_CANCELLED,
   type RetrievedContextItem,
   type GroundedSqliteDb,
@@ -1305,7 +1306,56 @@ describe('AI Agent & Context Engine', () => {
     });
 
     describe('Vision Mode Receipt Flow', () => {
-      it('vision mode uses image + keeps total + rates confidence low when ungrounded', async () => {
+      it('replaces a vision total and items that are not on the receipt with the OCR reading', async () => {
+        (useSettingsStore.getState as jest.Mock).mockReturnValue({ aiInferenceMode: 'local', receiptReadingMode: 'vision' });
+        mockIsVisionAvailable.mockResolvedValueOnce(true);
+        mockGenService.startGeneration.mockResolvedValueOnce(
+          JSON.stringify({
+            merchant: 'Vision Mart',
+            date: '2026-03-12',
+            total: 999999,
+            items: [{ name: 'Special Product', qty: 1, price: 999999 }],
+          }),
+        );
+        const result = await analyzeReceiptImage('file:///path/to/receipt.jpg');
+        expect(result?.totalAmount).toBe(75000);
+        expect(result?.lineItemsText).toBeUndefined();
+      });
+
+      it('drops garbage vision items: phone numbers, addresses, websites, digit soup, duplicates and echoed totals', () => {
+        const rows = ['TOKO MAJU', 'INDOMIE GORENG 3 3.500 10.500', 'AQUA 600ML 4.000', 'TOTAL 14.500', 'TELP 0812 1313 7035'];
+        const text = groundModelItems(
+          [
+            { name: 'Indomie Goreng', qty: 3, price: 10500 },
+            { name: 'Aqua 600ml', qty: 1, price: 4000 },
+            { name: 'Aqua 600ml', qty: 1, price: 4000 },
+            { name: 'WHATSAPP: 0812 1313 7035', qty: 1, price: 7035 },
+            { name: 'Jl. Tanjung Duren Raya', qty: 1, price: 4000 },
+            { name: 'www.superindo.co.id', qty: 1, price: 4000 },
+            { name: '0017813726046000', qty: 1, price: 4000 },
+            { name: 'BTKP', qty: 1, price: 14500 },
+            { name: 'Grand Total', qty: 1, price: 14500 },
+            { name: 'Mystery Snack', qty: 1, price: 12345 },
+            { name: 'Toko Maju', qty: 1, price: 4000 },
+          ],
+          rows,
+          14500,
+          'Toko Maju',
+        );
+        expect(text).toBe('3x Indomie Goreng | 10500\nAqua 600ml | 4000');
+      });
+
+      it('vision mode uses image + keeps total + rates confidence low when ungrounded and OCR found no total', async () => {
+        const { getOcrEngine } = require('../../ocr/index');
+        (getOcrEngine as jest.Mock).mockReturnValueOnce({
+          processImage: jest.fn(async () => ({
+            success: true,
+            rawText: 'Vision Mart  12/03/2026\nSpecial Product',
+            rows: ['Vision Mart  12/03/2026', 'Special Product'],
+            extractedTotal: null,
+            extractedMerchant: 'Vision Mart',
+          })),
+        });
         (useSettingsStore.getState as jest.Mock).mockReturnValue({
           aiInferenceMode: 'local',
           receiptReadingMode: 'vision',
