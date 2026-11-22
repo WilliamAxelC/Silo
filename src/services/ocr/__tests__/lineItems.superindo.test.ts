@@ -80,3 +80,13 @@ describe('receipt id and cashier rows', () => {
     expect(extractAmounts('NPWP: 845037704416000 total 13,000')).toEqual([13000]);
   });
 });
+
+describe('OCR-split thousands', () => {
+  it('reads "13, 000" as 13000 and finds the Lawson total', () => {
+    const { extractAmounts, pickTotalFromRows } = jest.requireActual('../receiptText');
+    expect(extractAmounts('Total Bel anja  13, 000')).toEqual([13000]);
+    expect(
+      pickTotalFromRows(['LH S CARB TRFLE  1 15,000  15, 000', 'Total Item  1  15,000', 'Total Disc.  2, 000', 'Total Bel anja  13, 000', 'QRIS CPH LAWSON  13, 000', 'Kembal ian  0']),
+    ).toBe(13000);
+  });
+});

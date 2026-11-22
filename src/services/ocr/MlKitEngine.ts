@@ -5,6 +5,7 @@ import {
   buildReceiptRows,
   detectUprightRotation,
   extractAmounts,
+  joinSplitThousands,
   extractReceiptDate,
   isNonItemLine,
   OcrLine,
@@ -366,7 +367,7 @@ function extractLinesFromMlKitResult(result: TextRecognitionResult): OcrLine[] {
       for (const line of block.lines) {
         if (!line?.text) continue;
         lines.push({
-          text: line.text,
+          text: joinSplitThousands(line.text),
           frame: line.frame
             ? {
                 left: line.frame.left,

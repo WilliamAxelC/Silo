@@ -66,7 +66,7 @@ const COLUMN_HEADER_WORD_REGEX = /\b(?:qty|kuantitas|deskripsi|description|desc|
 function isColumnHeaderRow(row: string): boolean {
   return (row.match(COLUMN_HEADER_WORD_REGEX) ?? []).length >= 2;
 }
-const TOTAL_PREFERRED_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar)\b/i;
+const TOTAL_PREFERRED_REGEX = /\b(grand\s*total|total\s*bel\s*anja|total\s*bayar)\b/i;
 const TOTAL_EXCLUDE_REGEX =
   /\b(sub\s*total|subtotal|sub-total|sub_total|subttl|total\s*items?|total\s*qty|total\s*disc\.?|diskon|discount|kembali|kembalian|change|tunai|cash|ppn|tax|dpp|service)\b/i;
 
@@ -471,12 +471,20 @@ export function buildReceiptRows(lines: OcrLine[]): string[] {
 }
 
 /**
+ * OCR often splits a thousands group after the separator ("13, 000", "29. 400"); join it back so the
+ * amount reads as one number.
+ */
+export function joinSplitThousands(text: string): string {
+  return text.replace(/(\d)([.,]) (\d{3})(?!\d)/g, '$1$2$3');
+}
+
+/**
  * Extracts all money-like numbers from text as integer Rupiah amounts.
  */
 export function extractAmounts(text: string): number[] {
   if (!text) return [];
 
-  const sanitized = text
+  const sanitized = joinSplitThousands(text)
     .replace(DATE_SLASH_OR_DASH_REGEX, ' ')
     .replace(DATE_DOT_DMY_REGEX, ' ')
     .replace(DATE_DOT_YMD_REGEX, ' ')
