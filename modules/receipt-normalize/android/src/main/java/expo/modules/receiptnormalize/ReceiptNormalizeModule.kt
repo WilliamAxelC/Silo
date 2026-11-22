@@ -93,8 +93,8 @@ class ReceiptNormalizeModule : Module() {
     return uris.distinct()
   }
 
-  private fun copyToCache(context: Context, uri: Uri, index: Int): String? =
-    try {
+  private fun copyToCache(context: Context, uri: Uri, index: Int): String? {
+    return try {
       val type = context.contentResolver.getType(uri) ?: "image/jpeg"
       val extension = when {
         type.contains("png") -> "png"
@@ -103,9 +103,11 @@ class ReceiptNormalizeModule : Module() {
         else -> "jpg"
       }
       val file = File(context.cacheDir, "shared-receipt-${System.currentTimeMillis()}-$index.$extension")
-      context.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return null
+      val input = context.contentResolver.openInputStream(uri) ?: return null
+      input.use { stream -> file.outputStream().use { stream.copyTo(it) } }
       Uri.fromFile(file).toString()
     } catch (_: Exception) {
       null
     }
+  }
 }
