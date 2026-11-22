@@ -87,6 +87,11 @@ export function rebaseHomeCurrency(db: Db, fromCurrency: string, toCurrency: str
     for (const budget of budgets) {
       db.runSync('UPDATE budgets SET limit_amount = ? WHERE id = ?;', [convert(budget.limitAmount), budget.id]);
     }
+    // General budgets keep the currency they were set in (a Rp 3.000.000 food budget stays in rupiah).
+    db.runSync(
+      `UPDATE budget_plans SET currency = CASE WHEN currency IS NULL THEN ? WHEN currency = ? THEN NULL ELSE currency END;`,
+      [from, to],
+    );
     const splits = db.getAllSync<{ id: number; owed: number }>('SELECT id, amount_owed AS owed FROM shared_splits;');
     for (const split of splits) {
       db.runSync('UPDATE shared_splits SET amount_owed = ? WHERE id = ?;', [convert(split.owed), split.id]);

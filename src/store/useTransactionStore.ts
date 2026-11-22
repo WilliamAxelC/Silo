@@ -25,6 +25,14 @@ import {
   normalizeCategoryName,
 } from '../features/transactions/categories';
 import { normalizeTagNames, normalizeTransactionInput } from '../features/transactions/factories';
+import type { BudgetPlan } from '../features/budgets/engine';
+import {
+  deleteBudgetPlan as deleteBudgetPlanDb,
+  readBudgetPlans,
+  renameCategoryInPlans,
+  saveBudgetPlan as saveBudgetPlanDb,
+  type BudgetPlanInput,
+} from '../features/budgets/plans';
 import { mapTransactionRowToModel, type TransactionListRow } from '../features/transactions/mappers';
 import type { CategoryRecord, CategoryType, TagRecord, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
@@ -68,6 +76,11 @@ interface TransactionState {
   /** Tags with how many transactions use them, most used first. */
   tags: TagRecord[];
   fetchTags: () => void;
+  /** General budgets (one-off or repeating, any currency, category/account/tag filters). */
+  budgetPlans: BudgetPlan[];
+  fetchBudgetPlans: () => void;
+  saveBudgetPlan: (id: number | null, input: BudgetPlanInput) => number;
+  deleteBudgetPlan: (id: number) => void;
   renameTag: (id: number, name: string) => void;
   /** Removes the tag from every transaction and deletes it. */
   deleteTag: (id: number) => void;
@@ -259,6 +272,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactionsList: [],
   wallets: [],
   tags: [],
+  budgetPlans: [],
   categories: [],
   budgets: {},
   isSaving: false,
@@ -319,6 +333,25 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
   fetchTags: () => {
     set({ tags: readTags() });
+  },
+
+  fetchBudgetPlans: () => {
+    try {
+      set((state) => ({ budgetPlans: readBudgetPlans(expoDb), dataVersion: state.dataVersion + 1 }));
+    } catch (error) {
+      console.warn('Failed to read budgets:', error);
+    }
+  },
+
+  saveBudgetPlan: (id, input) => {
+    const savedId = saveBudgetPlanDb(expoDb, id, input);
+    get().fetchBudgetPlans();
+    return savedId;
+  },
+
+  deleteBudgetPlan: (id) => {
+    deleteBudgetPlanDb(expoDb, id);
+    get().fetchBudgetPlans();
   },
 
   renameTag: (id, name) => {
@@ -508,7 +541,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       ? await db.select({ count: sql<number>`count(*)` }).from(budgets).where(eq(budgets.category, normalizedName))
       : [{ count: 0 }];
 
-    return Number(transactionUsage[0]?.count ?? 0) + Number(budgetUsage[0]?.count ?? 0);
+    const planUsage =
+      type === 'expense' ? readBudgetPlans(expoDb).filter((plan) => plan.categories.includes(normalizedName)).length : 0;
+    return Number(transactionUsage[0]?.count ?? 0) + Number(budgetUsage[0]?.count ?? 0) + planUsage;
   },
 
   addCategory: async (name, type) => {
@@ -568,6 +603,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       }
     });
 
+    if (current.type === 'expense') {
+      renameCategoryInPlans(expoDb, current.name, normalizedName);
+      get().fetchBudgetPlans();
+    }
     await get().fetchCategories();
     await get().fetchTransactions();
     await get().fetchBudgets();

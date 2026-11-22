@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 15;
+const DB_SCHEMA_VERSION = 16;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -429,6 +429,56 @@ function migrateToVersion15(sqliteDb: typeof expoDb = expoDb) {
     }
   }
   createTagTables(sqliteDb);
+}
+
+/**
+ * General budgets (features/budgets/engine.ts): one date range or every N days/weeks/months/years, own
+ * currency, optional rollover, filtered by categories / accounts / tags (JSON arrays). Existing monthly
+ * category limits become monthly plans anchored on the billing month start.
+ */
+export function createBudgetPlansTable(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS budget_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      currency TEXT,
+      kind TEXT NOT NULL DEFAULT 'recurring',
+      start_date INTEGER NOT NULL,
+      end_date INTEGER,
+      every INTEGER NOT NULL DEFAULT 1,
+      unit TEXT NOT NULL DEFAULT 'month',
+      rollover TEXT NOT NULL DEFAULT 'reset',
+      carry_overspend INTEGER NOT NULL DEFAULT 0,
+      categories TEXT NOT NULL DEFAULT '[]',
+      wallet_ids TEXT NOT NULL DEFAULT '[]',
+      tags TEXT NOT NULL DEFAULT '[]',
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+  `);
+}
+
+function migrateToVersion16(sqliteDb: typeof expoDb = expoDb) {
+  createBudgetPlansTable(sqliteDb);
+  const existing = sqliteDb.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM budget_plans;');
+  if ((existing?.n ?? 0) > 0) return;
+  const legacy = sqliteDb.getAllSync<{ category: string; limitAmount: number }>(
+    `SELECT category, limit_amount AS limitAmount FROM budgets WHERE limit_amount > 0 AND TRIM(category) != '';`
+  );
+  if (legacy.length === 0) return;
+  const setting = sqliteDb.getFirstSync<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'monthStartDay';`);
+  const startDay = Math.min(28, Math.max(1, Number.parseInt(setting?.value ?? '1', 10) || 1));
+  const today = new Date();
+  const monthOffset = today.getDate() >= startDay ? 0 : -1;
+  const anchor = new Date(today.getFullYear(), today.getMonth() + monthOffset, startDay).getTime();
+  for (const row of legacy) {
+    sqliteDb.runSync(
+      `INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at)
+       VALUES (?, ?, 'recurring', ?, 1, 'month', 'reset', ?, ?);`,
+      [row.category, row.limitAmount, anchor, JSON.stringify([row.category]), Date.now()]
+    );
+  }
 }
 
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
@@ -871,6 +921,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 15) {
     migrateToVersion15(sqliteDb);
+  }
+
+  if (currentVersion < 16) {
+    migrateToVersion16(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);
