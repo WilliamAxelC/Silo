@@ -39,7 +39,7 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
           <AccountPickerModal
             visible
             title="Account"
-            wallets={[{ id: 1, name: 'Main Wallet', type: 'cash', isActive: true, initialBalance: 0, balance: 0 }]}
+            wallets={[{ id: 1, name: 'Main Wallet', type: 'cash', isActive: true, initialBalance: 0, balance: 0, currency: null, averageRate: null }]}
             selectedId={1}
             onSelect={jest.fn()}
             onClose={jest.fn()}

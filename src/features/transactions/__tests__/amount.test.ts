@@ -608,7 +608,7 @@ describe('amount utilities', () => {
       expect(getCurrencySymbol('GBP')).toBe('£');
       expect(getCurrencySymbol('SGD')).toBe('S$');
       expect(getCurrencySymbol('JPY')).toBe('¥');
-      expect(getCurrencySymbol('AUD')).toBe('AUD');
+      expect(getCurrencySymbol('ZAR')).toBe('ZAR');
     });
   });
 });

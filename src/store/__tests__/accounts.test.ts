@@ -66,6 +66,41 @@ describe('accounts', () => {
     expect(balances()).toEqual({ 'Main Wallet': -20_000, BCA: 5_800_000, GoPay: 161_500 });
   });
 
+  it('keeps foreign accounts in their own currency with an average exchange cost', () => {
+    const { addWallet } = useTransactionStore.getState();
+    const bca = addWallet({ name: 'BCA', type: 'bank', initialBalance: 5_000_000 });
+    const yen = addWallet({ name: 'Japan Cash', type: 'cash', initialBalance: 0, currency: 'jpy' });
+    const insert = (cols: Record<string, unknown>) => {
+      const keys = Object.keys(cols);
+      db.runSync(
+        `INSERT INTO transactions (merchant_name, date, ${keys.join(', ')}) VALUES ('x', 1, ${keys.map(() => '?').join(', ')});`,
+        Object.values(cols) as any[],
+      );
+    };
+
+    // Two exchanges at different rates: Rp 1.000.000 -> ¥10.000, then Rp 1.100.000 -> ¥10.000.
+    insert({ wallet_id: bca, to_wallet_id: yen, type: 'transfer', total_amount: -1_000_000, to_amount: 10_000, fx_rate: 100 });
+    insert({ wallet_id: bca, to_wallet_id: yen, type: 'transfer', total_amount: -1_100_000, to_amount: 10_000, fx_rate: 110 });
+    // Spend ¥3.200 (Rp 336.000 in reports) and sell ¥1.000 back for Rp 104.000.
+    insert({ wallet_id: yen, type: 'expense', total_amount: -336_000, original_amount: -3_200, original_currency: 'JPY', fx_rate: 105 });
+    insert({ wallet_id: yen, to_wallet_id: bca, type: 'transfer', total_amount: -104_000, original_amount: -1_000, original_currency: 'JPY', to_amount: 104_000, fx_rate: 104 });
+    useTransactionStore.getState().fetchWallets();
+
+    const wallets = useTransactionStore.getState().wallets;
+    expect(wallets.find((w) => w.id === yen)).toMatchObject({ currency: 'JPY', balance: 15_800, averageRate: 105 });
+    expect(wallets.find((w) => w.id === bca)).toMatchObject({ currency: null, balance: 3_004_000, averageRate: null });
+  });
+
+  it('only lets an account change currency while it has no transactions', () => {
+    const { addWallet, updateWallet } = useTransactionStore.getState();
+    const fresh = addWallet({ name: 'USD card', type: 'card', initialBalance: 0 });
+    updateWallet(fresh, { currency: 'USD' });
+    expect(useTransactionStore.getState().wallets.find((w) => w.id === fresh)?.currency).toBe('USD');
+
+    insertTx(fresh, -10, 'expense');
+    expect(() => updateWallet(fresh, { currency: 'SGD' })).toThrow("currency can't change");
+  });
+
   it('archives accounts that have history or are the default, deletes unused ones, and keeps one active', () => {
     const { addWallet, removeWallet } = useTransactionStore.getState();
     const used = addWallet({ name: 'Old card', type: 'card', initialBalance: 0 });

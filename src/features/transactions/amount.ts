@@ -7,6 +7,20 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   GBP: '£',
   SGD: 'S$',
   JPY: '¥',
+  MYR: 'RM',
+  THB: '฿',
+  KRW: '₩',
+  CNY: 'CN¥',
+  HKD: 'HK$',
+  TWD: 'NT$',
+  AUD: 'A$',
+  NZD: 'NZ$',
+  PHP: '₱',
+  VND: '₫',
+  INR: '₹',
+  CHF: 'CHF',
+  SAR: 'SAR',
+  AED: 'AED',
 };
 
 /**

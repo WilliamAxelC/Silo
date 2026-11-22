@@ -31,6 +31,13 @@ export interface Transaction {
   walletId?: number;
   /** Transfers only: the receiving account. */
   toWalletId?: number | null;
+  /** Amount in the source account's currency when it is not the home currency (signed like totalAmount). */
+  originalAmount?: number | null;
+  originalCurrency?: string | null;
+  /** Home-currency units per 1 unit of the foreign currency used for this transaction. */
+  fxRate?: number | null;
+  /** Transfers only: amount that arrived, in the receiving account's currency (when currencies differ or are foreign). */
+  toAmount?: number | null;
 }
 
 export type WalletType = 'cash' | 'bank' | 'ewallet' | 'card' | 'savings';
@@ -41,8 +48,12 @@ export interface Wallet {
   type: WalletType;
   isActive: boolean;
   initialBalance: number;
-  /** initialBalance plus every income/expense in the account and transfers in and out. */
+  /** initialBalance plus every income/expense in the account and transfers in and out, in the account's currency. */
   balance: number;
+  /** ISO 4217 code for foreign-currency accounts; null = home currency. */
+  currency: string | null;
+  /** Foreign accounts: average home-currency cost of 1 unit, from exchanges and income into it. */
+  averageRate: number | null;
 }
 
 export type AIInferenceMode = 'local' | 'external';

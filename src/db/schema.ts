@@ -7,6 +7,8 @@ export const wallets = sqliteTable('wallets', {
   type: text('type').notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true),
   initialBalance: real('initial_balance').notNull().default(0),
+  /** ISO 4217 code; NULL = the home currency. Balance and initial balance are in this currency. */
+  currency: text('currency'),
 });
 
 export const budgets = sqliteTable('budgets', {
@@ -29,6 +31,22 @@ export const transactions = sqliteTable('transactions', {
   lineItemsText: text('line_items_text'),
   // Transfers only: the account receiving the money. The amount is stored negative on wallet_id (the source).
   toWalletId: integer('to_wallet_id').references(() => wallets.id),
+  // Multi-currency: total_amount stays in the home currency; these keep the foreign side.
+  originalAmount: real('original_amount'),
+  originalCurrency: text('original_currency'),
+  fxRate: real('fx_rate'),
+  toAmount: real('to_amount'),
+});
+
+export const tags = sqliteTable('tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const transactionTags = sqliteTable('transaction_tags', {
+  transactionId: integer('transaction_id').references(() => transactions.id, { onDelete: 'cascade' }).notNull(),
+  tagId: integer('tag_id').references(() => tags.id, { onDelete: 'cascade' }).notNull(),
 });
 
 export const transactionItems = sqliteTable('transaction_items', {

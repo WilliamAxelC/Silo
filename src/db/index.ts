@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 14;
+const DB_SCHEMA_VERSION = 15;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -407,6 +407,44 @@ function migrateToVersion14(sqliteDb: typeof expoDb = expoDb) {
   if (!hasColumn('receipt_queue', 'thumbnail_uri', sqliteDb)) {
     sqliteDb.execSync('ALTER TABLE receipt_queue ADD COLUMN thumbnail_uri TEXT;');
   }
+}
+
+/**
+ * Multi-currency accounts and tags. `wallets.currency` NULL means the home currency. Transactions keep
+ * `total_amount` in the home currency; foreign amounts live in original_amount/original_currency with the
+ * fx_rate used (home per 1 foreign unit). Transfers record `to_amount` in the destination account's currency.
+ */
+function migrateToVersion15(sqliteDb: typeof expoDb = expoDb) {
+  if (!hasColumn('wallets', 'currency', sqliteDb)) {
+    sqliteDb.execSync('ALTER TABLE wallets ADD COLUMN currency TEXT;');
+  }
+  for (const [column, type] of [
+    ['original_amount', 'REAL'],
+    ['original_currency', 'TEXT'],
+    ['fx_rate', 'REAL'],
+    ['to_amount', 'REAL'],
+  ] as const) {
+    if (!hasColumn('transactions', column, sqliteDb)) {
+      sqliteDb.execSync(`ALTER TABLE transactions ADD COLUMN ${column} ${type};`);
+    }
+  }
+  createTagTables(sqliteDb);
+}
+
+function createTagTables(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS transaction_tags (
+      transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+      PRIMARY KEY (transaction_id, tag_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag_id);
+  `);
 }
 
 export function rebuildFtsIndex(sqliteDb: typeof expoDb = expoDb) {
@@ -815,6 +853,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 14) {
     migrateToVersion14(sqliteDb);
+  }
+
+  if (currentVersion < 15) {
+    migrateToVersion15(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

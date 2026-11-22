@@ -15,7 +15,14 @@ export type TransactionListRow = {
   category: string | null;
   walletId?: number | null;
   toWalletId?: number | null;
+  originalAmount?: number | null;
+  originalCurrency?: string | null;
+  fxRate?: number | null;
+  toAmount?: number | null;
 };
+
+const finiteOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
 
 export function mapTransactionRowToModel(row: Partial<TransactionListRow> & { id: number }): Transaction {
   const rawType = row.type as TransactionType;
@@ -45,6 +52,10 @@ export function mapTransactionRowToModel(row: Partial<TransactionListRow> & { id
     category,
     walletId: row.walletId ?? undefined,
     toWalletId: type === 'transfer' ? row.toWalletId ?? null : null,
+    originalAmount: finiteOrNull(row.originalAmount),
+    originalCurrency: row.originalCurrency?.trim() || null,
+    fxRate: finiteOrNull(row.fxRate),
+    toAmount: type === 'transfer' ? finiteOrNull(row.toAmount) : null,
   };
 }
 
@@ -60,6 +71,10 @@ export function buildEditableTransactionInput(transaction: Partial<Transaction>)
     imageUri: transaction.imageUri ?? null,
     walletId: transaction.walletId,
     toWalletId: transaction.toWalletId ?? null,
+    originalAmount: transaction.originalAmount ?? null,
+    originalCurrency: transaction.originalCurrency ?? null,
+    fxRate: transaction.fxRate ?? null,
+    toAmount: transaction.toAmount ?? null,
   });
 }
 

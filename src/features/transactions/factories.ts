@@ -3,6 +3,9 @@ import { roundCurrency } from './amount';
 
 const VALID_TRANSACTION_TYPES = new Set<TransactionType>(['expense', 'income', 'transfer']);
 
+const finiteOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
 export function createTransactionInput(input?: Partial<TransactionInput>): TransactionInput {
   const rawType = input?.type;
   const type: TransactionType = rawType && VALID_TRANSACTION_TYPES.has(rawType) ? rawType : 'expense';
@@ -26,6 +29,10 @@ export function createTransactionInput(input?: Partial<TransactionInput>): Trans
     imageUri: input?.imageUri ?? null,
     walletId: input?.walletId,
     toWalletId: type === 'transfer' ? input?.toWalletId ?? null : null,
+    originalAmount: finiteOrNull(input?.originalAmount),
+    originalCurrency: input?.originalCurrency?.trim().toUpperCase() || null,
+    fxRate: finiteOrNull(input?.fxRate),
+    toAmount: type === 'transfer' ? finiteOrNull(input?.toAmount) : null,
   };
 }
 
@@ -65,6 +72,9 @@ export function normalizeTransactionInput(input: Partial<TransactionInput>): Tra
     note,
     lineItemsText,
     totalAmount: roundCurrency(signedAmount),
+    // The foreign-side amount carries the same sign as the home amount.
+    originalAmount:
+      base.originalAmount == null ? null : Math.sign(signedAmount || -1) * Math.abs(base.originalAmount),
   };
 }
 

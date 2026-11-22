@@ -12,6 +12,8 @@ import {
 } from '../db/index';
 import { budgets, categories, transactionItems, transactions } from '../db/schema';
 import { roundCurrency, type TransactionFilterSummary } from '../features/transactions/amount';
+import { roundRate } from '../features/currency/conversion';
+import { normalizeCurrencyCode } from '../features/currency/currencies';
 import { DEFAULT_WALLET_ID, TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
 import {
@@ -32,6 +34,8 @@ export interface WalletInput {
   name: string;
   type: WalletType;
   initialBalance: number;
+  /** ISO 4217 code for a foreign-currency account; omit/null for the home currency. */
+  currency?: string | null;
 }
 
 interface TransactionState {
@@ -106,7 +110,11 @@ const LIST_TRANSACTIONS_SQL = `
     t.line_items_text AS lineItemsText,
     i.category AS category,
     t.wallet_id AS walletId,
-    t.to_wallet_id AS toWalletId
+    t.to_wallet_id AS toWalletId,
+    t.original_amount AS originalAmount,
+    t.original_currency AS originalCurrency,
+    t.fx_rate AS fxRate,
+    t.to_amount AS toAmount
   FROM transactions t
   LEFT JOIN transaction_items i ON t.id = i.transaction_id
   ORDER BY t.date DESC, t.id DESC;
@@ -134,6 +142,11 @@ function readTransactionsList(): Transaction[] {
   return rows.map(mapTransactionRowToModel);
 }
 
+/**
+ * Balances are in each account's own currency: a foreign account sums the foreign-side amounts of its
+ * transactions (original_amount) and what arrived through transfers (to_amount). Home accounts are unchanged.
+ * averageRate = home currency paid / foreign units received across exchanges and income into the account.
+ */
 function readWallets(): Wallet[] {
   const rows = expoDb.getAllSync<{
     id: number;
@@ -141,24 +154,51 @@ function readWallets(): Wallet[] {
     type: string;
     isActive: number | null;
     initialBalance: number | null;
+    currency: string | null;
     balance: number | null;
+    costHome: number | null;
+    costUnits: number | null;
   }>(`
-    SELECT w.id, w.name, w.type, w.is_active AS isActive, w.initial_balance AS initialBalance,
+    SELECT w.id, w.name, w.type, w.is_active AS isActive, w.initial_balance AS initialBalance, w.currency AS currency,
       COALESCE(w.initial_balance, 0)
-        + COALESCE((SELECT SUM(t.total_amount) FROM transactions t WHERE t.wallet_id = w.id), 0)
-        - COALESCE((SELECT SUM(t.total_amount) FROM transactions t WHERE t.to_wallet_id = w.id AND t.type = 'transfer'), 0)
-        AS balance
+        + COALESCE((
+            SELECT SUM(CASE WHEN w.currency IS NOT NULL AND t.original_currency = w.currency
+                            THEN t.original_amount ELSE t.total_amount END)
+            FROM transactions t WHERE t.wallet_id = w.id), 0)
+        + COALESCE((
+            SELECT SUM(COALESCE(t.to_amount, -t.total_amount))
+            FROM transactions t WHERE t.to_wallet_id = w.id AND t.type = 'transfer'), 0)
+        AS balance,
+      CASE WHEN w.currency IS NULL THEN NULL ELSE
+        COALESCE((SELECT SUM(-t.total_amount) FROM transactions t
+                  WHERE t.to_wallet_id = w.id AND t.type = 'transfer' AND t.to_amount > 0), 0)
+        + COALESCE((SELECT SUM(t.total_amount) FROM transactions t
+                  WHERE t.wallet_id = w.id AND t.type = 'income' AND t.original_currency = w.currency AND t.original_amount > 0), 0)
+      END AS costHome,
+      CASE WHEN w.currency IS NULL THEN NULL ELSE
+        COALESCE((SELECT SUM(t.to_amount) FROM transactions t
+                  WHERE t.to_wallet_id = w.id AND t.type = 'transfer' AND t.to_amount > 0), 0)
+        + COALESCE((SELECT SUM(t.original_amount) FROM transactions t
+                  WHERE t.wallet_id = w.id AND t.type = 'income' AND t.original_currency = w.currency AND t.original_amount > 0), 0)
+      END AS costUnits
     FROM wallets w
     ORDER BY w.is_active DESC, w.id ASC;
   `);
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    type: WALLET_TYPES.has(row.type as WalletType) ? (row.type as WalletType) : 'cash',
-    isActive: row.isActive !== 0,
-    initialBalance: row.initialBalance ?? 0,
-    balance: roundCurrency(row.balance ?? 0),
-  }));
+  return rows.map((row) => {
+    const currency = row.currency?.trim().toUpperCase() || null;
+    const averageRate =
+      currency && (row.costUnits ?? 0) > 0 && (row.costHome ?? 0) > 0 ? roundRate((row.costHome ?? 0) / (row.costUnits ?? 1)) : null;
+    return {
+      id: row.id,
+      name: row.name,
+      type: WALLET_TYPES.has(row.type as WalletType) ? (row.type as WalletType) : 'cash',
+      isActive: row.isActive !== 0,
+      initialBalance: row.initialBalance ?? 0,
+      balance: roundCurrency(row.balance ?? 0),
+      currency,
+      averageRate,
+    };
+  });
 }
 
 function readWalletsSafe(fallback: Wallet[]): Wallet[] {
@@ -251,14 +291,13 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }
   },
 
-  addWallet: ({ name, type, initialBalance }) => {
+  addWallet: ({ name, type, initialBalance, currency }) => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Give the account a name.');
-    const result = expoDb.runSync('INSERT INTO wallets (name, type, is_active, initial_balance) VALUES (?, ?, 1, ?);', [
-      trimmed,
-      type,
-      Number.isFinite(initialBalance) ? initialBalance : 0,
-    ]);
+    const result = expoDb.runSync(
+      'INSERT INTO wallets (name, type, is_active, initial_balance, currency) VALUES (?, ?, 1, ?, ?);',
+      [trimmed, type, Number.isFinite(initialBalance) ? initialBalance : 0, normalizeCurrencyCode(currency)],
+    );
     get().fetchWallets();
     return Number(result.lastInsertRowId);
   },
@@ -269,11 +308,23 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     if (input.isActive === false && get().wallets.filter((w) => w.isActive).length <= 1 && current.isActive) {
       throw new Error('Keep at least one active account.');
     }
-    expoDb.runSync('UPDATE wallets SET name = ?, type = ?, initial_balance = ?, is_active = ? WHERE id = ?;', [
+    const nextCurrency = input.currency !== undefined ? normalizeCurrencyCode(input.currency) : current.currency;
+    if (nextCurrency !== current.currency) {
+      // Amounts already recorded are in the old currency, so it can only change while the account is unused.
+      const used = expoDb.getFirstSync<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM transactions WHERE wallet_id = ? OR to_wallet_id = ?;',
+        [id, id],
+      );
+      if ((used?.n ?? 0) > 0) {
+        throw new Error("This account already has transactions, so its currency can't change. Create a new account instead.");
+      }
+    }
+    expoDb.runSync('UPDATE wallets SET name = ?, type = ?, initial_balance = ?, is_active = ?, currency = ? WHERE id = ?;', [
       (input.name ?? current.name).trim() || current.name,
       input.type ?? current.type,
       input.initialBalance ?? current.initialBalance,
       (input.isActive ?? current.isActive) ? 1 : 0,
+      nextCurrency,
       id,
     ]);
     get().fetchWallets();
@@ -508,6 +559,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
             imageUri: normalizedTx.imageUri,
             note: normalizedTx.note,
             lineItemsText: normalizedTx.lineItemsText,
+            originalAmount: normalizedTx.originalAmount ?? null,
+            originalCurrency: normalizedTx.originalCurrency ?? null,
+            fxRate: normalizedTx.fxRate ?? null,
+            toAmount: accounts.toWalletId ? normalizedTx.toAmount ?? null : null,
           })
           .returning({ id: transactions.id });
 
@@ -539,6 +594,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           category: finalCategory,
           walletId: accounts.walletId,
           toWalletId: accounts.toWalletId,
+          originalAmount: normalizedTx.originalAmount ?? null,
+          originalCurrency: normalizedTx.originalCurrency ?? null,
+          fxRate: normalizedTx.fxRate ?? null,
+          toAmount: accounts.toWalletId ? normalizedTx.toAmount ?? null : null,
         });
         const nextWallets = readWalletsSafe(get().wallets);
         set((state) => ({
@@ -580,6 +639,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
             ? get().normalizeCategoryForType(normalizedTx.category, nextType)
             : existingTransaction?.category;
       const accountsChanged = tx.walletId !== undefined || tx.toWalletId !== undefined || tx.type !== undefined;
+      // Currency fields travel together: the amount, its currency and the rate are only meaningful as a set.
+      const currencyChanged =
+        tx.originalAmount !== undefined || tx.originalCurrency !== undefined || tx.fxRate !== undefined || tx.toAmount !== undefined;
+      const currencyFields = currencyChanged
+        ? {
+            originalAmount: normalizedTx.originalAmount ?? null,
+            originalCurrency: normalizedTx.originalCurrency ?? null,
+            fxRate: normalizedTx.fxRate ?? null,
+            toAmount: nextType === 'transfer' ? normalizedTx.toAmount ?? null : null,
+          }
+        : null;
       const accounts = accountsChanged
         ? resolveAccounts({
             type: nextType,
@@ -597,6 +667,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           tx.imageUri !== undefined ||
           tx.note !== undefined ||
           tx.lineItemsText !== undefined ||
+          currencyChanged ||
           accounts
         ) {
           await txDb
@@ -611,6 +682,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
               lineItemsText: tx.lineItemsText !== undefined ? normalizedTx.lineItemsText : undefined,
               walletId: accounts?.walletId,
               toWalletId: accounts ? accounts.toWalletId : undefined,
+              ...(currencyFields ?? {}),
             })
             .where(eq(transactions.id, id));
         }
@@ -656,6 +728,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
                   : latest.category,
             walletId: accounts ? accounts.walletId : latest.walletId ?? DEFAULT_WALLET_ID,
             toWalletId: accounts ? accounts.toWalletId : latest.toWalletId ?? null,
+            originalAmount: currencyFields ? currencyFields.originalAmount : latest.originalAmount ?? null,
+            originalCurrency: currencyFields ? currencyFields.originalCurrency : latest.originalCurrency ?? null,
+            fxRate: currencyFields ? currencyFields.fxRate : latest.fxRate ?? null,
+            toAmount: currencyFields ? currencyFields.toAmount : latest.toAmount ?? null,
           });
           return {
             transactionsList: insertTransactionSorted(state.transactionsList, updatedTx),

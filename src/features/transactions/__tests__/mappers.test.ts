@@ -30,6 +30,10 @@ describe('transaction mappers', () => {
         category: 'Groceries',
         walletId: undefined,
         toWalletId: null,
+        originalAmount: null,
+        originalCurrency: null,
+        fxRate: null,
+        toAmount: null,
       });
     });
 
@@ -106,6 +110,10 @@ describe('transaction mappers', () => {
         lineItemsText: 'Coffee | 45000',
         walletId: undefined,
         toWalletId: null,
+        originalAmount: null,
+        originalCurrency: null,
+        fxRate: null,
+        toAmount: null,
       });
       expect((input as any).id).toBeUndefined();
     });
