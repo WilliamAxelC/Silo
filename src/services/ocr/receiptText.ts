@@ -91,6 +91,8 @@ const METADATA_LINE_PREFIX_REGEX =
 // Prices never start with a 0 digit group, so a 0/+62-prefixed group followed by 1-3 more digit groups is a phone number.
 const PHONE_NUMBER_REGEX = /(?:^|[\s:(])(?:\+62|0)\d{1,4}(?:[\s.-]\d{2,5}){1,3}(?=$|[\s),])/;
 // Cashier / receipt-number rows anywhere in the line ("Bon 6A5Q-555-020928K8 Kasir : AHMAD").
+// Tax breakdown rows with labels mid-line ("REGULER  DPP: 12,613 PPN: 1,387").
+const TAX_BREAKDOWN_LINE_REGEX = /\b(?:dpp|ppn|pb\s*1|pajak)\s*:/i;
 const RECEIPT_ID_LINE_REGEX = /\b(?:kasir|cashier|operator|no\.?\s*(?:struk|bon|trans(?:aksi)?))\b|\b[A-Z0-9]{3,}-[A-Z0-9]{2,}-[A-Z0-9]{4,}\b/i;
 const CONTACT_LINE_REGEX = /\b(?:whats\s*app|bebas\s*pulsa|hotline|call\s*only|sms\s*only)\b/i;
 
@@ -253,6 +255,7 @@ export function isNonItemLine(text: string): boolean {
     RECEIPT_DISCLAIMER_REGEX.test(trimmed) ||
     CONTACT_LINE_REGEX.test(trimmed) ||
     RECEIPT_ID_LINE_REGEX.test(trimmed) ||
+    TAX_BREAKDOWN_LINE_REGEX.test(trimmed) ||
     PHONE_NUMBER_REGEX.test(trimmed)
   ) {
     return true;

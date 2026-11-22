@@ -76,6 +76,8 @@ describe('receipt id and cashier rows', () => {
     const { extractAmounts, isNonItemLine } = jest.requireActual('../receiptText');
     expect(isNonItemLine('Bon 6A5Q-555-020928K8 Kasir : AHMAD NI')).toBe(true);
     expect(isNonItemLine('Kasir: SITI 12.000')).toBe(true);
+    expect(isNonItemLine('REGULER  DPP: 12,613 PPN:  1,387')).toBe(true);
+    expect(isNonItemLine('Sambal PPN 10.000')).toBe(false);
     expect(isNonItemLine('LW S CARB TRFLE 1 15,000 15,000')).toBe(false);
     expect(extractAmounts('NPWP: 845037704416000 total 13,000')).toEqual([13000]);
   });
