@@ -44,6 +44,25 @@ function hashCategoryName(name: string): number {
   return hash >>> 0;
 }
 
+export type ReportGroupBy = 'category' | 'account' | 'tag';
+
+const REPORT_GROUPS: Array<{ key: ReportGroupBy; label: string; heading: string }> = [
+  { key: 'category', label: 'Category', heading: 'CATEGORY' },
+  { key: 'account', label: 'Account', heading: 'ACCOUNT' },
+  { key: 'tag', label: 'Tag', heading: 'TAG' },
+];
+
+/** The breakdown group(s) a transaction belongs to; a transaction with several tags joins each tag. */
+export function reportGroupKeys(
+  tx: { category?: string; walletId?: number; tags?: string[] },
+  groupBy: ReportGroupBy,
+  walletNames: Map<number, string>
+): string[] {
+  if (groupBy === 'account') return [walletNames.get(tx.walletId ?? -1) ?? 'Unknown account'];
+  if (groupBy === 'tag') return tx.tags && tx.tags.length > 0 ? tx.tags.map((t) => `#${t}`) : ['No tag'];
+  return [tx.category || UNCATEGORIZED_EXPENSE_LABEL];
+}
+
 export const getCategoryColor = (categoryName: string, type: 'expense' | 'income'): string => {
   const palette = type === 'expense' ? EXPENSE_PALETTE : INCOME_PALETTE;
   const normalized = (categoryName || '').trim().toLowerCase();
@@ -55,6 +74,7 @@ export const ReportsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const transactionsList = useTransactionStore((state) => state.transactionsList);
+  const wallets = useTransactionStore((state) => state.wallets);
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
@@ -70,6 +90,8 @@ export const ReportsScreen = () => {
   const hasSyncedInitialReportTypeRef = useRef(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
+  /** What the breakdown and chart split by. */
+  const [groupBy, setGroupBy] = useState<ReportGroupBy>('category');
 
   useEffect(() => {
     if (isLoaded && !hasSyncedInitialReportTypeRef.current && !hasUserToggledReportTypeRef.current) {
@@ -117,17 +139,19 @@ export const ReportsScreen = () => {
 
   const totalForType = reportType === 'expense' ? totalExpense : totalIncome;
 
+  const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
   const categoryData = useMemo(() => {
     return filteredTransactions.reduce((acc, curr) => {
-      const cat = curr.category || UNCATEGORIZED_EXPENSE_LABEL;
-      if (!acc[cat]) {
-        acc[cat] = { total: 0, items: [] };
+      for (const key of reportGroupKeys(curr, groupBy, walletNames)) {
+        if (!acc[key]) {
+          acc[key] = { total: 0, items: [] };
+        }
+        acc[key].total += Math.abs(curr.totalAmount);
+        acc[key].items.push(curr);
       }
-      acc[cat].total += Math.abs(curr.totalAmount);
-      acc[cat].items.push(curr);
       return acc;
     }, {} as Record<string, { total: number; items: typeof filteredTransactions }>);
-  }, [filteredTransactions]);
+  }, [filteredTransactions, groupBy, walletNames]);
 
   const chartData = useMemo(() => {
     return Object.keys(categoryData)
@@ -306,6 +330,36 @@ export const ReportsScreen = () => {
 
       {/* Main Scroll Content */}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 14, paddingBottom: 28 }}>
+        {/* Group by: category / account / tag */}
+        <View style={styles.groupByRow} testID="reports-group-by">
+          <Text style={[styles.groupByLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Group by</Text>
+          {REPORT_GROUPS.map((option) => {
+            const selected = groupBy === option.key;
+            return (
+              <TouchableOpacity
+                key={option.key}
+                style={[
+                  styles.groupByChip,
+                  { borderColor: selected ? theme.primary : theme.border, backgroundColor: selected ? theme.primaryMuted : 'transparent' },
+                ]}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setGroupBy(option.key);
+                  setExpandedCategories({});
+                  setSelectedCategoryName(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Group by ${option.label}`}
+                accessibilityState={{ selected }}
+              >
+                <Text style={{ color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(13), fontWeight: '700' }}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {/* Month Summary KPI Bar */}
         <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.summaryCol}>
@@ -511,8 +565,13 @@ export const ReportsScreen = () => {
         {chartData.length > 0 ? (
           <View style={styles.legendContainer}>
             <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-              CATEGORY BREAKDOWN ({chartData.length})
+              {REPORT_GROUPS.find((g) => g.key === groupBy)?.heading} BREAKDOWN ({chartData.length})
             </Text>
+            {groupBy === 'tag' ? (
+              <Text style={[styles.breakdownHeaderTitle, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                A transaction with several tags counts under each of them.
+              </Text>
+            ) : null}
 
           {chartData.map((item) => {
             const isExpanded = expandedCategories[item.category];
@@ -650,6 +709,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   toggleBtn: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  groupByRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
+  groupByLabel: { fontWeight: '700', marginRight: 2 },
+  groupByChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
   toggleText: { fontWeight: '700', fontSize: 13 },
   summaryCard: {
     flexDirection: 'row',

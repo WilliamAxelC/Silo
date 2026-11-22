@@ -383,4 +383,40 @@ describe('ReportsScreen', () => {
       renderer.unmount();
     });
   });
+
+  it('groups the breakdown by account or by tag', () => {
+    const now = new Date();
+    useTransactionStore.setState({
+      wallets: [
+        { id: 1, name: 'BCA', type: 'bank', isActive: true, initialBalance: 0, balance: 0, currency: null, averageRate: null },
+        { id: 2, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0, currency: null, averageRate: null },
+      ],
+      transactionsList: [
+        { id: 1, merchantName: 'Sushi', totalAmount: -400000, type: 'expense', category: 'Food & Dining', date: now.getTime(), walletId: 1, tags: ['date', 'Japan 2026'] },
+        { id: 2, merchantName: 'Cinema', totalAmount: -100000, type: 'expense', category: 'Entertainment', date: now.getTime(), walletId: 2, tags: ['date'] },
+        { id: 3, merchantName: 'Bus', totalAmount: -50000, type: 'expense', category: 'Transport', date: now.getTime(), walletId: 2, tags: [] },
+      ],
+      hasLoadedTransactions: true,
+      transactionsDirty: false,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+    const labels = () =>
+      renderer.root
+        .findAll((n: any) => typeof n.props.accessibilityLabel === 'string' && n.props.onPress)
+        .map((n: any) => n.props.accessibilityLabel as string);
+
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Group by Account' }).props.onPress());
+    expect(labels()).toEqual(expect.arrayContaining([expect.stringMatching(/^BCA, 73%/), expect.stringMatching(/^GoPay, 27%/)]));
+
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Group by Tag' }).props.onPress());
+    const tagLabels = labels();
+    expect(tagLabels).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^#date, 91%/), expect.stringMatching(/^#Japan 2026, 73%/), expect.stringMatching(/^No tag, 9%/)])
+    );
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });
