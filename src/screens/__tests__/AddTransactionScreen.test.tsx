@@ -1179,6 +1179,55 @@ describe('AddTransactionScreen', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
+  it('saves the edited itemized list (not the scanned one) after a scan', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///scan-edit.jpg' }],
+    });
+    (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({
+      merchantName: 'Super Indo',
+      totalAmount: 23695,
+      lineItemsText: 'TELUR AYAM OMEGA 806 29, 400 | 23695\nBTKP | 23695\nELP BEBAS PULSA | 3210',
+      rawText: 'SUPER INDO',
+    });
+    mockAddTransaction.mockResolvedValue(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Remove item 3' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Remove item 2' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Item 1 name' }).props.onChangeText('Telur Ayam Omega');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Item 1 note' }).props.onChangeText('0.806 kg');
+    });
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledTimes(1);
+    const saved = mockAddTransaction.mock.calls[0][0];
+    expect(saved.totalAmount).toBe(-23695);
+    expect(saved.merchantName).toBe('Super Indo');
+    expect(saved.lineItemsText).toBe('Telur Ayam Omega | 23.695 | 0.806 kg');
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
   it('calls navigation.goBack() on delete and edit save when canGoBack() is true to preserve caller screen state (F-17)', async () => {
     mockCanGoBack = true;
     mockRouteParams.transactionId = 99;

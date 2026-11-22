@@ -1,7 +1,15 @@
 import Constants from 'expo-constants';
 import type { TextRecognitionResult } from '@react-native-ml-kit/text-recognition';
 import { IOcrEngine, OcrResult } from './types';
-import { buildReceiptRows, extractAmounts, isNonItemLine, OcrLine, pickMerchantFromRows, pickTotalFromRows } from './receiptText';
+import {
+  buildReceiptRows,
+  extractAmounts,
+  extractReceiptDate,
+  isNonItemLine,
+  OcrLine,
+  pickMerchantFromRows,
+  pickTotalFromRows,
+} from './receiptText';
 import { serializeReceiptLineItems } from '../../features/transactions/lineItems';
 
 // Auto-detects: true in Custom Dev Clients, false in Expo Go
@@ -170,19 +178,8 @@ export function parseReceiptTextHeuristic(rawText: string): {
     }
   }
 
-  // 3. Extract Date (DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, YYYY-MM-DD)
-  let extractedDate: string | null = null;
-  const isoMatch = rawText.match(/\b(20\d{2})[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\d|3[01])\b/);
-  if (isoMatch) {
-    extractedDate = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-  } else {
-    const dmyMatch = rawText.match(/\b(0[1-9]|[12]\d|3[01])[-/.](0[1-9]|1[0-2])[-/.](20\d{2}|\d{2})\b/);
-    if (dmyMatch) {
-      let year = dmyMatch[3];
-      if (year.length === 2) year = `20${year}`;
-      extractedDate = `${year}-${dmyMatch[2]}-${dmyMatch[1]}`;
-    }
-  }
+  // 3. Extract Date (ISO or D-M-Y; skips tax-registration/expiry rows and implausible dates)
+  const extractedDate = extractReceiptDate(rawText);
 
   // 4. Infer Category
   const extractedCategory = inferReceiptCategory(extractedMerchant, reconstructedText);
@@ -253,6 +250,40 @@ export function inferReceiptCategory(merchantName: string | null, rawText: strin
   return 'Food & Dining';
 }
 
+function formatIdrThousands(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+// Trailing "<qty> <unit price>" columns on a tabular receipt row, e.g. "TELUR AYAM OMEGA 806 29,400" or "INDOMIE 3 3.500".
+// OCR sometimes splits "29,400" into "29, 400", hence the optional space after the separator.
+const TRAILING_QTY_PRICE_REGEX = /^(.*\p{L}.*?)\s+(\d{1,4}(?:[.,]\d{1,3})?)\s*[x×]?\s+@?\s*(\d{1,3}(?:[.,]\s?\d{3})+|\d{3,})$/u;
+
+/**
+ * Moves qty / unit-price columns out of an item name into its note, but only when they reconcile with the
+ * line total (qty × unit, or grams × price-per-kg for weighed produce). Otherwise the name is left untouched,
+ * so product names that merely end in numbers ("AQUA 600", "TEH BOTOL 350") are not mangled.
+ */
+export function splitQtyPriceColumns(name: string, lineTotal: number): { name: string; note: string } {
+  const match = name.match(TRAILING_QTY_PRICE_REGEX);
+  if (!match) return { name, note: '' };
+
+  const baseName = match[1].replace(/[\s\-:|]+$/, '').trim();
+  const qty = Number(match[2].replace(',', '.'));
+  const unitPrice = Number(match[3].replace(/\D/g, ''));
+  if (!baseName || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+    return { name, note: '' };
+  }
+
+  const tolerance = Math.max(5, lineTotal * 0.002);
+  if (Math.abs(qty * unitPrice - lineTotal) <= tolerance) {
+    return { name: baseName, note: qty === 1 ? '' : `${match[2]} × ${formatIdrThousands(unitPrice)}` };
+  }
+  if (Number.isInteger(qty) && qty >= 10 && Math.abs((qty / 1000) * unitPrice - lineTotal) <= tolerance) {
+    return { name: baseName, note: `${qty} g × ${formatIdrThousands(unitPrice)}/kg` };
+  }
+  return { name, note: '' };
+}
+
 export function extractLineItemsHeuristic(reconstructedText: string, merchantName?: string | null): string | null {
   const lines = reconstructedText.split('\n').map((l) => l.trim()).filter(Boolean);
   const resolvedMerchant = merchantName !== undefined ? merchantName : pickMerchantFromRows(lines);
@@ -283,7 +314,7 @@ export function extractLineItemsHeuristic(reconstructedText: string, merchantNam
           .replace(/[\s\-:|]+$/, '')
           .trim();
         if (name && !isNonItemLine(name)) {
-          items.push({ name, price: String(price), note: '' });
+          items.push({ price: String(price), ...splitQtyPriceColumns(name, price) });
         }
       }
     }

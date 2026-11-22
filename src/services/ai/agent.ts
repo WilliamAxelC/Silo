@@ -3,8 +3,18 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { expoDb } from '../../db/index';
 import { getModelLifecycleManager, isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
+import { normalizeReceiptImage } from '../ocr/normalizeImage';
+import type { OcrResult } from '../ocr/types';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
-import { isGrounded, isNonItemLine, isSuspiciousMerchantName, pickMerchantFromRows, pickTotalFromRows } from '../ocr/receiptText';
+import {
+  extractAmounts,
+  isGrounded,
+  isNonItemLine,
+  isPlausibleReceiptDate,
+  isSuspiciousMerchantName,
+  pickMerchantFromRows,
+  pickTotalFromRows,
+} from '../ocr/receiptText';
 import { assessReceiptConfidence, type ReceiptConfidence } from '../ocr/receiptConfidence';
 import { formatDisplayCurrency, parseSignedAmount } from '../../features/transactions/amount';
 import { parseReceiptLineItemsText, serializeReceiptLineItems } from '../../features/transactions/lineItems';
@@ -2927,6 +2937,33 @@ export function filterReceiptOcrTextForAi(rawText: string): string {
     .join('\n');
 }
 
+function ocrResultScore(result: OcrResult): number {
+  if (!result.success || !result.rawText) return -1;
+  const rows = result.rows?.length ? result.rows : result.rawText.split('\n').filter((line) => line.trim());
+  const pricedRows = rows.filter((row) => extractAmounts(row).length > 0).length;
+  return (result.extractedTotal ? 1000 : 0) + pricedRows * 10 + Math.min(rows.length, 9);
+}
+
+/**
+ * OCRs a document-scanner style black-and-white copy of the photo first (helps gallery photos with
+ * shadows, colour casts or low contrast), and also reads the original when the scan finds no total,
+ * keeping whichever read looks more like a receipt. Without the native normalizer, reads the original.
+ */
+export async function recognizeReceiptText(imageUri: string): Promise<OcrResult> {
+  const engine = getOcrEngine();
+  const normalizedUri = await normalizeReceiptImage(imageUri);
+  if (!normalizedUri) {
+    return engine.processImage(imageUri);
+  }
+
+  const normalized = await engine.processImage(normalizedUri);
+  if (normalized.success && normalized.extractedTotal) {
+    return normalized;
+  }
+  const original = await engine.processImage(imageUri);
+  return ocrResultScore(original) > ocrResultScore(normalized) ? original : normalized;
+}
+
 export const analyzeReceiptImage = async (
   imageUri?: string,
   _base64Image?: string,
@@ -2936,8 +2973,7 @@ export const analyzeReceiptImage = async (
 
   onStatusChange?.('Reading text…');
 
-  const ocrEngine = getOcrEngine();
-  const ocrResult = await ocrEngine.processImage(imageUri);
+  const ocrResult = await recognizeReceiptText(imageUri);
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');
   }
@@ -3004,7 +3040,10 @@ export const analyzeReceiptImage = async (
       const rawVisionMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
       const merchantName = sanitizeMerchantName(rawVisionMerchant, cleanOcrMerchant);
       const date =
-        (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
+        (typeof parsedData.date === 'string' &&
+          isDateGrounded(parsedData.date.trim(), rawText) &&
+          isPlausibleReceiptDate(parsedData.date.trim()) &&
+          parsedData.date.trim()) ||
         ocrResult.extractedDate ||
         undefined;
       const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
@@ -3070,7 +3109,10 @@ export const analyzeReceiptImage = async (
       const merchantName = sanitizeMerchantName(rawLlmMerchant, cleanOcrMerchant);
       // Small models invent plausible dates (bench: Qwen3.5-0.8B on 34/39 receipts); keep only dates visible in the OCR text.
       const date =
-        (typeof parsedData.date === 'string' && isDateGrounded(parsedData.date.trim(), rawText) && parsedData.date.trim()) ||
+        (typeof parsedData.date === 'string' &&
+          isDateGrounded(parsedData.date.trim(), rawText) &&
+          isPlausibleReceiptDate(parsedData.date.trim()) &&
+          parsedData.date.trim()) ||
         ocrResult.extractedDate ||
         undefined;
       const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;

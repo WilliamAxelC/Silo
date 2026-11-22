@@ -35,13 +35,18 @@ const AMOUNT_TOKEN_REGEX = /(?<![A-Za-z0-9])(?:(?:Rp|IDR|@)\s*\.?\s*)?(\d+(?:[.,
 
 // `TL` is the total line on Casio/Sharp cash registers (e.g. "TL  139,000"); only at row start.
 const TOTAL_CANDIDATE_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar|total|jumlah|tagihan|amount|netto)\b|^\s*tl\b/i;
+// Two or more column words ("DESKRIPSI QTY HARGA TOTAL") mark a header row; a lone "TOTAL HARGA" stays a total label.
+const COLUMN_HEADER_WORD_REGEX = /\b(?:qty|kuantitas|deskripsi|description|desc|nama\s*barang|items?|harga|price|unit)\b/gi;
+function isColumnHeaderRow(row: string): boolean {
+  return (row.match(COLUMN_HEADER_WORD_REGEX) ?? []).length >= 2;
+}
 const TOTAL_PREFERRED_REGEX = /\b(grand\s*total|total\s*belanja|total\s*bayar)\b/i;
 const TOTAL_EXCLUDE_REGEX =
   /\b(sub\s*total|subtotal|sub-total|sub_total|subttl|total\s*items?|total\s*qty|total\s*disc\.?|diskon|discount|kembali|kembalian|change|tunai|cash|ppn|tax|dpp|service)\b/i;
 
 // Exact / full-label summary, tax, fee, discount, payment, tender, and change patterns (anchored on stripped row label).
 const NON_ITEM_SUMMARY_LABEL_REGEX =
-  /^(?:sub\s*total|subttl|grand\s*total|total(?:\s+(?:belanja|bayar|sales|amount|akhir|harga|tagihan|netto|items?|qty|disc(?:ount)?|diskon|potongan|hemat|pembayaran|payment|keseluruhan|ppn|tax|pajak|service|charge|due))?|tl|ttl|harga\s*jual|jumlah(?:\s+(?:bayar|belanja|harga|item|qty|total))?|tagihan|netto|net\s*sales|net\s*total|amount\s*due|balance\s*due|items?\s*total|sub\s*total\s*items?|dpp|ppn|p\.?\s*b\.?\s*1|pb\s*1|p81|tax|pajak(?:\s+(?:restoran|ppn|pb\s*1))?|vat|gst|sc|service(?:\s*charge)?|serv\s*chg|biaya\s*(?:admin|layanan|service|pengiriman|antar|kemasan|bungkus|kantong|plastik)|admin\s*fee|delivery\s*fee|service\s*fee|platform\s*fee|ongkir|ongkos\s*kirim|rounding|pembulatan|gratuity|tips?|disc(?:ount)?|diskon(?:\s+(?:member|promo|belanja|khusus|karyawan|voucher))?|potongan(?:\s+(?:harga|diskon|voucher|promo|member|poin|kupon|tunai|langsung))?|anda\s+hemat|total\s+hemat|hemat(?:\s+(?:member|promo|belanja|anda))?|voucher(?:\s+(?:diskon|potongan|belanja|promo))?|cash\s*back|cashback|promo(?:\s+(?:diskon|potongan|member|voucher|hemat))?|kupon|coupon|member\s*disc(?:ount)?|cash|tunai|non\s*tunai|change|chnge|chng|kembali(?:an)?|uang\s*(?:tunai|kembali|bayar)|bayar|dibayar|pembayaran|payment|paid|tender(?:ed)?|saldo|balance|debit|credit|kredit|kartu|card|qris|gopay|ovo|dana|shopeepay|linkaja|flazz|e\s*money|brizzi|tapcash|edc|visa|master\s*card|bca|mandiri|bni|bri|cimb|table|meja|order|nota|struk|receipt|invoice)$/i;
+  /^(?:sub\s*total|subttl|grand\s*total|total(?:\s+(?:belanja|bayar|sales|amount|akhir|harga|tagihan|netto|items?|qty|disc(?:ount)?|diskon|potongan|hemat|pembayaran|payment|keseluruhan|ppn|tax|pajak|service|charge|due))?|tl|ttl|harga\s*jual|jumlah(?:\s+(?:bayar|belanja|harga|item|qty|total))?|tagihan|netto|net\s*sales|net\s*total|amount\s*due|balance\s*due|items?\s*total|sub\s*total\s*items?|dpp|ppn|n?btkp|bkp|non\s*bkp|p\.?\s*b\.?\s*1|pb\s*1|p81|tax|pajak(?:\s+(?:restoran|ppn|pb\s*1))?|vat|gst|sc|service(?:\s*charge)?|serv\s*chg|biaya\s*(?:admin|layanan|service|pengiriman|antar|kemasan|bungkus|kantong|plastik)|admin\s*fee|delivery\s*fee|service\s*fee|platform\s*fee|ongkir|ongkos\s*kirim|rounding|pembulatan|gratuity|tips?|disc(?:ount)?|diskon(?:\s+(?:member|promo|belanja|khusus|karyawan|voucher))?|potongan(?:\s+(?:harga|diskon|voucher|promo|member|poin|kupon|tunai|langsung))?|anda\s+hemat|total\s+hemat|hemat(?:\s+(?:member|promo|belanja|anda))?|voucher(?:\s+(?:diskon|potongan|belanja|promo))?|cash\s*back|cashback|promo(?:\s+(?:diskon|potongan|member|voucher|hemat))?|kupon|coupon|member\s*disc(?:ount)?|cash|tunai|non\s*tunai|change|chnge|chng|kembali(?:an)?|uang\s*(?:tunai|kembali|bayar)|bayar|dibayar|pembayaran|payment|paid|tender(?:ed)?|saldo|balance|debit|credit|kredit|kartu|card|qris|gopay|ovo|dana|shopeepay|linkaja|flazz|e\s*money|brizzi|tapcash|edc|visa|master\s*card|bca|mandiri|bni|bri|cimb|table|meja|order|nota|struk|receipt|invoice)$/i;
 
 // Multi-word payment/settlement labels where both tokens are known payment/bank/method terms (e.g. "DEBIT BCA", "CASH TENDERED", "BAYAR TUNAI").
 const PAYMENT_TERM =
@@ -55,6 +60,11 @@ const PAYMENT_PREFIX_REGEX =
 // Anchored receipt metadata rows (addresses, phone numbers, cashier/table/order IDs, status lines).
 const METADATA_LINE_PREFIX_REGEX =
   /^(?:jl\.|jalan\s|telp\.?|tlp\.?|phone|fax|kasir|cashier|npwp|struk|receipt|nota|order\s*#|invoice|bill\s*#|no\.?\s*(?:trx|resep|nota|order|struk)|trx\s*id|ref\s*#|approval\s*code|status\s*:|qty\s*:|tanggal|tgl\.?|date\s*:|pos\s*\d|table\s*(?:#|\d)|meja\s*(?:#|\d))\b/i;
+
+// Indonesian phone numbers in footers/headers (e.g. "0800 140 3210", "WHATSAPP: 0812 1313 7035", "+62 21 555 0123").
+// Prices never start with a 0 digit group, so a 0/+62-prefixed group followed by 1-3 more digit groups is a phone number.
+const PHONE_NUMBER_REGEX = /(?:^|[\s:(])(?:\+62|0)\d{1,4}(?:[\s.-]\d{2,5}){1,3}(?=$|[\s),])/;
+const CONTACT_LINE_REGEX = /\b(?:whats\s*app|bebas\s*pulsa|hotline|call\s*only|sms\s*only)\b/i;
 
 // Unambiguous multi-word receipt footers and tax/legal disclaimers (safe for item filtering).
 const RECEIPT_DISCLAIMER_REGEX =
@@ -212,7 +222,9 @@ export function isNonItemLine(text: string): boolean {
   if (
     METADATA_LINE_PREFIX_REGEX.test(trimmed) ||
     PAYMENT_PREFIX_REGEX.test(trimmed) ||
-    RECEIPT_DISCLAIMER_REGEX.test(trimmed)
+    RECEIPT_DISCLAIMER_REGEX.test(trimmed) ||
+    CONTACT_LINE_REGEX.test(trimmed) ||
+    PHONE_NUMBER_REGEX.test(trimmed)
   ) {
     return true;
   }
@@ -473,6 +485,10 @@ export function pickTotalFromRows(rows: string[]): number | null {
     }
 
     const rowAmounts = extractAmounts(row);
+    // Column headers like "DESKRIPSI QTY HARGA TOTAL" are not totals; never borrow the first item's qty from the next row.
+    if (rowAmounts.length === 0 && isColumnHeaderRow(row)) {
+      continue;
+    }
     let candidate: number | null = rowAmounts.length > 0 ? rowAmounts[rowAmounts.length - 1] : null;
 
     if (candidate === null && i + 1 < rows.length) {
@@ -510,4 +526,56 @@ export function isGrounded(total: number, rows: string[]): boolean {
     return false;
   }
   return extractAmounts(rows.join('\n')).includes(Math.round(total));
+}
+
+// Dates on these rows are not the purchase date (tax registration "Tanggal Pengukuhan", card/voucher expiry, member since).
+const NON_PURCHASE_DATE_LINE_REGEX =
+  /\b(?:pengukuhan|npwp|pkp|exp(?:ired|iry)?|kadaluar?sa|berlaku|valid\s*(?:until|thru|s\.?d\.?)|lahir|member\s*since|sejak|jatuh\s*tempo|due\s*date|best\s*before)\b/i;
+const ISO_DATE_IN_LINE_REGEX = /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/g;
+const DMY_DATE_IN_LINE_REGEX = /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\b/g;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A scanned purchase date must be a real calendar day, no later than tomorrow and no more than 5 years old.
+ * Rejects things like a 1997 tax registration date read as 2097.
+ */
+export function isPlausibleReceiptDate(isoDate: string, now: Date = new Date()): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
+  const time = date.getTime();
+  return time <= now.getTime() + DAY_MS && time >= now.getTime() - 5 * 366 * DAY_MS;
+}
+
+/**
+ * Picks the purchase date from receipt text (ISO or Indonesian D-M-Y). Skips registration/expiry rows,
+ * prefers a date printed next to a time ("22-11-26 (16:12:45)"), and ignores implausible dates.
+ */
+export function extractReceiptDate(rawText: string, now: Date = new Date()): string | null {
+  const pad = (value: string | number) => String(value).padStart(2, '0');
+  let firstPlausible: string | null = null;
+
+  for (const line of rawText.split('\n')) {
+    if (NON_PURCHASE_DATE_LINE_REGEX.test(line)) continue;
+    const candidates: string[] = [];
+    for (const m of line.matchAll(ISO_DATE_IN_LINE_REGEX)) {
+      candidates.push(`${m[1]}-${pad(m[2])}-${pad(m[3])}`);
+    }
+    if (candidates.length === 0) {
+      for (const m of line.matchAll(DMY_DATE_IN_LINE_REGEX)) {
+        const year = m[3].length === 2 ? `20${m[3]}` : m[3];
+        candidates.push(`${year}-${pad(m[2])}-${pad(m[1])}`);
+      }
+    }
+    const plausible = candidates.find((iso) => isPlausibleReceiptDate(iso, now));
+    if (!plausible) continue;
+    if (/\b\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\b/.test(line.replace(DMY_DATE_IN_LINE_REGEX, ' ').replace(ISO_DATE_IN_LINE_REGEX, ' '))) {
+      return plausible;
+    }
+    firstPlausible ??= plausible;
+  }
+
+  return firstPlausible;
 }
