@@ -191,7 +191,7 @@ let running: Promise<number> | null = null;
  * interruption never creates duplicates. Returns how many transactions were created.
  */
 export function materializeDueRecurring(
-  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>,
+  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<unknown>,
   now = Date.now(),
 ): Promise<number> {
   if (running) return running;

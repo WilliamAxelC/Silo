@@ -6,6 +6,7 @@ import { expoDb } from '../db/index';
 import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { useSettingsStore } from './useSettingsStore';
+import { normalizeReceiptImage, startBackgroundWork, stopBackgroundWork } from '../services/ocr/normalizeImage';
 
 export type ReceiptQueueStatus = 'pending' | 'processing' | 'done' | 'failed';
 
@@ -18,7 +19,22 @@ export interface ReceiptQueueItem {
   result: ParsedReceiptResult | null;
   error: string | null;
   createdAt: number;
+  /** Gallery import still to be turned into a document-style scan before reading. */
+  needsScan?: boolean;
 }
+
+/** A receipt already saved as a transaction, kept briefly so it can be reopened and fixed. */
+export interface SavedReceipt {
+  id: number;
+  imageUri: string;
+  thumbnailUri: string | null;
+  transactionId: number | null;
+  savedAt: number;
+  result: ParsedReceiptResult | null;
+}
+
+/** Saved receipts stay in the "Recently saved" history this long. */
+export const SAVED_HISTORY_MS = 14 * 24 * 60 * 60 * 1000;
 
 export interface EnqueueReceiptsResult {
   added: number;
@@ -34,15 +50,24 @@ interface ReceiptQueueRow {
   result_json: string | null;
   error: string | null;
   created_at: number;
+  needs_scan?: number | null;
+  transaction_id?: number | null;
+  saved_at?: number | null;
 }
 
 interface ReceiptQueueState {
   items: ReceiptQueueItem[];
+  /** Recently saved receipts (newest first), for going back to fix a transaction. */
+  savedItems: SavedReceipt[];
   isProcessing: boolean;
   /** Loads the queue, re-queues receipts interrupted by an app restart, and resumes processing. */
   load: () => void;
   /** Copies picked images into app storage (picker URIs are temporary), skips duplicates already in queue, and queues them. */
-  enqueue: (uris: string[]) => Promise<EnqueueReceiptsResult>;
+  enqueue: (uris: string[], options?: { scan?: boolean }) => Promise<EnqueueReceiptsResult>;
+  /** Moves a reviewed receipt into the "Recently saved" history, linked to the transaction it became. */
+  markSaved: (id: number, transactionId: number | null) => void;
+  /** Drops a receipt from the "Recently saved" history (the transaction and its photo are kept). */
+  removeSaved: (id: number) => Promise<void>;
   /** Lazily generates and persists a small JPEG thumbnail for a queue item that doesn't have one yet. */
   ensureThumbnail: (id: number, options?: { force?: boolean }) => Promise<string | null>;
   retry: (id: number) => void;
@@ -125,13 +150,40 @@ function toItem(row: ReceiptQueueRow): ReceiptQueueItem {
     result,
     error: row.error,
     createdAt: row.created_at,
+    needsScan: row.needs_scan === 1,
   };
 }
 
 function readAll(): ReceiptQueueItem[] {
   return expoDb
     .getAllSync<ReceiptQueueRow>('SELECT * FROM receipt_queue ORDER BY created_at ASC, id ASC;')
+    .filter((row) => row.status !== 'saved')
     .map(toItem);
+}
+
+function readSaved(): SavedReceipt[] {
+  try {
+    return expoDb
+      .getAllSync<ReceiptQueueRow>(`SELECT * FROM receipt_queue WHERE status = 'saved' ORDER BY saved_at DESC, id DESC;`)
+      .map((row) => {
+        const item = toItem(row);
+        return {
+          id: row.id,
+          imageUri: row.image_uri,
+          thumbnailUri: item.thumbnailUri,
+          transactionId: row.transaction_id ?? null,
+          savedAt: row.saved_at ?? row.created_at,
+          result: item.result,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** Fingerprints of every stored receipt, including saved history, so re-importing a photo is caught. */
+function readAllFingerprintRows(): ReceiptQueueRow[] {
+  return expoDb.getAllSync<ReceiptQueueRow>('SELECT * FROM receipt_queue;');
 }
 
 function scanErrorMessage(error: unknown): string {
@@ -155,10 +207,25 @@ async function computeImageFingerprint(uri: string): Promise<string> {
   return `uri:${uri}`;
 }
 
-function insertQueueRow(imageUri: string, imageHash: string, thumbnailUri: string | null, createdAt: number) {
+function insertQueueRow(
+  imageUri: string,
+  imageHash: string,
+  thumbnailUri: string | null,
+  createdAt: number,
+  needsScan = false,
+) {
   inMemoryHashByUri.set(imageUri, imageHash);
   if (thumbnailUri) {
     inMemoryThumbByUri.set(imageUri, thumbnailUri);
+  }
+  try {
+    expoDb.runSync(
+      `INSERT INTO receipt_queue (image_uri, image_hash, thumbnail_uri, status, created_at, needs_scan) VALUES (?, ?, ?, 'pending', ?, ?);`,
+      [imageUri, imageHash, thumbnailUri, createdAt, needsScan ? 1 : 0],
+    );
+    return;
+  } catch {
+    // Older test tables without needs_scan fall through to the plain insert below.
   }
   try {
     expoDb.runSync(
@@ -201,7 +268,40 @@ function persistImageHash(id: number, imageUri: string, imageHash: string) {
 }
 
 export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
-  const refresh = () => set({ items: readAll() });
+  const refresh = () => set({ items: readAll(), savedItems: readSaved() });
+
+  /** Turns a gallery import into a document-style scan (cropped, black and white) and swaps the stored image. */
+  const scanQueuedImage = async (item: ReceiptQueueItem): Promise<string> => {
+    const scanned = await normalizeReceiptImage(item.imageUri);
+    let nextUri = item.imageUri;
+    if (scanned) {
+      const dest = `${getReceiptsDir()}receipt-scan-${item.id}-${Date.now()}.jpg`;
+      try {
+        await FileSystem.copyAsync({ from: scanned, to: dest });
+        nextUri = dest;
+        await FileSystem.deleteAsync(scanned, { idempotent: true }).catch(() => undefined);
+        if (item.imageUri.startsWith(getReceiptsDir())) {
+          await FileSystem.deleteAsync(item.imageUri, { idempotent: true }).catch(() => undefined);
+        }
+      } catch (error) {
+        console.warn('Could not store the scanned receipt; keeping the original photo:', error);
+      }
+    }
+    try {
+      expoDb.runSync(`UPDATE receipt_queue SET image_uri = ?, needs_scan = 0 WHERE id = ?;`, [nextUri, item.id]);
+    } catch {
+      // Older test tables without needs_scan.
+    }
+    if (nextUri !== item.imageUri) {
+      inMemoryHashByUri.set(nextUri, item.imageHash ?? `uri:${nextUri}`);
+      const thumb = await createReceiptThumbnail(nextUri, `scan-${item.id}-${Date.now()}`);
+      if (thumb) {
+        await deleteThumbnailQuietly(item.thumbnailUri, item.imageUri);
+        persistThumbnailUri(item.id, nextUri, thumb);
+      }
+    }
+    return nextUri;
+  };
 
   // Reads queued receipts one at a time; the generation service serializes model access with chat and single scans.
   const processQueue = async () => {
@@ -218,14 +318,19 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
         await getModelLifecycleManager?.()?.ensureInitialized?.();
       }
 
+      let done = 0;
       for (;;) {
         const next = get().items.find((item) => item.status === 'pending');
         if (!next) break;
+        const remaining = get().items.filter((item) => item.status === 'pending').length;
+        // Keeps reading with the app in the background (Android foreground service + notification).
+        startBackgroundWork(`Reading receipts: ${done + 1} of ${done + remaining}`);
 
         expoDb.runSync(`UPDATE receipt_queue SET status = 'processing', error = NULL WHERE id = ?;`, [next.id]);
         refresh();
         try {
-          const result = await analyzeReceiptImage(next.imageUri);
+          const imageUri = next.needsScan ? await scanQueuedImage(next) : next.imageUri;
+          const result = await analyzeReceiptImage(imageUri);
           expoDb.runSync(`UPDATE receipt_queue SET status = 'done', result_json = ? WHERE id = ?;`, [
             JSON.stringify(result ?? {}),
             next.id,
@@ -236,31 +341,60 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
             next.id,
           ]);
         }
+        done += 1;
         refresh();
       }
     } finally {
+      stopBackgroundWork();
       set({ isProcessing: false });
     }
   };
 
   return {
     items: [],
+    savedItems: [],
     isProcessing: false,
 
     load: () => {
       failedThumbIds.clear();
       expoDb.runSync(`UPDATE receipt_queue SET status = 'pending' WHERE status = 'processing';`);
+      // Forget history older than two weeks (the transactions keep their photos).
+      for (const old of readSaved().filter((entry) => Date.now() - entry.savedAt > SAVED_HISTORY_MS)) {
+        expoDb.runSync('DELETE FROM receipt_queue WHERE id = ?;', [old.id]);
+        void deleteThumbnailQuietly(old.thumbnailUri, old.imageUri);
+      }
       refresh();
       void processQueue();
     },
 
-    enqueue: async (uris) => {
+    markSaved: (id, transactionId) => {
+      try {
+        expoDb.runSync(`UPDATE receipt_queue SET status = 'saved', transaction_id = ?, saved_at = ? WHERE id = ?;`, [
+          transactionId,
+          Date.now(),
+          id,
+        ]);
+      } catch {
+        // Older test tables without the history columns: drop the row like before.
+        expoDb.runSync('DELETE FROM receipt_queue WHERE id = ?;', [id]);
+      }
+      refresh();
+    },
+
+    removeSaved: async (id) => {
+      const entry = get().savedItems.find((item) => item.id === id);
+      expoDb.runSync('DELETE FROM receipt_queue WHERE id = ?;', [id]);
+      refresh();
+      if (entry) await deleteThumbnailQuietly(entry.thumbnailUri, entry.imageUri);
+    },
+
+    enqueue: async (uris, options) => {
       if (uris.length === 0) return { added: 0, skippedDuplicates: 0 };
       const receiptsDir = getReceiptsDir();
       await FileSystem.makeDirectoryAsync(receiptsDir, { intermediates: true }).catch(() => undefined);
 
-      // Build existing fingerprint set from persisted queue rows
-      const existingItems = readAll();
+      // Build existing fingerprint set from persisted queue rows (including the saved history)
+      const existingItems = readAllFingerprintRows().map(toItem);
       const seenFingerprints = new Set<string>();
       for (const item of existingItems) {
         if (item.imageHash) {
@@ -298,7 +432,7 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
         }
 
         const thumbnailUri = await createReceiptThumbnail(stored, `${now}-${added}`);
-        insertQueueRow(stored, fingerprint, thumbnailUri, now + added);
+        insertQueueRow(stored, fingerprint, thumbnailUri, now + added, Boolean(options?.scan));
         seenFingerprints.add(fingerprint);
         seenFingerprints.add(`uri:${sourceUri}`);
         seenFingerprints.add(`uri:${stored}`);

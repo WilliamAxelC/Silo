@@ -170,7 +170,7 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
 
     expect(ImagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
     expect(ImagePicker.launchCameraAsync).toHaveBeenCalledTimes(1);
-    expect(mockEnqueue).toHaveBeenCalledWith(['file:///camera/receipt.jpg']);
+    expect(mockEnqueue).toHaveBeenCalledWith(['file:///camera/receipt.jpg'], { scan: true });
 
     // 2. Document scanner throws + camera permission denied -> alert offers Open settings and Import from gallery
     (DocumentScanner.scanDocument as jest.Mock).mockRejectedValueOnce(new Error('Google Play services unavailable'));
@@ -300,6 +300,43 @@ describe('ReceiptInboxScreen (F-07, F-08, F-09)', () => {
     expect(updatedImages[0].props.source).toEqual({ uri: 'file:///docs/receipts/r1.jpg' });
     expect(mockEnsureThumbnail).toHaveBeenCalledWith(10, { force: true });
 
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('lists recently saved receipts so a saved transaction can be reopened and fixed', () => {
+    const { useTransactionStore } = require('../../store/useTransactionStore');
+    useTransactionStore.setState({
+      transactionsList: [
+        { id: 42, merchantName: 'Super Indo', totalAmount: -23695, type: 'expense', category: 'Groceries', date: new Date(2025, 10, 22).getTime() },
+      ],
+    });
+    const removeSaved = jest.fn(async () => undefined);
+    useReceiptQueueStore.setState({
+      items: [],
+      savedItems: [
+        { id: 7, imageUri: 'file:///docs/receipts/s.jpg', thumbnailUri: null, transactionId: 42, savedAt: Date.now(), result: null },
+        { id: 8, imageUri: 'file:///docs/receipts/t.jpg', thumbnailUri: null, transactionId: 99, savedAt: Date.now(), result: { merchantName: 'Gone' } },
+      ],
+      removeSaved,
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReceiptInboxScreen />);
+    });
+    const saved = renderer.root.findAll(
+      (n: any) => typeof n.props.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('Saved receipt Super Indo'),
+    )[0];
+    // The wrong year is visible right in the history, without scrolling through Cashflow.
+    expect(saved.props.accessibilityLabel).toContain('dated 22 Nov 2025');
+    ReactTestRenderer.act(() => saved.props.onPress());
+    expect(mockNavigate).toHaveBeenCalledWith('AddTransactionStack', { transactionId: 42 });
+    expect(
+      renderer.root.findAll((n: any) => typeof n.props.accessibilityLabel === 'string' && n.props.accessibilityLabel.includes('Transaction was deleted'))
+        .length,
+    ).toBeGreaterThan(0);
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Remove Gone from recently saved' }).props.onPress());
+    expect(removeSaved).toHaveBeenCalledWith(8);
     ReactTestRenderer.act(() => renderer.unmount());
   });
 });

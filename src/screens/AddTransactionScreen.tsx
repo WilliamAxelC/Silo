@@ -61,6 +61,7 @@ import { AccountPickerModal } from '../components/AccountPickerModal';
 import { AmountCalculatorModal } from '../components/AmountCalculatorKeypad';
 import { ReceiptPhotoModal } from '../components/ReceiptPhotoModal';
 import { TagInput } from '../components/TagInput';
+import { persistReceiptImage, scanGalleryImage } from '../services/receiptImages';
 import {
   RECURRING_FREQUENCIES,
   createRecurringRule,
@@ -642,14 +643,16 @@ export const AddTransactionScreen = () => {
       if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
 
       if (target === 'scan' && result.assets.length > 1) {
-        const queued = await useReceiptQueueStore.getState().enqueue(result.assets.map((asset) => asset.uri));
+        const queued = await useReceiptQueueStore
+          .getState()
+          .enqueue(result.assets.map((asset) => asset.uri), { scan: true });
         notifySkippedDuplicates(queued?.skippedDuplicates);
         navigation.navigate('ReceiptInbox');
         return;
       }
 
       if (target === 'scan') {
-        void processScanReceipt(result.assets[0].uri);
+        void processScanReceipt(result.assets[0].uri, undefined, { fromGallery: true });
       } else {
         setImageUri(result.assets[0].uri);
       }
@@ -673,11 +676,14 @@ export const AddTransactionScreen = () => {
       });
       if (captured.status !== 'captured') return;
       if (captured.uris.length > 1) {
-        const queued = await useReceiptQueueStore.getState().enqueue(captured.uris);
+        const queued = await useReceiptQueueStore
+          .getState()
+          .enqueue(captured.uris, { scan: captured.source === 'camera' });
         notifySkippedDuplicates(queued?.skippedDuplicates);
         navigation.navigate('ReceiptInbox');
       } else if (captured.uris.length === 1) {
-        void processScanReceipt(captured.uris[0]);
+        // A plain camera photo (no document scanner on this phone) gets the same scan treatment as gallery picks.
+        void processScanReceipt(captured.uris[0], undefined, { fromGallery: captured.source === 'camera' });
       }
       return;
     }
@@ -690,7 +696,7 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const processScanReceipt = async (uri: string, base64String?: string) => {
+  const processScanReceipt = async (uri: string, base64String?: string, source: { fromGallery?: boolean } = {}) => {
     scanAbortRef.current?.abort();
     const controller = new AbortController();
     scanAbortRef.current = controller;
@@ -702,8 +708,20 @@ export const AddTransactionScreen = () => {
     setIsRawTextExpanded(false);
 
     try {
+      // Gallery photos become a document-style scan first, like the camera's scanner: cropped,
+      // straightened and black and white. That scan is the photo kept with the transaction.
+      let scanUri = uri;
+      let alreadyScanned = false;
+      if (source.fromGallery) {
+        setScanStatusLabel('Straightening the photo…');
+        const scanned = await scanGalleryImage(uri);
+        if (controller.signal.aborted) return;
+        scanUri = scanned.uri;
+        alreadyScanned = scanned.scanned;
+        if (scanned.scanned) setImageUri(scanned.uri);
+      }
       const parsedData = await analyzeReceiptImage(
-        uri,
+        scanUri,
         base64String ?? undefined,
         (status: string) => {
           if (controller.signal.aborted) return;
@@ -721,7 +739,7 @@ export const AddTransactionScreen = () => {
             setScanStatusLabel(status);
           }
         },
-        { signal: controller.signal }
+        { signal: controller.signal, alreadyScanned }
       );
       if (controller.signal.aborted) return;
 
@@ -799,7 +817,7 @@ export const AddTransactionScreen = () => {
     });
   };
 
-  const buildTransactionPayload = (categoryOverride?: string): TransactionInput => {
+  const buildTransactionPayload = (categoryOverride?: string, imageOverride?: string | null): TransactionInput => {
     const signedType = type === 'transfer' ? 'expense' : type;
     let currencyFields: CurrencyFields | null = null;
     try {
@@ -821,7 +839,7 @@ export const AddTransactionScreen = () => {
         date: selectedDate.getTime(),
         note,
         lineItemsText,
-        imageUri: imageUri || null,
+        imageUri: (imageOverride !== undefined ? imageOverride : imageUri) || null,
         walletId: effectiveWalletId ?? undefined,
         toWalletId: type === 'transfer' ? effectiveToWalletId : null,
         tags,
@@ -938,7 +956,10 @@ export const AddTransactionScreen = () => {
         }
       }
 
-      const data = buildTransactionPayload(resolvedCategory);
+      // Picked/scanned photos live in cache folders Android may clear; keep a permanent copy.
+      const storedImage = await persistReceiptImage(imageUri);
+      if (storedImage !== imageUri) setImageUri(storedImage);
+      const data = buildTransactionPayload(resolvedCategory, storedImage);
 
       if (editingId) {
         await updateTransaction(editingId, data);
@@ -968,13 +989,13 @@ export const AddTransactionScreen = () => {
           createRecurringRule(data, repeat, data.date);
         }
       } else {
-        await addTransaction(data);
+        const newTransactionId = await addTransaction(data);
         if (repeat) {
           createRecurringRule(data, repeat, data.date);
         }
         if (receiptQueueId) {
-          // The transaction now owns the receipt photo, so keep the file.
-          await useReceiptQueueStore.getState().remove(receiptQueueId, false);
+          // The transaction now owns the receipt photo; keep the receipt in "Recently saved" to fix later.
+          useReceiptQueueStore.getState().markSaved(receiptQueueId, typeof newTransactionId === 'number' ? newTransactionId : null);
 
           const remainingReady = useReceiptQueueStore
             .getState()

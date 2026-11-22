@@ -3024,9 +3024,13 @@ function ocrResultScore(result: OcrResult): number {
  * shadows, colour casts or low contrast), and also reads the original when the scan finds no total,
  * keeping whichever read looks more like a receipt. Without the native normalizer, reads the original.
  */
-export async function recognizeReceiptText(imageUri: string): Promise<OcrResult> {
+export async function recognizeReceiptText(
+  imageUri: string,
+  options: { alreadyScanned?: boolean } = {},
+): Promise<OcrResult> {
   const engine = getOcrEngine();
-  const normalizedUri = await normalizeReceiptImage(imageUri);
+  // A gallery photo already turned into a scan (cropped, black and white) is read as is.
+  const normalizedUri = options.alreadyScanned ? null : await normalizeReceiptImage(imageUri);
   if (!normalizedUri) {
     return engine.processImage(imageUri);
   }
@@ -3045,6 +3049,8 @@ export const RECEIPT_SCAN_CANCELLED = 'SCAN_CANCELLED';
 export interface AnalyzeReceiptOptions {
   /** Aborting stops the scan between stages and stops an in-flight model generation. */
   signal?: AbortSignal;
+  /** The image is already a document-style scan (gallery import), so skip normalizing it again. */
+  alreadyScanned?: boolean;
 }
 
 export const analyzeReceiptImage = async (
@@ -3062,7 +3068,7 @@ export const analyzeReceiptImage = async (
 
   onStatusChange?.('Reading text…');
 
-  const ocrResult = await recognizeReceiptText(imageUri);
+  const ocrResult = await recognizeReceiptText(imageUri, { alreadyScanned: options.alreadyScanned });
   throwIfCancelled();
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');

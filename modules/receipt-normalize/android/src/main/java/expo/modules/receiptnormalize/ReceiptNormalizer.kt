@@ -84,7 +84,7 @@ object ReceiptNormalizer {
     val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     output.setPixels(pixels, 0, width, 0, 0, width, height)
     val file = File(context.cacheDir, "receipt-normalized-${System.currentTimeMillis()}.jpg")
-    FileOutputStream(file).use { output.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+    FileOutputStream(file).use { output.compress(Bitmap.CompressFormat.JPEG, 85, it) }
     output.recycle()
     return Uri.fromFile(file)
   }

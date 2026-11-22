@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 16;
+const DB_SCHEMA_VERSION = 17;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -481,6 +481,22 @@ function migrateToVersion16(sqliteDb: typeof expoDb = expoDb) {
   }
 }
 
+/**
+ * Receipt Inbox: needs_scan marks gallery imports to be turned into a document-style scan before reading;
+ * saved rows (status 'saved', transaction_id, saved_at) are kept for a while as a "Recently saved" history.
+ */
+function migrateToVersion17(sqliteDb: typeof expoDb = expoDb) {
+  for (const [column, type] of [
+    ['needs_scan', 'INTEGER NOT NULL DEFAULT 0'],
+    ['transaction_id', 'INTEGER'],
+    ['saved_at', 'INTEGER'],
+  ] as const) {
+    if (!hasColumn('receipt_queue', column, sqliteDb)) {
+      sqliteDb.execSync(`ALTER TABLE receipt_queue ADD COLUMN ${column} ${type};`);
+    }
+  }
+}
+
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -925,6 +941,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 16) {
     migrateToVersion16(sqliteDb);
+  }
+
+  if (currentVersion < 17) {
+    migrateToVersion17(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { NavigationProps } from '../navigation/types';
 import { useReceiptQueueStore, type EnqueueReceiptsResult, type ReceiptQueueItem } from '../store/useReceiptQueueStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useTransactionStore } from '../store/useTransactionStore';
 import { formatDisplayCurrency } from '../features/transactions/amount';
 import { ConfidenceBadge } from '../components/ConfidenceBadge';
 import { captureReceiptWithFallback } from '../services/ocr/documentScanner';
@@ -34,7 +35,7 @@ export async function importReceiptsFromGallery(): Promise<EnqueueReceiptsResult
   });
   if (result.canceled || !result.assets?.length) return { added: 0, skippedDuplicates: 0 };
   const uris = result.assets.map((asset) => asset.uri).filter(Boolean);
-  return useReceiptQueueStore.getState().enqueue(uris);
+  return useReceiptQueueStore.getState().enqueue(uris, { scan: true });
 }
 
 const STATUS_LABEL: Record<ReceiptQueueItem['status'], string> = {
@@ -230,7 +231,11 @@ export const ReceiptInboxScreen = () => {
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
+  const dateFormat = useSettingsStore((s) => s.dateFormat);
   const items = useReceiptQueueStore((s) => s.items);
+  const savedItems = useReceiptQueueStore((s) => s.savedItems ?? []);
+  const transactionsList = useTransactionStore((s) => s.transactionsList);
+  const transactionsById = useMemo(() => new Map(transactionsList.map((t) => [t.id, t])), [transactionsList]);
   const ensureThumbnail = useReceiptQueueStore((s) => s.ensureThumbnail);
   const retry = useReceiptQueueStore((s) => s.retry);
   const remove = useReceiptQueueStore((s) => s.remove);
@@ -270,7 +275,7 @@ export const ReceiptInboxScreen = () => {
       onImportFromGallery: handleImport,
     });
     if (captured.status === 'captured' && captured.uris.length > 0) {
-      const result = await useReceiptQueueStore.getState().enqueue(captured.uris);
+      const result = await useReceiptQueueStore.getState().enqueue(captured.uris, { scan: captured.source === 'camera' });
       surfaceDuplicateFeedback(result);
     }
   }, [handleImport, surfaceDuplicateFeedback]);
@@ -561,8 +566,8 @@ export const ReceiptInboxScreen = () => {
 
       {waiting > 0 ? (
         <Text style={[styles.hint, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-          Receipts are read on this phone, one at a time. You can keep using Silo meanwhile; if you close it, reading
-          continues next time you open the app.
+          Receipts are read on this phone, one at a time. You can put Silo away: reading carries on in the background
+          and a notification shows progress.
         </Text>
       ) : null}
 
@@ -571,7 +576,57 @@ export const ReceiptInboxScreen = () => {
         keyExtractor={receiptKeyExtractor}
         renderItem={renderReceiptItem}
         contentContainerStyle={listContentContainerStyle}
-        ListEmptyComponent={listEmptyElement}
+        ListEmptyComponent={savedItems.length > 0 ? null : listEmptyElement}
+        ListFooterComponent={
+          savedItems.length > 0 ? (
+            <View style={styles.savedSection} testID="recently-saved">
+              <Text style={[styles.savedTitle, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+                Recently saved · tap to fix
+              </Text>
+              {savedItems.map((entry) => {
+                const tx = entry.transactionId != null ? transactionsById.get(entry.transactionId) : undefined;
+                const name = tx?.merchantName ?? entry.result?.merchantName ?? 'Receipt';
+                const when = new Date(entry.savedAt).toLocaleDateString(dateFormat || 'en-GB', { day: 'numeric', month: 'short' });
+                const detail = tx
+                  ? [
+                      formatDisplayCurrency(Math.abs(tx.totalAmount), currencyCode, useThousands),
+                      `dated ${new Date(tx.date).toLocaleDateString(dateFormat || 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+                      `saved ${when}`,
+                    ].join(' · ')
+                  : 'Transaction was deleted';
+                return (
+                  <View key={entry.id} style={[styles.row, styles.savedRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                    <TouchableOpacity
+                      style={styles.savedMain}
+                      disabled={!tx}
+                      onPress={() => tx && navigation.navigate('AddTransactionStack', { transactionId: tx.id })}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Saved receipt ${name}, ${detail}`}
+                    >
+                      <Image source={{ uri: entry.thumbnailUri ?? entry.imageUri }} style={styles.savedThumb} />
+                      <View style={styles.savedText}>
+                        <Text style={[styles.rowTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
+                          {name}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }} numberOfLines={1}>
+                          {detail}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => void useReceiptQueueStore.getState().removeSaved(entry.id)}
+                      style={styles.savedDismiss}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${name} from recently saved`}
+                    >
+                      <Ionicons name="close" size={18} color={theme.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null
+        }
         initialNumToRender={10}
         maxToRenderPerBatch={8}
         updateCellsBatchingPeriod={50}
@@ -655,6 +710,13 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '700' },
   emptyText: { fontSize: 13, textAlign: 'center', lineHeight: 19 },
   row: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 14, padding: 10, gap: 12 },
+  savedSection: { marginTop: 16, gap: 8 },
+  savedTitle: { fontWeight: '700' },
+  savedRow: { paddingVertical: 8 },
+  savedMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  savedThumb: { width: 40, height: 52, borderRadius: 6 },
+  savedText: { flex: 1, minWidth: 0 },
+  savedDismiss: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   thumb: { width: 56, height: 72, borderRadius: 8 },
   rowBody: { flex: 1, gap: 4 },
   rowTitle: { fontSize: 15, fontWeight: '700' },

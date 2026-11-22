@@ -90,7 +90,8 @@ interface TransactionState {
   searchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<Transaction[]>;
   summarizeSearchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<TransactionFilterSummary>;
   getDailyTotals: (startMs: number, endMs: number) => DailyTotal[];
-  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<void>;
+  /** Saves a transaction and resolves its new id (null if it could not be determined). */
+  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<number | null>;
   updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
   deleteTransaction: (id: number) => Promise<void>;
   addCategory: (name: string, type: CategoryType) => Promise<string>;
@@ -734,6 +735,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           dataVersion: state.dataVersion + 1,
         }));
       }
+      return insertedId;
     } catch (error) {
       console.error('Failed to add transaction:', error);
       set({ error: error instanceof Error ? error.message : String(error), isSaving: false });

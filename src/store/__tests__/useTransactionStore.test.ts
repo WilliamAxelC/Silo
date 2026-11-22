@@ -617,7 +617,7 @@ describe('useTransactionStore', () => {
 
     it('injects dummy data with automatic category creation', async () => {
       const addCatSpy = jest.spyOn(useTransactionStore.getState(), 'addCategory').mockResolvedValue('Food & Dining');
-      const addTxSpy = jest.spyOn(useTransactionStore.getState(), 'addTransaction').mockResolvedValue();
+      const addTxSpy = jest.spyOn(useTransactionStore.getState(), 'addTransaction').mockResolvedValue(1);
       const fetchTxSpy = jest.spyOn(useTransactionStore.getState(), 'fetchTransactions').mockResolvedValue();
       const fetchBudgetsSpy = jest.spyOn(useTransactionStore.getState(), 'fetchBudgets').mockResolvedValue();
 

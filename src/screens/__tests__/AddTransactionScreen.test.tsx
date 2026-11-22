@@ -381,7 +381,7 @@ describe('AddTransactionScreen', () => {
     expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith(
       expect.objectContaining({ allowsMultipleSelection: true, selectionLimit: 0 })
     );
-    expect(enqueue).toHaveBeenCalledWith(['file:///a.jpg', 'file:///b.jpg']);
+    expect(enqueue).toHaveBeenCalledWith(['file:///a.jpg', 'file:///b.jpg'], { scan: true });
     expect(analyzeReceiptImage).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith('ReceiptInbox');
     ReactTestRenderer.act(() => renderer.unmount());
@@ -930,7 +930,8 @@ describe('AddTransactionScreen', () => {
         date: txDate,
         note: 'Dinner with team',
         lineItemsText: 'Latte | 30.000\nCroissant | 15.000',
-        imageUri: 'file:///sate.jpg',
+        // Photos outside app storage are copied in once so the OS can't clear them.
+        imageUri: expect.stringContaining('/files/receipts/receipt-'),
         walletId: 1,
       })
     );
@@ -986,7 +987,7 @@ describe('AddTransactionScreen', () => {
   });
 
   it('advances to the next pending receipt (2 of N) after saving a queued receipt and returns to ReceiptInbox after the last one (F-08)', async () => {
-    const mockQueueRemove = jest.fn(async (id: number) => {
+    const mockQueueRemove = jest.fn((id: number, _transactionId?: number | null) => {
       useReceiptQueueStore.setState((state) => ({
         items: state.items.filter((item) => item.id !== id),
       }));
@@ -1013,7 +1014,7 @@ describe('AddTransactionScreen', () => {
           createdAt: 2000,
         },
       ],
-      remove: mockQueueRemove,
+      markSaved: mockQueueRemove,
     } as any);
 
     mockRouteParams.receiptQueueId = 10;
@@ -1043,7 +1044,8 @@ describe('AddTransactionScreen', () => {
       await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
     });
 
-    expect(mockQueueRemove).toHaveBeenCalledWith(10, false);
+    // Saved receipts move to the "Recently saved" history, linked to their new transaction.
+    expect(mockQueueRemove).toHaveBeenCalledWith(10, null);
     expect(mockReplace).toHaveBeenCalledWith('AddTransactionStack', {
       receiptQueueId: 11,
       reviewBatchIndex: 2,
@@ -1069,7 +1071,7 @@ describe('AddTransactionScreen', () => {
       await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
     });
 
-    expect(mockQueueRemove).toHaveBeenCalledWith(11, false);
+    expect(mockQueueRemove).toHaveBeenCalledWith(11, null);
     // Back to the inbox already in the stack, so Back from it can't reopen the saved receipt.
     expect(mockPopTo).toHaveBeenCalledWith('ReceiptInbox');
     expect(mockNavigate).not.toHaveBeenCalledWith('ReceiptInbox');
