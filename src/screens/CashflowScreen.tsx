@@ -133,9 +133,12 @@ const TransactionRow = React.memo(function TransactionRow({
   const isTransfer = item.type === 'transfer';
   const isIncome = !isTransfer && (item.type === 'income' || (item.totalAmount || 0) > 0);
   const tint = isTransfer ? theme.primary : isIncome ? theme.income : theme.expense;
+  const tagLabel = item.tags && item.tags.length > 0 ? item.tags.map((t) => `#${t}`).join(' ') : '';
   const subtitle = isTransfer
-    ? [dateLabel, accountLabel, item.note].filter(Boolean).join(' · ')
-    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, item.note].filter(Boolean).join(' · ');
+    ? [dateLabel, accountLabel, tagLabel, item.note].filter(Boolean).join(' · ')
+    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, tagLabel, item.note]
+        .filter(Boolean)
+        .join(' · ');
   const amountText = formatDisplayCurrency(
     isTransfer ? Math.abs(item.totalAmount || 0) : item.totalAmount || 0,
     currencyCode,
@@ -269,7 +272,12 @@ export const CashflowScreen = () => {
       return;
     }
 
+    // "#date" in the search box filters by that tag (the whole text after # is the tag name).
+    const tagQuery = trimmed.startsWith('#') ? trimmed.replace(/^#+/, '').trim() : '';
+    const textQuery = tagQuery ? '' : trimmed;
+
     const options: SearchTransactionsOptions = {};
+    if (tagQuery) options.tag = tagQuery;
     if (typeFilter) options.type = typeFilter;
     if (walletFilterId != null) options.walletId = walletFilterId;
     if (categoryFilter) options.category = categoryFilter;
@@ -278,10 +286,10 @@ export const CashflowScreen = () => {
 
     const runSearch = async () => {
       try {
-        const filterOptions = hasActiveFilters ? options : undefined;
+        const filterOptions = hasActiveFilters || tagQuery ? options : undefined;
         const [results, summary] = await Promise.all([
-          searchTransactions(trimmed, filterOptions),
-          summarizeSearchTransactions(trimmed, filterOptions),
+          searchTransactions(textQuery, filterOptions),
+          summarizeSearchTransactions(textQuery, filterOptions),
         ]);
         if (active) {
           setSearchResults(results);
@@ -831,7 +839,7 @@ export const CashflowScreen = () => {
             <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
             <TextInput
               style={[styles.searchInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
-              placeholder="Search merchant, note, or items..."
+              placeholder="Search merchant, note, items, or #tag"
               placeholderTextColor={theme.textMuted}
               selectionColor={theme.primary}
               value={searchQuery}

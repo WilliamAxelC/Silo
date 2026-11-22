@@ -6,6 +6,20 @@ const VALID_TRANSACTION_TYPES = new Set<TransactionType>(['expense', 'income', '
 const finiteOrNull = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
+/** Trims tags, drops a leading '#', removes blanks and case-insensitive duplicates (first spelling wins). */
+export function normalizeTagNames(tags: ReadonlyArray<string> | null | undefined): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of tags ?? []) {
+    const name = String(raw).replace(/^#+/, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    result.push(name);
+  }
+  return result;
+}
+
 export function createTransactionInput(input?: Partial<TransactionInput>): TransactionInput {
   const rawType = input?.type;
   const type: TransactionType = rawType && VALID_TRANSACTION_TYPES.has(rawType) ? rawType : 'expense';
@@ -33,6 +47,7 @@ export function createTransactionInput(input?: Partial<TransactionInput>): Trans
     originalCurrency: input?.originalCurrency?.trim().toUpperCase() || null,
     fxRate: finiteOrNull(input?.fxRate),
     toAmount: type === 'transfer' ? finiteOrNull(input?.toAmount) : null,
+    tags: normalizeTagNames(input?.tags),
   };
 }
 

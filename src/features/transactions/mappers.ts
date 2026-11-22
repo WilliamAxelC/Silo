@@ -19,6 +19,8 @@ export type TransactionListRow = {
   originalCurrency?: string | null;
   fxRate?: number | null;
   toAmount?: number | null;
+  /** Tag names joined with the unit separator (char 31). */
+  tagNames?: string | null;
 };
 
 const finiteOrNull = (value: unknown): number | null =>
@@ -56,6 +58,7 @@ export function mapTransactionRowToModel(row: Partial<TransactionListRow> & { id
     originalCurrency: row.originalCurrency?.trim() || null,
     fxRate: finiteOrNull(row.fxRate),
     toAmount: type === 'transfer' ? finiteOrNull(row.toAmount) : null,
+    tags: row.tagNames ? row.tagNames.split('\u001f').filter(Boolean).sort((a, b) => a.localeCompare(b)) : [],
   };
 }
 
@@ -75,6 +78,7 @@ export function buildEditableTransactionInput(transaction: Partial<Transaction>)
     originalCurrency: transaction.originalCurrency ?? null,
     fxRate: transaction.fxRate ?? null,
     toAmount: transaction.toAmount ?? null,
+    tags: transaction.tags ?? [],
   });
 }
 

@@ -473,6 +473,8 @@ export interface SearchTransactionsOptions {
   type?: string;
   walletId?: number;
   category?: string;
+  /** Only transactions carrying this tag (case-insensitive). */
+  tag?: string;
   dateFrom?: number;
   dateTo?: number;
 }
@@ -488,7 +490,13 @@ const SEARCH_SELECT_COLUMNS = `
   t.line_items_text AS lineItemsText,
   i.category AS category,
   t.wallet_id AS walletId,
-  t.to_wallet_id AS toWalletId
+  t.to_wallet_id AS toWalletId,
+  t.original_amount AS originalAmount,
+  t.original_currency AS originalCurrency,
+  t.fx_rate AS fxRate,
+  t.to_amount AS toAmount,
+  (SELECT group_concat(tg.name, char(31)) FROM transaction_tags tt JOIN tags tg ON tg.id = tt.tag_id
+     WHERE tt.transaction_id = t.id) AS tagNames
 `;
 
 const SEARCH_SUMMARY_COLUMNS = `
@@ -548,6 +556,12 @@ function buildSearchFilterParts(options?: SearchTransactionsOptions): {
   if (options?.category && options.category.trim()) {
     filterClauses.push('i.category = ?');
     filterParams.push(options.category.trim());
+  }
+  if (options?.tag && options.tag.trim()) {
+    filterClauses.push(
+      'EXISTS (SELECT 1 FROM transaction_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tt.transaction_id = t.id AND tg.name = ? COLLATE NOCASE)'
+    );
+    filterParams.push(options.tag.trim());
   }
   if (typeof options?.dateFrom === 'number' && Number.isFinite(options.dateFrom)) {
     filterClauses.push('t.date >= ?');

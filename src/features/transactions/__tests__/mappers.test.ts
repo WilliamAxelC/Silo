@@ -34,6 +34,7 @@ describe('transaction mappers', () => {
         originalCurrency: null,
         fxRate: null,
         toAmount: null,
+        tags: [],
       });
     });
 
@@ -114,6 +115,7 @@ describe('transaction mappers', () => {
         originalCurrency: null,
         fxRate: null,
         toAmount: null,
+        tags: [],
       });
       expect((input as any).id).toBeUndefined();
     });

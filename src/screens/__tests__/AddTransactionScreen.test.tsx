@@ -1322,6 +1322,39 @@ describe('AddTransactionScreen', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
+  it('saves tags picked from suggestions and typed in, separate from the category', async () => {
+    mockAddTransaction.mockResolvedValue(undefined);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      useTransactionStore.setState({ tags: [{ id: 1, name: 'date', usage: 4 }, { id: 2, name: 'work', usage: 1 }] } as any);
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Sushi dinner');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findAllByType(TextInput).find((n: any) => n.props.showSoftInputOnFocus === false).props.onChangeText('450000');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Add tag date' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Add tag' }).props.onChangeText('#Anniversary');
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Add tag' }).props.onSubmitEditing();
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Remove tag Anniversary' })).toBeTruthy();
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'Food & Dining', tags: ['date', 'Anniversary'] })
+    );
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
   describe('foreign-currency accounts', () => {
     const wallets = [
       { id: 1, name: 'BCA', type: 'bank', isActive: true, initialBalance: 0, balance: 5_000_000, currency: null, averageRate: null },

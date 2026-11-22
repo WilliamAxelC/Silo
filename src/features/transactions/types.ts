@@ -38,6 +38,15 @@ export interface Transaction {
   fxRate?: number | null;
   /** Transfers only: amount that arrived, in the receiving account's currency (when currencies differ or are foreign). */
   toAmount?: number | null;
+  /** Free-form labels such as "date" or "Japan 2026"; independent of the single category. */
+  tags?: string[];
+}
+
+export interface TagRecord {
+  id: number;
+  name: string;
+  /** Number of transactions carrying the tag. */
+  usage: number;
 }
 
 export type WalletType = 'cash' | 'bank' | 'ewallet' | 'card' | 'savings';

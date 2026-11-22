@@ -24,9 +24,9 @@ import {
   isDuplicateCategory,
   normalizeCategoryName,
 } from '../features/transactions/categories';
-import { normalizeTransactionInput } from '../features/transactions/factories';
+import { normalizeTagNames, normalizeTransactionInput } from '../features/transactions/factories';
 import { mapTransactionRowToModel, type TransactionListRow } from '../features/transactions/mappers';
-import type { CategoryRecord, CategoryType, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
+import type { CategoryRecord, CategoryType, TagRecord, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
 export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
 
@@ -65,6 +65,12 @@ interface TransactionState {
   fetchCategories: () => Promise<void>;
   fetchBudgets: () => Promise<void>;
   fetchWallets: () => void;
+  /** Tags with how many transactions use them, most used first. */
+  tags: TagRecord[];
+  fetchTags: () => void;
+  renameTag: (id: number, name: string) => void;
+  /** Removes the tag from every transaction and deletes it. */
+  deleteTag: (id: number) => void;
   addWallet: (input: WalletInput) => number;
   updateWallet: (id: number, input: Partial<WalletInput> & { isActive?: boolean }) => void;
   /** Deletes an unused account; one with transactions is archived instead. Returns what happened. */
@@ -114,7 +120,9 @@ const LIST_TRANSACTIONS_SQL = `
     t.original_amount AS originalAmount,
     t.original_currency AS originalCurrency,
     t.fx_rate AS fxRate,
-    t.to_amount AS toAmount
+    t.to_amount AS toAmount,
+    (SELECT group_concat(tg.name, char(31)) FROM transaction_tags tt JOIN tags tg ON tg.id = tt.tag_id
+     WHERE tt.transaction_id = t.id) AS tagNames
   FROM transactions t
   LEFT JOIN transaction_items i ON t.id = i.transaction_id
   ORDER BY t.date DESC, t.id DESC;
@@ -201,6 +209,34 @@ function readWallets(): Wallet[] {
   });
 }
 
+const TAG_SEPARATOR = '\u001f';
+
+function readTags(): TagRecord[] {
+  try {
+    return expoDb.getAllSync<TagRecord>(
+      `SELECT tg.id AS id, tg.name AS name, COUNT(tt.transaction_id) AS usage
+       FROM tags tg LEFT JOIN transaction_tags tt ON tt.tag_id = tg.id
+       GROUP BY tg.id
+       ORDER BY usage DESC, tg.name COLLATE NOCASE ASC;`,
+    ).map((row) => ({ id: row.id, name: row.name, usage: Number(row.usage ?? 0) }));
+  } catch (error) {
+    console.warn('Failed to read tags:', error);
+    return [];
+  }
+}
+
+/** Replaces a transaction's tags, creating tags that don't exist yet (matched case-insensitively). */
+function writeTransactionTags(transactionId: number, names: string[]) {
+  expoDb.runSync('DELETE FROM transaction_tags WHERE transaction_id = ?;', [transactionId]);
+  for (const name of names) {
+    expoDb.runSync('INSERT OR IGNORE INTO tags (name, created_at) VALUES (?, ?);', [name, Date.now()]);
+    const tag = expoDb.getFirstSync<{ id: number }>('SELECT id FROM tags WHERE name = ? COLLATE NOCASE;', [name]);
+    if (tag?.id != null) {
+      expoDb.runSync('INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?);', [transactionId, tag.id]);
+    }
+  }
+}
+
 function readWalletsSafe(fallback: Wallet[]): Wallet[] {
   try {
     return readWallets();
@@ -222,6 +258,7 @@ function resolveAccounts(tx: Pick<TransactionInput, 'type' | 'walletId' | 'toWal
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactionsList: [],
   wallets: [],
+  tags: [],
   categories: [],
   budgets: {},
   isSaving: false,
@@ -262,6 +299,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       set((state) => ({
         transactionsList,
         wallets: nextWallets,
+        tags: readTags(),
         hasLoadedTransactions: true,
         transactionsDirty: false,
         dataVersion: state.dataVersion + 1,
@@ -277,6 +315,31 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     if (!hasLoadedTransactions || transactionsDirty) {
       await get().fetchTransactions();
     }
+  },
+
+  fetchTags: () => {
+    set({ tags: readTags() });
+  },
+
+  renameTag: (id, name) => {
+    const [clean] = normalizeTagNames([name]);
+    if (!clean) throw new Error('Give the tag a name.');
+    const clash = expoDb.getFirstSync<{ id: number }>('SELECT id FROM tags WHERE name = ? COLLATE NOCASE AND id != ?;', [clean, id]);
+    if (clash) {
+      // Renaming onto an existing tag merges the two.
+      expoDb.runSync('INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) SELECT transaction_id, ? FROM transaction_tags WHERE tag_id = ?;', [clash.id, id]);
+      expoDb.runSync('DELETE FROM transaction_tags WHERE tag_id = ?;', [id]);
+      expoDb.runSync('DELETE FROM tags WHERE id = ?;', [id]);
+    } else {
+      expoDb.runSync('UPDATE tags SET name = ? WHERE id = ?;', [clean, id]);
+    }
+    set((state) => ({ tags: readTags(), transactionsList: readTransactionsList(), dataVersion: state.dataVersion + 1 }));
+  },
+
+  deleteTag: (id) => {
+    expoDb.runSync('DELETE FROM transaction_tags WHERE tag_id = ?;', [id]);
+    expoDb.runSync('DELETE FROM tags WHERE id = ?;', [id]);
+    set((state) => ({ tags: readTags(), transactionsList: readTransactionsList(), dataVersion: state.dataVersion + 1 }));
   },
 
   fetchWallets: () => {
@@ -576,6 +639,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
       });
 
+      const tagNames = normalizedTx.tags ?? [];
+      if (insertedId != null && tagNames.length > 0) {
+        writeTransactionTags(insertedId, tagNames);
+      }
+
       if (options?.skipRefresh) {
         set((state) => ({
           transactionsDirty: true,
@@ -598,11 +666,13 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           originalCurrency: normalizedTx.originalCurrency ?? null,
           fxRate: normalizedTx.fxRate ?? null,
           toAmount: accounts.toWalletId ? normalizedTx.toAmount ?? null : null,
+          tagNames: tagNames.join(TAG_SEPARATOR),
         });
         const nextWallets = readWalletsSafe(get().wallets);
         set((state) => ({
           transactionsList: insertTransactionSorted(state.transactionsList, createdTx),
           wallets: nextWallets,
+          tags: tagNames.length > 0 ? readTags() : state.tags,
           isSaving: false,
           transactionsDirty: state.transactionsDirty,
           dataVersion: state.dataVersion + 1,
@@ -698,6 +768,12 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
       });
 
+      const nextTags = tx.tags !== undefined ? normalizeTagNames(tx.tags) : null;
+      if (nextTags) {
+        writeTransactionTags(id, nextTags);
+        set({ tags: readTags() });
+      }
+
       const nextWallets = readWalletsSafe(get().wallets);
       const hasInStore = get().transactionsList.some((item) => item.id === id);
       if (hasInStore) {
@@ -732,6 +808,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
             originalCurrency: currencyFields ? currencyFields.originalCurrency : latest.originalCurrency ?? null,
             fxRate: currencyFields ? currencyFields.fxRate : latest.fxRate ?? null,
             toAmount: currencyFields ? currencyFields.toAmount : latest.toAmount ?? null,
+            tagNames: (nextTags ?? latest.tags ?? []).join(TAG_SEPARATOR),
           });
           return {
             transactionsList: insertTransactionSorted(state.transactionsList, updatedTx),
@@ -765,6 +842,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         await tx.delete(transactionItems).where(eq(transactionItems.transactionId, id));
         await tx.delete(transactions).where(eq(transactions.id, id));
       });
+      expoDb.runSync('DELETE FROM transaction_tags WHERE transaction_id = ?;', [id]);
       const nextWallets = readWalletsSafe(get().wallets);
       set((state) => ({
         transactionsList: state.transactionsList.filter((item) => item.id !== id),

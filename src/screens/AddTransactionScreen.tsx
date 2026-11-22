@@ -57,6 +57,7 @@ import { capturePhotoWithCamera, captureReceiptWithFallback } from '../services/
 import { AccountPickerModal } from '../components/AccountPickerModal';
 import { AmountCalculatorModal } from '../components/AmountCalculatorKeypad';
 import { ReceiptPhotoModal } from '../components/ReceiptPhotoModal';
+import { TagInput } from '../components/TagInput';
 import {
   RECURRING_FREQUENCIES,
   createRecurringRule,
@@ -149,6 +150,9 @@ export const AddTransactionScreen = () => {
   const fromCurrency = walletCurrencyOf(fromWallet, currencyCode);
   const toCurrency = walletCurrencyOf(toWallet, currencyCode);
   const [entryCurrency, setEntryCurrency] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
+  const knownTags = useTransactionStore((s) => s.tags);
+  const tagSuggestions = useMemo(() => (knownTags ?? []).map((t) => t.name), [knownTags]);
   const amountCurrency =
     type === 'transfer'
       ? fromCurrency
@@ -318,6 +322,7 @@ export const AddTransactionScreen = () => {
     setWalletId(null);
     setToWalletId(null);
     setEntryCurrency(null);
+    setTags([]);
     setRateText('');
     setRateSource(null);
     rateEditedRef.current = false;
@@ -355,6 +360,7 @@ export const AddTransactionScreen = () => {
         : editableTransaction.totalAmount;
     prevAmountCurrencyRef.current = recordedCurrency;
     setEntryCurrency(recordedCurrency);
+    setTags(editableTransaction.tags ?? []);
     setAmount(recordedAmount !== 0 ? formatAmountForInput(recordedAmount, recordedCurrency) : '');
     setRateText(editableTransaction.fxRate ? String(editableTransaction.fxRate) : '');
     rateEditedRef.current = Boolean(editableTransaction.fxRate);
@@ -818,6 +824,7 @@ export const AddTransactionScreen = () => {
         imageUri: imageUri || null,
         walletId: effectiveWalletId ?? undefined,
         toWalletId: type === 'transfer' ? effectiveToWalletId : null,
+        tags,
       })
     );
   };
@@ -1682,6 +1689,11 @@ export const AddTransactionScreen = () => {
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
+
+          <View style={styles.inputGroupCompact}>
+            <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Tags</Text>
+            <TagInput tags={tags} suggestions={tagSuggestions} onChange={setTags} />
           </View>
 
           {/* Repeat Schedule (visible in both Add and Edit modes) */}
