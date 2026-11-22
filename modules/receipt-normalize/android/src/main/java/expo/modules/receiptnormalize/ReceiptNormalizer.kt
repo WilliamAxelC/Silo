@@ -23,7 +23,15 @@ object ReceiptNormalizer {
   private const val MAX_SIDE = 2048
   private const val BLOCK = 24
 
-  fun normalize(context: Context, uri: Uri): Uri {
+  fun normalize(context: Context, uri: Uri): Uri =
+    try {
+      normalizeOrThrow(context, uri)
+    } catch (error: OutOfMemoryError) {
+      // Surface as a normal rejection so JS falls back to OCR on the original photo.
+      throw IllegalStateException("Not enough memory to normalize receipt image", error)
+    }
+
+  private fun normalizeOrThrow(context: Context, uri: Uri): Uri {
     val source = decodeUpright(context, uri)
     val width = source.width
     val height = source.height
@@ -39,8 +47,8 @@ object ReceiptNormalizer {
 
     val background = estimateBackground(gray, width, height)
 
-    // Divide by the local paper brightness: shadows and gradients become flat white paper.
-    val flat = IntArray(gray.size)
+    // Divide by the local paper brightness: shadows and gradients become flat white paper (in place).
+    val flat = gray
     val histogram = IntArray(256)
     for (i in gray.indices) {
       val v = min(255, gray[i] * 255 / max(1, background[i]))
