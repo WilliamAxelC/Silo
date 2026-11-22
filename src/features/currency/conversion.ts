@@ -126,3 +126,24 @@ export function resolveTransferAmounts(params: {
   const rate = roundRate(params.sourceRate);
   return { totalAmount: -roundTo(sent * rate, home), originalAmount: -sent, originalCurrency: from, fxRate: rate, toAmount: received };
 }
+
+/** Formats an exchange rate the way the app writes numbers: "16.260,2", "115,345". */
+export function formatRate(rate: number): string {
+  if (!isPositive(rate)) return '';
+  return roundRate(rate).toLocaleString('id-ID', { maximumFractionDigits: 6, useGrouping: true });
+}
+
+/**
+ * Parses a typed rate with '.' thousands and ',' decimals ("16.250" = 16250, "115,345" = 115.345).
+ * A single '.' followed by other than exactly three digits is read as a decimal point ("0.0095", "104.6").
+ */
+export function parseRateText(text: string): number | null {
+  const cleaned = text.replace(/\s/g, '');
+  if (!cleaned) return null;
+  let normalized: string;
+  if (cleaned.includes(',')) normalized = cleaned.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(cleaned)) normalized = cleaned.replace(/\./g, '');
+  else normalized = cleaned;
+  const value = Number(normalized);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}

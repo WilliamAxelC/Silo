@@ -54,3 +54,17 @@ describe('resolveTransferAmounts', () => {
     expect(roundRate(0.0095602)).toBe(0.0095602);
   });
 });
+
+describe('rate text', () => {
+  const { formatRate, parseRateText } = jest.requireActual('../conversion');
+  it('formats with Indonesian separators and parses what people type', () => {
+    expect(formatRate(16260.2)).toBe('16.260,2');
+    expect(formatRate(115.345)).toBe('115,345');
+    expect(parseRateText('16.250')).toBe(16250);
+    expect(parseRateText('16.260,2')).toBe(16260.2);
+    expect(parseRateText('115,345')).toBe(115.345);
+    expect(parseRateText('104.6')).toBe(104.6);
+    expect(parseRateText('0.0000615')).toBe(0.0000615);
+    expect(parseRateText('abc')).toBeNull();
+  });
+});

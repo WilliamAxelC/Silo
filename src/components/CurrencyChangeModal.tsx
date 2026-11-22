@@ -5,6 +5,7 @@ import { expoDb } from '../db/index';
 import { getCurrencySymbol } from '../features/transactions/amount';
 import { hasForeignCurrencyData, rebaseHomeCurrency } from '../features/currency/rebaseHomeCurrency';
 import { getDailyRate } from '../services/fx/rates';
+import { formatRate, parseRateText } from '../features/currency/conversion';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -40,7 +41,7 @@ export function CurrencyChangeModal({ fromCurrency, toCurrency, onClose }: Props
         const invert = daily.rate < 1;
         setInverted(invert);
         const shown = invert ? 1 / daily.rate : daily.rate;
-        setRateText(String(Math.round(shown * 10000) / 10000));
+        setRateText(formatRate(shown));
       })
       .finally(() => alive && setLoadingRate(false));
     return () => {
@@ -50,8 +51,8 @@ export function CurrencyChangeModal({ fromCurrency, toCurrency, onClose }: Props
 
   if (!toCurrency) return null;
   const [baseCode, quoteCode] = inverted ? [toCurrency, fromCurrency] : [fromCurrency, toCurrency];
-  const shownRate = Number(rateText.replace(/\s/g, '').replace(',', '.'));
-  const rate = Number.isFinite(shownRate) && shownRate > 0 ? (inverted ? 1 / shownRate : shownRate) : null;
+  const shownRate = parseRateText(rateText);
+  const rate = shownRate ? (inverted ? 1 / shownRate : shownRate) : null;
 
   const finish = async (mode: 'convert' | 'relabel') => {
     if (mode === 'convert' && !rate) {

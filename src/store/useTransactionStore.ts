@@ -12,7 +12,6 @@ import {
 } from '../db/index';
 import { budgets, categories, transactionItems, transactions } from '../db/schema';
 import { roundCurrency, type TransactionFilterSummary } from '../features/transactions/amount';
-import { roundRate } from '../features/currency/conversion';
 import { normalizeCurrencyCode } from '../features/currency/currencies';
 import { DEFAULT_WALLET_ID, TRANSFER_CATEGORY_LABEL } from '../features/transactions/constants';
 import { buildDummyTransactions } from '../features/transactions/dummyData';
@@ -208,7 +207,7 @@ function readWallets(): Wallet[] {
   return rows.map((row) => {
     const currency = row.currency?.trim().toUpperCase() || null;
     const averageRate =
-      currency && (row.costUnits ?? 0) > 0 && (row.costHome ?? 0) > 0 ? roundRate((row.costHome ?? 0) / (row.costUnits ?? 1)) : null;
+      currency && (row.costUnits ?? 0) > 0 && (row.costHome ?? 0) > 0 ? (row.costHome ?? 0) / (row.costUnits ?? 1) : null;
     return {
       id: row.id,
       name: row.name,

@@ -339,9 +339,18 @@ export function formatDisplayCurrency(
   }
 
   try {
+    const code = (currencyCode || 'IDR').toUpperCase();
+    if (code !== 'IDR' && CURRENCY_SYMBOLS[code]) {
+      // Intl's id-ID locale writes "JP¥"/"US$"; use the app's short symbols for foreign currencies.
+      const number = new Intl.NumberFormat('id-ID', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      }).format(absAmount);
+      return `${sign}${CURRENCY_SYMBOLS[code]}\u00a0${number}`;
+    }
     const formattedAbs = new Intl.NumberFormat('id-ID', {
       style: 'currency',
-      currency: currencyCode || 'IDR',
+      currency: code,
       maximumFractionDigits: decimals,
     }).format(absAmount);
     return `${sign}${formattedAbs}`;

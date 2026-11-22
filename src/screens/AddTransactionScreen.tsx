@@ -45,7 +45,10 @@ import { getUnrealisticDateWarning } from '../features/transactions/dateSanity';
 import { walletCurrencyOf } from '../features/currency/currencies';
 import {
   CurrencyConversionError,
+  formatRate,
+  parseRateText,
   resolveEntryAmounts,
+  roundRate,
   resolveTransferAmounts,
   type CurrencyFields,
 } from '../features/currency/conversion';
@@ -196,13 +199,13 @@ export const AddTransactionScreen = () => {
     let alive = true;
     const apply = (rate: number, source: string) => {
       if (!alive || rateEditedRef.current) return;
-      setRateText(String(rate));
+      setRateText(formatRate(rate));
       setRateSource(source);
     };
     const describeDaily = (date: string) => `Today's market rate${date ? ` (${date})` : ''}`;
     const cached = getCachedRate(rateCurrency, currencyCode);
     if (cached) apply(cached.rate, describeDaily(cached.date));
-    else if (fromWallet?.averageRate) apply(fromWallet.averageRate, 'Your average exchange cost');
+    else if (fromWallet?.averageRate) apply(roundRate(fromWallet.averageRate), 'Your average exchange cost');
     void getDailyRate(rateCurrency, currencyCode).then((daily) => {
       if (daily) apply(daily.rate, describeDaily(daily.date));
     });
@@ -362,7 +365,7 @@ export const AddTransactionScreen = () => {
     setEntryCurrency(recordedCurrency);
     setTags(editableTransaction.tags ?? []);
     setAmount(recordedAmount !== 0 ? formatAmountForInput(recordedAmount, recordedCurrency) : '');
-    setRateText(editableTransaction.fxRate ? String(editableTransaction.fxRate) : '');
+    setRateText(editableTransaction.fxRate ? formatRate(editableTransaction.fxRate) : '');
     rateEditedRef.current = Boolean(editableTransaction.fxRate);
     setRateSource(editableTransaction.fxRate ? 'Rate saved with this transaction' : null);
     setReceivedText('');
@@ -771,10 +774,7 @@ export const AddTransactionScreen = () => {
     setSourceModalVisible(true);
   };
 
-  const parseRate = (text: string): number | null => {
-    const value = Number(text.replace(/\s/g, '').replace(',', '.'));
-    return Number.isFinite(value) && value > 0 ? value : null;
-  };
+  const parseRate = (text: string): number | null => parseRateText(text);
 
   /** Home amount plus the foreign side for this entry; throws CurrencyConversionError when a rate/amount is missing. */
   const computeCurrencyFields = (): CurrencyFields => {
@@ -1613,18 +1613,18 @@ export const AddTransactionScreen = () => {
                   />
                 </View>
               ) : null}
-              {rateCurrency && fromWallet?.averageRate && parseRate(rateText) !== fromWallet.averageRate ? (
+              {rateCurrency && fromWallet?.averageRate && parseRate(rateText) !== roundRate(fromWallet.averageRate) ? (
                 <TouchableOpacity
                   onPress={() => {
                     rateEditedRef.current = true;
-                    setRateText(String(fromWallet.averageRate));
+                    setRateText(formatRate(fromWallet.averageRate ?? 0));
                     setRateSource('Your average exchange cost');
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="Use my average exchange cost"
                 >
                   <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
-                    Use my exchange cost ({getCurrencySymbol(currencyCode)} {fromWallet.averageRate})
+                    Use my exchange cost ({getCurrencySymbol(currencyCode)} {formatRate(fromWallet.averageRate)})
                   </Text>
                 </TouchableOpacity>
               ) : null}

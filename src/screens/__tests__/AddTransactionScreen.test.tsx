@@ -1392,7 +1392,7 @@ describe('AddTransactionScreen', () => {
 
       expect(renderer.root.findByProps({ testID: 'currency-exchange-panel' })).toBeTruthy();
       const rateInput = renderer.root.findByProps({ accessibilityLabel: 'Exchange rate, IDR per JPY' });
-      expect(rateInput.props.value).toBe('104.6');
+      expect(rateInput.props.value).toBe('104,6');
       expect(renderer.root.findByProps({ testID: 'amount-currency-badge' }).findAllByType(Text).map((t: any) => t.props.children)).toContain('¥');
 
       ReactTestRenderer.act(() => {

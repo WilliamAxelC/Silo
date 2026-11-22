@@ -795,7 +795,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     expect(alertSpy).not.toHaveBeenCalled();
     expect(renderer.root.findByProps({ testID: 'currency-change-modal' })).toBeTruthy();
     // Today's rate is shown in the readable direction: 1 USD = Rp 16.000.
-    expect(renderer.root.findByProps({ accessibilityLabel: 'Exchange rate, IDR per USD' }).props.value).toBe('16000');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Exchange rate, IDR per USD' }).props.value).toBe('16.000');
     expect(useSettingsStore.getState().currencyCode).toBe('IDR');
     alertSpy.mockRestore();
   });

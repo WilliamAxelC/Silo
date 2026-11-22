@@ -390,8 +390,8 @@ export const AccountsScreen = () => {
                 </Text>
               ) : draftCurrency !== currencyCode ? (
                 <Text style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                  Balance is kept in {draftCurrency}. Fill it with a Transfer from a {currencyCode} account to record the
-                  exchange rate.
+                  Balance is kept in {draftCurrency}. Fill it with a Transfer from one of your {currencyCode} accounts to
+                  record the exchange rate.
                 </Text>
               ) : null}
 
