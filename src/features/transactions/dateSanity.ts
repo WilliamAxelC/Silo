@@ -29,3 +29,32 @@ export function getUnrealisticDateWarning(date: Date, now: Date = new Date()): s
   }
   return null;
 }
+
+/** Scanned receipt dates more than this far from today get a confirmation (usually a misread year/day). */
+export const SCANNED_DATE_TOLERANCE_DAYS = 7;
+
+export function isFarFromToday(date: Date, now: Date = new Date(), days: number = SCANNED_DATE_TOLERANCE_DAYS): boolean {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return Math.abs(day - today) > days * DAY_MS;
+}
+
+/** "3 days ago", "a year ago", "in 2 months". */
+export function describeDateDistance(date: Date, now: Date = new Date()): string {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diff = day - today;
+  const days = Math.round(Math.abs(diff) / DAY_MS);
+  const months = Math.round(days / 30.44);
+  const years = Math.round(days / 365.25);
+  const span =
+    days < 45
+      ? `${days} day${days === 1 ? '' : 's'}`
+      : months < 11
+        ? `${months} months`
+        : years <= 1
+          ? 'a year'
+          : `${years} years`;
+  if (diff === 0) return 'today';
+  return diff > 0 ? `in ${span}` : `${span} ago`;
+}

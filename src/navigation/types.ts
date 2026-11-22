@@ -29,6 +29,7 @@ export type RootStackParamList = {
   /** editWalletId: open the account editor for that account on arrival. */
   Accounts: { editWalletId?: number } | undefined;
   AccountDetail: { walletId: number };
+  Activity: undefined;
   Recurring: undefined;
   Settings: undefined;
   SystemLogs: undefined;

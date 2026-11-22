@@ -708,7 +708,7 @@ describe('AddTransactionScreen', () => {
     await ReactTestRenderer.act(async () => {
       await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
     });
-    expect(mockAddTransaction).toHaveBeenCalledWith(expect.objectContaining({ walletId: 2 }));
+    expect(mockAddTransaction).toHaveBeenCalledWith(expect.objectContaining({ walletId: 2 }), { source: 'template' });
     ReactTestRenderer.act(() => renderer.unmount());
 
     // 2. Duplicating transfer from archived wallet 1 -> active wallet 2:
@@ -835,7 +835,9 @@ describe('AddTransactionScreen', () => {
         merchantName: 'Morning Coffee',
         totalAmount: -28000,
         date: prefilled,
-      })
+      }),
+      // Recorded in the activity log as coming from a template.
+      { source: 'template' }
     );
 
     ReactTestRenderer.act(() => renderer.unmount());
@@ -1456,6 +1458,40 @@ describe('AddTransactionScreen', () => {
       );
       ReactTestRenderer.act(() => renderer.unmount());
     });
+  });
+
+  it('confirms a scanned receipt date far from today, with a one-tap "Use today"', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///r.jpg' }] });
+    const lastYear = new Date();
+    lastYear.setFullYear(lastYear.getFullYear() - 1);
+    const iso = `${lastYear.getFullYear()}-${String(lastYear.getMonth() + 1).padStart(2, '0')}-${String(lastYear.getDate()).padStart(2, '0')}`;
+    (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({ merchantName: 'Super Indo', totalAmount: 23695, date: iso, rawText: 'SUPER INDO' });
+    mockAddTransaction.mockResolvedValue(7);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress());
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+    expect(renderer.root.findByProps({ testID: 'scanned-date-notice' })).toBeTruthy();
+
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+    expect(mockAddTransaction).not.toHaveBeenCalled();
+    const call = (Alert.alert as jest.Mock).mock.calls.find((c) => c[0] === 'Check the receipt date');
+    expect(call[1]).toMatch(/a year ago\. Is that right\?/);
+    await ReactTestRenderer.act(async () => {
+      call[2][0].onPress();
+    });
+    expect(mockAddTransaction).toHaveBeenCalledTimes(1);
+    const saved = mockAddTransaction.mock.calls[0];
+    expect(new Date(saved[0].date).toDateString()).toBe(new Date().toDateString());
+    expect(saved[1]).toEqual({ source: 'scan' });
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   it('calls navigation.goBack() on delete and edit save when canGoBack() is true to preserve caller screen state (F-17)', async () => {

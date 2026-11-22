@@ -191,7 +191,7 @@ let running: Promise<number> | null = null;
  * interruption never creates duplicates. Returns how many transactions were created.
  */
 export function materializeDueRecurring(
-  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<unknown>,
+  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean; source?: 'recurring' }) => Promise<unknown>,
   now = Date.now(),
 ): Promise<number> {
   if (running) return running;
@@ -203,7 +203,7 @@ export function materializeDueRecurring(
       let date = occurrenceDate(rule.startDate, rule.frequency, n);
       try {
         while (date <= now && created < MAX_CATCH_UP) {
-          await addTransaction({ ...rule.template, date, imageUri: null }, { skipRefresh: true });
+          await addTransaction({ ...rule.template, date, imageUri: null }, { skipRefresh: true, source: 'recurring' });
           n += 1;
           created += 1;
           expoDb.runSync('UPDATE recurring_rules SET occurrences = ? WHERE id = ?;', [n, rule.id]);

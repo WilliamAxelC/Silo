@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 17;
+const DB_SCHEMA_VERSION = 18;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -497,6 +497,24 @@ function migrateToVersion17(sqliteDb: typeof expoDb = expoDb) {
   }
 }
 
+/** Activity log (features/activity/activityLog.ts): what the user changed, with snapshots for undo. */
+function migrateToVersion18(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      entity_id INTEGER,
+      source TEXT,
+      before_json TEXT,
+      after_json TEXT,
+      undone INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_activity_log_at ON activity_log(at);
+  `);
+}
+
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -945,6 +963,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 17) {
     migrateToVersion17(sqliteDb);
+  }
+
+  if (currentVersion < 18) {
+    migrateToVersion18(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

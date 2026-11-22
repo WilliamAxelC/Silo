@@ -161,6 +161,21 @@ export const MoreScreen = () => {
 
           <TouchableOpacity
             style={styles.menuRow}
+            onPress={() => navigation.navigate('Activity')}
+            accessibilityRole="button"
+            accessibilityLabel="Activity"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="time-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Activity</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
             onPress={() => navigation.navigate('Settings')}
             accessibilityRole="button"
             accessibilityLabel="App Settings"

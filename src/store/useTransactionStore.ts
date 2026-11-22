@@ -26,6 +26,14 @@ import {
 import { normalizeTagNames, normalizeTransactionInput } from '../features/transactions/factories';
 import type { BudgetPlan } from '../features/budgets/engine';
 import {
+  logActivity,
+  markActivityUndone,
+  pruneActivity,
+  readActivity,
+  type ActivityEntry,
+  type ActivitySource,
+} from '../features/activity/activityLog';
+import {
   deleteBudgetPlan as deleteBudgetPlanDb,
   readBudgetPlans,
   renameCategoryInPlans,
@@ -36,6 +44,12 @@ import { mapTransactionRowToModel, type TransactionListRow } from '../features/t
 import type { CategoryRecord, CategoryType, TagRecord, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
 export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
+
+/** skipLog: don't record in the activity log (used by undo and bulk/demo imports). */
+export interface LogOptions {
+  skipLog?: boolean;
+  source?: ActivitySource;
+}
 
 export interface WalletInput {
   name: string;
@@ -78,22 +92,30 @@ interface TransactionState {
   /** General budgets (one-off or repeating, any currency, category/account/tag filters). */
   budgetPlans: BudgetPlan[];
   fetchBudgetPlans: () => void;
-  saveBudgetPlan: (id: number | null, input: BudgetPlanInput) => number;
-  deleteBudgetPlan: (id: number) => void;
-  renameTag: (id: number, name: string) => void;
+  saveBudgetPlan: (id: number | null, input: BudgetPlanInput, options?: LogOptions) => number;
+  deleteBudgetPlan: (id: number, options?: LogOptions) => void;
+  /** Recent changes (newest first), for the Activity screen. */
+  activity: ActivityEntry[];
+  fetchActivity: () => void;
+  /** Reverts a logged change; resolves why it couldn't be undone otherwise. */
+  undoActivity: (id: number) => Promise<{ ok: boolean; message?: string }>;
+  renameTag: (id: number, name: string, options?: LogOptions) => void;
   /** Removes the tag from every transaction and deletes it. */
-  deleteTag: (id: number) => void;
-  addWallet: (input: WalletInput) => number;
-  updateWallet: (id: number, input: Partial<WalletInput> & { isActive?: boolean }) => void;
+  deleteTag: (id: number, options?: LogOptions) => void;
+  addWallet: (input: WalletInput, options?: LogOptions) => number;
+  updateWallet: (id: number, input: Partial<WalletInput> & { isActive?: boolean }, options?: LogOptions) => void;
   /** Deletes an unused account; one with transactions is archived instead. Returns what happened. */
-  removeWallet: (id: number) => { ok: boolean; archived?: boolean; message?: string };
+  removeWallet: (id: number, options?: LogOptions) => { ok: boolean; archived?: boolean; message?: string };
   searchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<Transaction[]>;
   summarizeSearchTransactions: (query: string, options?: SearchTransactionsOptions) => Promise<TransactionFilterSummary>;
   getDailyTotals: (startMs: number, endMs: number) => DailyTotal[];
   /** Saves a transaction and resolves its new id (null if it could not be determined). */
-  addTransaction: (tx: TransactionInput, options?: { skipRefresh?: boolean }) => Promise<number | null>;
-  updateTransaction: (id: number, tx: TransactionUpdate) => Promise<void>;
-  deleteTransaction: (id: number) => Promise<void>;
+  addTransaction: (
+    tx: TransactionInput,
+    options?: { skipRefresh?: boolean; skipLog?: boolean; source?: ActivitySource }
+  ) => Promise<number | null>;
+  updateTransaction: (id: number, tx: TransactionUpdate, options?: LogOptions) => Promise<void>;
+  deleteTransaction: (id: number, options?: LogOptions) => Promise<void>;
   addCategory: (name: string, type: CategoryType) => Promise<string>;
   renameCategory: (id: number, nextName: string) => Promise<{ ok: boolean; message?: string }>;
   deleteCategory: (id: number) => Promise<{ ok: boolean; message?: string }>;
@@ -223,6 +245,7 @@ function readWallets(): Wallet[] {
 }
 
 const TAG_SEPARATOR = '\u001f';
+const ACTIVITY_LOOKUP_LIMIT = 5000;
 
 function readTags(): TagRecord[] {
   try {
@@ -273,6 +296,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   wallets: [],
   tags: [],
   budgetPlans: [],
+  activity: [],
   categories: [],
   budgets: {},
   isSaving: false,
@@ -343,20 +367,94 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }
   },
 
-  saveBudgetPlan: (id, input) => {
+  saveBudgetPlan: (id, input, options) => {
+    const before = id != null ? get().budgetPlans.find((plan) => plan.id === id) ?? null : null;
     const savedId = saveBudgetPlanDb(expoDb, id, input);
     get().fetchBudgetPlans();
+    if (!options?.skipLog) {
+      const after = get().budgetPlans.find((plan) => plan.id === savedId) ?? null;
+      logActivity(expoDb, { action: id == null ? 'create' : 'update', entity: 'budget', entityId: savedId, before, after, source: options?.source });
+    }
     return savedId;
   },
 
-  deleteBudgetPlan: (id) => {
+  deleteBudgetPlan: (id, options) => {
+    const before = get().budgetPlans.find((plan) => plan.id === id) ?? null;
     deleteBudgetPlanDb(expoDb, id);
     get().fetchBudgetPlans();
+    if (!options?.skipLog) logActivity(expoDb, { action: 'delete', entity: 'budget', entityId: id, before, source: options?.source });
   },
 
-  renameTag: (id, name) => {
+  fetchActivity: () => {
+    pruneActivity(expoDb);
+    set({ activity: readActivity(expoDb) });
+  },
+
+  undoActivity: async (activityId) => {
+    const entry = readActivity(expoDb, ACTIVITY_LOOKUP_LIMIT).find((item) => item.id === activityId);
+    if (!entry) return { ok: false, message: 'That change is no longer in the log.' };
+    if (entry.undone) return { ok: false, message: 'Already undone.' };
+    const quiet: LogOptions = { skipLog: true };
+    const before = entry.before as Record<string, any> | null;
+    try {
+      if (entry.entity === 'transaction') {
+        const exists = entry.entityId != null && readTransactionsList().some((t) => t.id === entry.entityId);
+        if (entry.action === 'create') {
+          if (!exists) return { ok: false, message: 'This transaction was already deleted.' };
+          await get().deleteTransaction(entry.entityId as number, quiet);
+        } else if (entry.action === 'delete' && before) {
+          const { id: _oldId, ...input } = before;
+          await get().addTransaction(input as TransactionInput, { skipLog: true });
+        } else if (entry.action === 'update' && before) {
+          if (!exists) return { ok: false, message: 'This transaction was deleted later.' };
+          const { id: _id, ...input } = before;
+          await get().updateTransaction(entry.entityId as number, input as TransactionUpdate, quiet);
+        }
+      } else if (entry.entity === 'budget') {
+        if (entry.action === 'create' && entry.entityId != null) get().deleteBudgetPlan(entry.entityId, quiet);
+        else if (before) {
+          const { id: _id, ...input } = before;
+          get().saveBudgetPlan(entry.action === 'update' ? (entry.entityId as number) : null, input as BudgetPlanInput, quiet);
+        }
+      } else if (entry.entity === 'account') {
+        if (entry.action === 'create' && entry.entityId != null) {
+          const result = get().removeWallet(entry.entityId, quiet);
+          if (!result.ok) return { ok: false, message: result.message };
+          if (result.archived) return { ok: true, message: 'The account has transactions, so it was archived instead.' };
+        } else if (entry.action === 'update' && before && entry.entityId != null) {
+          get().updateWallet(
+            entry.entityId,
+            { name: before.name, type: before.type, initialBalance: before.initialBalance, isActive: before.isActive, currency: before.currency },
+            quiet
+          );
+        } else if (entry.action === 'delete' && before) {
+          get().addWallet({ name: before.name, type: before.type, initialBalance: before.initialBalance, currency: before.currency }, quiet);
+        }
+      } else if (entry.entity === 'tag' && before) {
+        if (entry.action === 'update' && entry.entityId != null) {
+          if (!get().tags.some((t) => t.id === entry.entityId)) return { ok: false, message: 'That tag was merged or deleted.' };
+          get().renameTag(entry.entityId, String(before.name), quiet);
+        } else if (entry.action === 'delete') {
+          expoDb.runSync('INSERT OR IGNORE INTO tags (name, created_at) VALUES (?, ?);', [String(before.name), Date.now()]);
+          const tag = expoDb.getFirstSync<{ id: number }>('SELECT id FROM tags WHERE name = ? COLLATE NOCASE;', [String(before.name)]);
+          for (const txId of (before.transactionIds as number[] | undefined) ?? []) {
+            if (tag) expoDb.runSync('INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?);', [txId, tag.id]);
+          }
+          set((state) => ({ tags: readTags(), transactionsList: readTransactionsList(), dataVersion: state.dataVersion + 1 }));
+        }
+      }
+      markActivityUndone(expoDb, activityId);
+      get().fetchActivity();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  },
+
+  renameTag: (id, name, options) => {
     const [clean] = normalizeTagNames([name]);
     if (!clean) throw new Error('Give the tag a name.');
+    const previous = get().tags.find((t) => t.id === id) ?? null;
     const clash = expoDb.getFirstSync<{ id: number }>('SELECT id FROM tags WHERE name = ? COLLATE NOCASE AND id != ?;', [clean, id]);
     if (clash) {
       // Renaming onto an existing tag merges the two.
@@ -367,12 +465,28 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       expoDb.runSync('UPDATE tags SET name = ? WHERE id = ?;', [clean, id]);
     }
     set((state) => ({ tags: readTags(), transactionsList: readTransactionsList(), dataVersion: state.dataVersion + 1 }));
+    if (!options?.skipLog && previous) {
+      logActivity(expoDb, {
+        action: clash ? 'delete' : 'update',
+        entity: 'tag',
+        entityId: clash ? null : id,
+        before: { name: previous.name },
+        after: { name: clean, mergedInto: clash ? clean : undefined },
+      });
+    }
   },
 
-  deleteTag: (id) => {
+  deleteTag: (id, options) => {
+    const previous = get().tags.find((t) => t.id === id) ?? null;
+    const transactionIds = expoDb
+      .getAllSync<{ transactionId: number }>('SELECT transaction_id AS transactionId FROM transaction_tags WHERE tag_id = ?;', [id])
+      .map((row) => row.transactionId);
     expoDb.runSync('DELETE FROM transaction_tags WHERE tag_id = ?;', [id]);
     expoDb.runSync('DELETE FROM tags WHERE id = ?;', [id]);
     set((state) => ({ tags: readTags(), transactionsList: readTransactionsList(), dataVersion: state.dataVersion + 1 }));
+    if (!options?.skipLog && previous) {
+      logActivity(expoDb, { action: 'delete', entity: 'tag', entityId: id, before: { name: previous.name, transactionIds } });
+    }
   },
 
   fetchWallets: () => {
@@ -387,7 +501,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }
   },
 
-  addWallet: ({ name, type, initialBalance, currency }) => {
+  addWallet: ({ name, type, initialBalance, currency }, options) => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Give the account a name.');
     const result = expoDb.runSync(
@@ -395,10 +509,14 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       [trimmed, type, Number.isFinite(initialBalance) ? initialBalance : 0, normalizeCurrencyCode(currency)],
     );
     get().fetchWallets();
-    return Number(result.lastInsertRowId);
+    const newId = Number(result.lastInsertRowId);
+    if (!options?.skipLog) {
+      logActivity(expoDb, { action: 'create', entity: 'account', entityId: newId, after: get().wallets.find((w) => w.id === newId) ?? null });
+    }
+    return newId;
   },
 
-  updateWallet: (id, input) => {
+  updateWallet: (id, input, options) => {
     const current = get().wallets.find((wallet) => wallet.id === id);
     if (!current) return;
     if (input.isActive === false && get().wallets.filter((w) => w.isActive).length <= 1 && current.isActive) {
@@ -424,9 +542,12 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       id,
     ]);
     get().fetchWallets();
+    if (!options?.skipLog) {
+      logActivity(expoDb, { action: 'update', entity: 'account', entityId: id, before: current, after: get().wallets.find((w) => w.id === id) ?? null });
+    }
   },
 
-  removeWallet: (id) => {
+  removeWallet: (id, options) => {
     const wallet = get().wallets.find((item) => item.id === id);
     if (!wallet) return { ok: false, message: 'Account not found.' };
     if (wallet.isActive && get().wallets.filter((w) => w.isActive).length <= 1) {
@@ -440,10 +561,14 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     if ((used?.n ?? 0) > 0 || id === DEFAULT_WALLET_ID) {
       expoDb.runSync('UPDATE wallets SET is_active = 0 WHERE id = ?;', [id]);
       get().fetchWallets();
+      if (!options?.skipLog) {
+        logActivity(expoDb, { action: 'update', entity: 'account', entityId: id, before: wallet, after: { ...wallet, isActive: false } });
+      }
       return { ok: true, archived: true };
     }
     expoDb.runSync('DELETE FROM wallets WHERE id = ?;', [id]);
     get().fetchWallets();
+    if (!options?.skipLog) logActivity(expoDb, { action: 'delete', entity: 'account', entityId: id, before: wallet });
     return { ok: true };
   },
 
@@ -689,6 +814,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       if (insertedId != null && tagNames.length > 0) {
         writeTransactionTags(insertedId, tagNames);
       }
+      if (insertedId != null && !options?.skipLog) {
+        logActivity(expoDb, {
+          action: 'create',
+          entity: 'transaction',
+          entityId: insertedId,
+          source: options?.source ?? (options?.skipRefresh ? 'recurring' : null),
+          after: { ...normalizedTx, id: insertedId, category: finalCategory, walletId: accounts.walletId, toWalletId: accounts.toWalletId },
+        });
+      }
 
       if (options?.skipRefresh) {
         set((state) => ({
@@ -743,7 +877,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }
   },
 
-  updateTransaction: async (id, tx) => {
+  updateTransaction: async (id, tx, options) => {
     set({ isSaving: true });
     try {
       const normalizedTx = normalizeTransactionInput(tx as TransactionInput);
@@ -815,6 +949,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
       });
 
+      const beforeSnapshot = existingTransaction ?? readTransactionsList().find((item) => item.id === id) ?? null;
       const nextTags = tx.tags !== undefined ? normalizeTagNames(tx.tags) : null;
       if (nextTags) {
         writeTransactionTags(id, nextTags);
@@ -876,6 +1011,16 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           dataVersion: state.dataVersion + 1,
         }));
       }
+      if (!options?.skipLog) {
+        logActivity(expoDb, {
+          action: 'update',
+          entity: 'transaction',
+          entityId: id,
+          source: options?.source,
+          before: beforeSnapshot,
+          after: get().transactionsList.find((item) => item.id === id) ?? null,
+        });
+      }
     } catch (error) {
       console.error('Failed to update transaction:', error);
       set({ error: error instanceof Error ? error.message : String(error), isSaving: false });
@@ -883,13 +1028,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     }
   },
 
-  deleteTransaction: async (id) => {
+  deleteTransaction: async (id, options) => {
     try {
+      const beforeSnapshot = get().transactionsList.find((item) => item.id === id) ?? readTransactionsList().find((item) => item.id === id) ?? null;
       await db.transaction(async (tx) => {
         await tx.delete(transactionItems).where(eq(transactionItems.transactionId, id));
         await tx.delete(transactions).where(eq(transactions.id, id));
       });
       expoDb.runSync('DELETE FROM transaction_tags WHERE transaction_id = ?;', [id]);
+      if (!options?.skipLog && beforeSnapshot) {
+        logActivity(expoDb, { action: 'delete', entity: 'transaction', entityId: id, before: beforeSnapshot, source: options?.source });
+      }
       const nextWallets = readWalletsSafe(get().wallets);
       set((state) => ({
         transactionsList: state.transactionsList.filter((item) => item.id !== id),
@@ -949,7 +1098,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           await get().addCategory(normalizedCategoryName, categoryType);
         }
 
-        await get().addTransaction(tx, { skipRefresh: true });
+        await get().addTransaction(tx, { skipRefresh: true, skipLog: true });
       }
       await get().fetchTransactions();
       await get().fetchBudgets();

@@ -41,7 +41,8 @@ import type { Transaction, TransactionInput, TransactionType, TransactionUIInput
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
 import { analyzeReceiptImage, RECEIPT_SCAN_CANCELLED, type ParsedReceiptResult } from '../services/ai/agent';
-import { getUnrealisticDateWarning } from '../features/transactions/dateSanity';
+import { describeDateDistance, getUnrealisticDateWarning, isFarFromToday } from '../features/transactions/dateSanity';
+import type { ActivitySource } from '../features/activity/activityLog';
 import { walletCurrencyOf } from '../features/currency/currencies';
 import {
   CurrencyConversionError,
@@ -154,6 +155,10 @@ export const AddTransactionScreen = () => {
   const fromCurrency = walletCurrencyOf(fromWallet, currencyCode);
   const toCurrency = walletCurrencyOf(toWallet, currencyCode);
   const [entryCurrency, setEntryCurrency] = useState<string | null>(null);
+  // Where this entry came from, for the activity log ('scan', 'template'); Receipt Inbox entries are 'receipt'.
+  const entrySourceRef = useRef<ActivitySource | undefined>(undefined);
+  // The date read from a scanned receipt, until the user picks another date.
+  const [scannedDateMs, setScannedDateMs] = useState<number | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const knownTags = useTransactionStore((s) => s.tags);
   const tagSuggestions = useMemo(() => (knownTags ?? []).map((t) => t.name), [knownTags]);
@@ -326,6 +331,8 @@ export const AddTransactionScreen = () => {
     setWalletId(null);
     setToWalletId(null);
     setEntryCurrency(null);
+    entrySourceRef.current = undefined;
+    setScannedDateMs(null);
     setTags([]);
     setRateText('');
     setRateSource(null);
@@ -483,9 +490,13 @@ export const AddTransactionScreen = () => {
       setParsedLineItems(parsedData.lineItemsText);
       setDetailsMode(note ? 'both' : 'receipt');
     }
+    entrySourceRef.current = 'scan';
     if (parsedData.date) {
       const parsedDate = new Date(parsedData.date);
-      if (!isNaN(parsedDate.getTime())) setSelectedDate(parsedDate);
+      if (!isNaN(parsedDate.getTime())) {
+        setSelectedDate(parsedDate);
+        setScannedDateMs(parsedDate.getTime());
+      }
     }
   };
 
@@ -568,7 +579,10 @@ export const AddTransactionScreen = () => {
 
   const onDateChange = (_event: unknown, date?: Date) => {
     setShowPicker(false);
-    if (date) setSelectedDate(date);
+    if (date) {
+      setSelectedDate(date);
+      setScannedDateMs(null);
+    }
   };
 
   const handleAmountChange = (text: string) => {
@@ -874,7 +888,7 @@ export const AddTransactionScreen = () => {
 
   const handleSave = () => saveTransaction();
 
-  const saveTransaction = async (skipDateCheck = false) => {
+  const saveTransaction = async (skipDateCheck = false, dateOverride?: Date) => {
     let hasValidationError = false;
 
     if (type === 'transfer') {
@@ -920,8 +934,9 @@ export const AddTransactionScreen = () => {
 
     // Warn before saving an implausible date (e.g. a scanned 07-07-97 tax date read as 2097),
     // unless an edited transaction keeps the date it already had.
-    const keepsOriginalDate = Boolean(editingId && originalEditedTxRef.current?.date === selectedDate.getTime());
-    const dateWarning = skipDateCheck || keepsOriginalDate ? null : getUnrealisticDateWarning(selectedDate);
+    const effectiveDate = dateOverride ?? selectedDate;
+    const keepsOriginalDate = Boolean(editingId && originalEditedTxRef.current?.date === effectiveDate.getTime());
+    const dateWarning = skipDateCheck || keepsOriginalDate ? null : getUnrealisticDateWarning(effectiveDate);
     if (dateWarning) {
       const dateLabel = selectedDate.toLocaleDateString(dateFormat || 'en-GB', {
         day: 'numeric',
@@ -932,6 +947,31 @@ export const AddTransactionScreen = () => {
         { text: 'Change date', style: 'cancel', onPress: () => openPicker('date') },
         {
           text: 'Save anyway',
+          onPress: () => {
+            void saveTransaction(true);
+          },
+        },
+      ]);
+      return;
+    }
+
+    // A receipt date far from today is usually a misread year or day ("2025" for "2026"): confirm it once.
+    const scannedDateFar =
+      !skipDateCheck && scannedDateMs != null && effectiveDate.getTime() === scannedDateMs && isFarFromToday(effectiveDate);
+    if (scannedDateFar) {
+      const dateLabel = effectiveDate.toLocaleDateString(dateFormat || 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+      Alert.alert('Check the receipt date', `The receipt was read as ${dateLabel}, ${describeDateDistance(effectiveDate)}. Is that right?`, [
+        {
+          text: 'Use today',
+          onPress: () => {
+            const today = new Date();
+            setSelectedDate(today);
+            setScannedDateMs(null);
+            void saveTransaction(true, today);
+          },
+        },
+        {
+          text: `Keep ${dateLabel}`,
           onPress: () => {
             void saveTransaction(true);
           },
@@ -959,7 +999,7 @@ export const AddTransactionScreen = () => {
       // Picked/scanned photos live in cache folders Android may clear; keep a permanent copy.
       const storedImage = await persistReceiptImage(imageUri);
       if (storedImage !== imageUri) setImageUri(storedImage);
-      const data = buildTransactionPayload(resolvedCategory, storedImage);
+      const data = { ...buildTransactionPayload(resolvedCategory, storedImage), date: effectiveDate.getTime() };
 
       if (editingId) {
         await updateTransaction(editingId, data);
@@ -989,7 +1029,8 @@ export const AddTransactionScreen = () => {
           createRecurringRule(data, repeat, data.date);
         }
       } else {
-        const newTransactionId = await addTransaction(data);
+        const source = receiptQueueId ? 'receipt' : entrySourceRef.current;
+        const newTransactionId = source ? await addTransaction(data, { source }) : await addTransaction(data);
         if (repeat) {
           createRecurringRule(data, repeat, data.date);
         }
@@ -1088,6 +1129,7 @@ export const AddTransactionScreen = () => {
       : typeof initialDate === 'number' && Number.isFinite(initialDate)
         ? new Date(initialDate)
         : new Date();
+    entrySourceRef.current = 'template';
     populateFormFromTransaction(
       {
         ...item.template,
@@ -1729,6 +1771,29 @@ export const AddTransactionScreen = () => {
             </View>
           </View>
 
+          {scannedDateMs != null && selectedDate.getTime() === scannedDateMs && isFarFromToday(selectedDate) ? (
+            <View
+              testID="scanned-date-notice"
+              style={[styles.scannedDateNotice, { backgroundColor: theme.primaryMuted, borderColor: theme.warning }]}
+            >
+              <Ionicons name="alert-circle-outline" size={16} color={theme.warning} />
+              <Text style={{ flex: 1, color: theme.text, fontSize: theme.scaleFont(12) }}>
+                Date from the receipt: {selectedDate.toLocaleDateString(dateFormat || 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} (
+                {describeDateDistance(selectedDate)})
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setSelectedDate(new Date());
+                  setScannedDateMs(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Use today's date"
+              >
+                <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '700' }}>Use today</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
           <View style={styles.inputGroupCompact}>
             <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Tags</Text>
             <TagInput tags={tags} suggestions={tagSuggestions} onChange={setTags} />
@@ -2152,6 +2217,7 @@ const styles = StyleSheet.create({
   amountTextInput: { flex: 1, minHeight: 44, paddingVertical: 0, marginRight: 4 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
   inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
+  scannedDateNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 12 },
   fxPanel: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8, marginBottom: 12 },
   fxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fxRowLabel: { marginBottom: 0, minWidth: 96 },
