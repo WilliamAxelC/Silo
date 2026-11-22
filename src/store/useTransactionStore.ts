@@ -473,8 +473,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const expenseCategoryNames = new Set(get().categories.filter((category) => category.type === 'expense').map((category) => category.name));
       const allRows = await db.select().from(budgets);
       const filteredRows = allRows.filter((row) => expenseCategoryNames.has(row.category));
+      let budgetPlans = get().budgetPlans;
+      try {
+        budgetPlans = readBudgetPlans(expoDb);
+      } catch (planError) {
+        console.warn('Failed to read budgets:', planError);
+      }
       set((state) => ({
         budgets: normalizeBudgetMap(filteredRows),
+        budgetPlans,
         hasLoadedBudgets: true,
         budgetsDirty: false,
         dataVersion: state.dataVersion + 1,

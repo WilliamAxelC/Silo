@@ -3,6 +3,9 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { expoDb } from '../../db/index';
 import { getModelLifecycleManager, isActiveModelInstalled } from './modelLifecycle';
 import { getOcrEngine } from '../ocr/index';
+import { computeBudgetStatus, type BudgetDb, type BudgetPlan } from '../../features/budgets/engine';
+import { readBudgetPlans } from '../../features/budgets/plans';
+import { getCachedRate } from '../fx/rates';
 import { normalizeReceiptImage } from '../ocr/normalizeImage';
 import type { OcrResult } from '../ocr/types';
 import { inferReceiptCategory, reconstructMultiColumnOcrText } from '../ocr/MlKitEngine';
@@ -729,6 +732,17 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function readGroundedBudgetPlans(db: GroundedSqliteDb): BudgetPlan[] {
+  try {
+    return readBudgetPlans({
+      getAllSync: <T,>(sql: string, params: (string | number | null)[]) => safeQuery<T>(db, sql, params),
+      runSync: () => ({ lastInsertRowId: 0, changes: 0 }),
+    }).filter((plan) => !plan.archived);
+  } catch {
+    return [];
+  }
+}
+
 function safeQuery<T>(db: GroundedSqliteDb, sql: string, params?: any[]): T[] {
   try {
     const rows = params && params.length > 0 ? db.getAllSync<T>(sql, params) : db.getAllSync<T>(sql);
@@ -1068,11 +1082,7 @@ function loadUserCategories(db: GroundedSqliteDb): StoredCategory[] {
     txCatRows.forEach((row) => add(row.category, row.type));
   }
 
-  const budgetCatRows = safeQuery<{ category?: string }>(
-    db,
-    `SELECT DISTINCT category FROM budgets WHERE category IS NOT NULL AND TRIM(category) != ''`,
-  );
-  budgetCatRows.forEach((row) => add(row.category, 'expense'));
+  readGroundedBudgetPlans(db).forEach((plan) => plan.categories.forEach((category) => add(category, 'expense')));
 
   return Array.from(seen.values());
 }
@@ -1809,37 +1819,44 @@ export function buildRetrievedContext(
     const budgetFromMs = usePeriodForBudgets ? period.fromMs : currentBillingMonth.fromMs;
     const budgetToMs = usePeriodForBudgets ? period.toMs : currentBillingMonth.toMs;
     const budgetPeriodLabel = usePeriodForBudgets ? period.label : currentBillingMonth.label;
-    const budgetParams: any[] = account !== null ? [budgetFromMs, budgetToMs, account.id] : [budgetFromMs, budgetToMs];
 
-    const budgetRows = safeQuery<{
-      category?: string;
-      limit_amount?: number | null;
-      spent?: number | null;
-    }>(
-      db,
-      `SELECT
-         b.category,
-         b.limit_amount,
-         COALESCE((
-           SELECT SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END)
-           FROM transactions t
-           JOIN transaction_items i ON t.id = i.transaction_id
-           WHERE t.type != 'transfer'
-             AND t.total_amount < 0
-             AND LOWER(i.category) = LOWER(b.category)
-             AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
-         ), 0) AS spent
-       FROM budgets b
-       WHERE b.limit_amount > 0
-       ORDER BY b.category ASC`,
-      budgetParams,
-    );
+    // General budgets (features/budgets/engine.ts): status for the period containing the asked-about date.
+    const budgetAt = usePeriodForBudgets ? budgetToMs - 1 : now.getTime();
+    const homeCode = currentCurrencyCode();
+    const budgetRows = readGroundedBudgetPlans(db)
+      .filter((plan) => account === null || plan.walletIds.length === 0 || plan.walletIds.includes(account.id))
+      .map((plan) => {
+        try {
+          const status = computeBudgetStatus(
+            db as unknown as BudgetDb,
+            plan,
+            homeCode,
+            budgetAt,
+            (code) => getCachedRate(code, homeCode)?.rate ?? null,
+          );
+          if (status.ended && plan.kind === 'once' && budgetAt >= status.periodEnd) return null;
+          return {
+            category: plan.name,
+            categories: plan.categories,
+            currency: status.currency,
+            limit_amount: status.available,
+            spent: status.spent,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null && row.limit_amount > 0);
 
     if (budgetRows.length > 0) {
       const namedCatSet = new Set(parsed.categories.map((c) => c.name.toLowerCase()));
       const matchingCategoryBudgets =
         namedCatSet.size > 0
-          ? budgetRows.filter((row) => row.category && namedCatSet.has(row.category.toLowerCase()))
+          ? budgetRows.filter(
+              (row) =>
+                (row.category && namedCatSet.has(row.category.toLowerCase())) ||
+                row.categories.some((c) => namedCatSet.has(c.toLowerCase())),
+            )
           : [];
       matchedAllNamedCategoryBudgets =
         namedCatSet.size > 0 && matchingCategoryBudgets.length === namedCatSet.size;
@@ -1847,15 +1864,16 @@ export function buildRetrievedContext(
       // Scope to named category budgets when matching budgets exist; otherwise show all configured budgets.
       const rowsToEmit = matchingCategoryBudgets.length > 0 ? matchingCategoryBudgets : budgetRows;
 
-      const formatBudgetRow = (row: { category?: string; limit_amount?: number | null; spent?: number | null }) => {
+      const formatBudgetRow = (row: { category?: string; currency?: string; limit_amount?: number | null; spent?: number | null }) => {
         const limit = Number(row.limit_amount ?? 0) || 0;
         const spent = Number(row.spent ?? 0) || 0;
         const remaining = limit - spent;
-        const remText =
-          remaining >= 0
-            ? `remaining ${formatCurrency(remaining)}`
-            : `over by ${formatCurrency(Math.abs(remaining))}`;
-        return `${row.category}: limit ${formatCurrency(limit)}, spent ${formatCurrency(spent)}, ${remText}`;
+        const fmt = (n: number) =>
+          row.currency && row.currency !== currentCurrencyCode()
+            ? formatDisplayCurrency(n, row.currency)
+            : formatCurrency(n);
+        const remText = remaining >= 0 ? `remaining ${fmt(remaining)}` : `over by ${fmt(Math.abs(remaining))}`;
+        return `${row.category}: limit ${fmt(limit)}, spent ${fmt(spent)}, ${remText}`;
       };
 
       const accountPart = account ? `, Account: ${account.name}` : '';
@@ -1896,7 +1914,7 @@ export function buildRetrievedContext(
         id: 'budgets-none',
         kind: 'budget',
         label: 'Budgets',
-        content: `Budgets: 0 budgets configured for ${budgetPeriodLabel} (you have not set any monthly budget limits yet).`,
+        content: `Budgets: 0 budgets configured for ${budgetPeriodLabel} (you have not set up any budgets yet).`,
         score: 955,
       });
     }

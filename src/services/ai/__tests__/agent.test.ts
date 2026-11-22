@@ -433,8 +433,8 @@ describe('AI Agent & Context Engine', () => {
       testDb.runSync("INSERT INTO wallets (id, name, type, is_active, initial_balance) VALUES (2, 'Bank BCA', 'bank', 1, 2000000);");
 
       // Budgets for November: Food & Dining (1,500,000), Transport (300,000)
-      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Food & Dining', 1500000, 'monthly', 1);");
-      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Transport', 300000, 'monthly', 1);");
+      testDb.runSync("INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Food & Dining', 1500000, 'recurring', " + new Date(2020, 0, 1).getTime() + ", 1, 'month', 'reset', '[\"Food & Dining\"]', 1);");
+      testDb.runSync("INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Transport', 300000, 'recurring', " + new Date(2020, 0, 1).getTime() + ", 1, 'month', 'reset', '[\"Transport\"]', 1);");
 
       // === Current month (Nov 2026) ===
       // Nov 1: Salary income +5,000,000 into Bank BCA
@@ -690,6 +690,7 @@ describe('AI Agent & Context Engine', () => {
 
       // Empty budgets table + asking about budgets
       testDb.runSync('DELETE FROM budgets;');
+      testDb.runSync('DELETE FROM budget_plans;');
       const noBudgetItems = buildRetrievedContext('How much budget do I have left?', { db: testDb, now: NOW });
       const noBudgetText = joinFacts(noBudgetItems);
       expect(noBudgetText).toContain('Budgets: 0 budgets configured');
@@ -1081,9 +1082,9 @@ describe('AI Agent & Context Engine', () => {
     });
 
     it('R7: preserves all 5 budgets and long single items without 260-char truncation', () => {
-      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Groceries', 800000, 'monthly', 1);");
-      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Bills', 2000000, 'monthly', 1);");
-      testDb.runSync("INSERT INTO budgets (category, limit_amount, period, wallet_id) VALUES ('Entertainment', 500000, 'monthly', 1);");
+      testDb.runSync("INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Groceries', 800000, 'recurring', " + new Date(2020, 0, 1).getTime() + ", 1, 'month', 'reset', '[\"Groceries\"]', 1);");
+      testDb.runSync("INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Bills', 2000000, 'recurring', " + new Date(2020, 0, 1).getTime() + ", 1, 'month', 'reset', '[\"Bills\"]', 1);");
+      testDb.runSync("INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Entertainment', 500000, 'recurring', " + new Date(2020, 0, 1).getTime() + ", 1, 'month', 'reset', '[\"Entertainment\"]', 1);");
 
       const budgetItems = buildRetrievedContext('How much budget do I have left?', { db: testDb, now: NOW });
       const compact = buildCompactContextBlock(budgetItems, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
