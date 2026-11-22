@@ -9,6 +9,8 @@ export interface OcrResult {
   extractedLineItems?: string | null;
   success: boolean;
   error?: string;
+  /** Clockwise degrees the image needs to read upright, from the text direction (undefined: unknown). */
+  uprightRotation?: 0 | 90 | 180 | 270;
 }
 
 export interface IOcrEngine {

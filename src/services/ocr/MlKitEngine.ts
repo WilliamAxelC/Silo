@@ -3,6 +3,7 @@ import type { TextRecognitionResult } from '@react-native-ml-kit/text-recognitio
 import { IOcrEngine, OcrResult } from './types';
 import {
   buildReceiptRows,
+  detectUprightRotation,
   extractAmounts,
   extractReceiptDate,
   isNonItemLine,
@@ -353,6 +354,7 @@ export function buildOcrResultFromLines(lines: OcrLine[], fallbackText: string):
     extractedCategory: parsed.extractedCategory,
     extractedLineItems: parsed.extractedLineItems,
     success: true,
+    uprightRotation: detectUprightRotation(lines),
   };
 }
 
@@ -373,6 +375,7 @@ function extractLinesFromMlKitResult(result: TextRecognitionResult): OcrLine[] {
                 height: line.frame.height,
               }
             : undefined,
+          cornerPoints: Array.isArray(line.cornerPoints) ? line.cornerPoints : undefined,
         });
       }
     }

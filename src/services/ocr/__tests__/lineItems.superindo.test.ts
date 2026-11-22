@@ -70,3 +70,13 @@ describe('Super Indo receipt line items', () => {
     ]);
   });
 });
+
+describe('receipt id and cashier rows', () => {
+  it('are never items, and long ID numbers are not amounts', () => {
+    const { extractAmounts, isNonItemLine } = jest.requireActual('../receiptText');
+    expect(isNonItemLine('Bon 6A5Q-555-020928K8 Kasir : AHMAD NI')).toBe(true);
+    expect(isNonItemLine('Kasir: SITI 12.000')).toBe(true);
+    expect(isNonItemLine('LW S CARB TRFLE 1 15,000 15,000')).toBe(false);
+    expect(extractAmounts('NPWP: 845037704416000 total 13,000')).toEqual([13000]);
+  });
+});

@@ -3026,10 +3026,8 @@ function ocrResultScore(result: OcrResult): number {
  * shadows, colour casts or low contrast), and also reads the original when the scan finds no total,
  * keeping whichever read looks more like a receipt. Without the native normalizer, reads the original.
  */
-/** A read with a total and at least two priced rows: good enough that the photo is clearly upright. */
+/** A read with a total and at least two priced rows. */
 const UPRIGHT_SCORE = 1020;
-/** How much better a turned photo must read before it replaces the original orientation. */
-const ROTATION_MARGIN = 20;
 
 export interface RecognizedReceipt extends OcrResult {
   /** Clockwise degrees the photo had to be turned to read upright (0 when it already was). */
@@ -3049,34 +3047,21 @@ async function rotateImage(uri: string, degrees: number): Promise<string | null>
 }
 
 /**
- * Receipts photographed sideways or upside down read as garbage. When a read isn't clearly upright,
- * reads the image turned 90, 270 and 180 degrees and keeps the orientation that reads clearly best.
+ * Receipts photographed sideways or upside down: when the OCR's text direction says the photo is turned,
+ * reads it once more turned upright (OCR on a turned photo jumbles the row order even when words are read).
  */
 async function readUpright(
   engine: ReturnType<typeof getOcrEngine>,
   uri: string,
   first: OcrResult,
 ): Promise<RecognizedReceipt> {
-  const firstScore = ocrResultScore(first);
-  if (first.success && firstScore >= UPRIGHT_SCORE) return { ...first, rotation: 0 };
-  let best: { result: OcrResult; score: number; rotation: 0 | 90 | 180 | 270; uri?: string } = {
-    result: first,
-    score: firstScore,
-    rotation: 0,
-  };
-  for (const degrees of [90, 270, 180] as const) {
-    const rotatedUri = await rotateImage(uri, degrees);
-    if (!rotatedUri) continue;
-    const result = await engine.processImage(rotatedUri).catch(() => null);
-    if (!result) continue;
-    const score = ocrResultScore(result);
-    if (score > best.score) best = { result, score, rotation: degrees, uri: rotatedUri };
-    if (score >= UPRIGHT_SCORE) break;
-  }
-  if (best.rotation !== 0 && best.score >= firstScore + ROTATION_MARGIN) {
-    return { ...best.result, rotation: best.rotation, uprightReadUri: best.uri };
-  }
-  return { ...first, rotation: 0 };
+  const rotation = first.uprightRotation;
+  if (!first.success || !rotation) return { ...first, rotation: 0 };
+  const rotatedUri = await rotateImage(uri, rotation);
+  if (!rotatedUri) return { ...first, rotation: 0 };
+  const upright = await engine.processImage(rotatedUri).catch(() => null);
+  if (!upright?.success) return { ...first, rotation: 0 };
+  return { ...upright, rotation, uprightReadUri: rotatedUri };
 }
 
 export async function recognizeReceiptText(
@@ -3091,7 +3076,7 @@ export async function recognizeReceiptText(
   }
 
   const normalized = await engine.processImage(normalizedUri);
-  if (normalized.success && normalized.extractedTotal && ocrResultScore(normalized) >= UPRIGHT_SCORE) {
+  if (normalized.success && normalized.extractedTotal && ocrResultScore(normalized) >= UPRIGHT_SCORE && !normalized.uprightRotation) {
     return { ...normalized, rotation: 0 };
   }
   const original = await engine.processImage(imageUri);

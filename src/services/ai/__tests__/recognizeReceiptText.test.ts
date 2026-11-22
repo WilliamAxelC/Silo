@@ -68,28 +68,24 @@ describe('recognizeReceiptText (black-and-white normalization for gallery photos
     expect(mockProcessImage).toHaveBeenCalledWith('file:///photo.jpg');
   });
 
-  it('turns a sideways receipt upright when that reads clearly better, and says how far it turned', async () => {
+  it('turns a sideways or upside-down receipt upright using the text direction, and re-reads it once', async () => {
     mockNormalize.mockResolvedValue(null);
     mockProcessImage.mockImplementation(async (uri: string) =>
-      uri.endsWith('#rot270') ? goodRead : read(['l1', 'i1I', 'TO'], null),
+      uri.endsWith('#rot180') ? goodRead : { ...goodRead, rawText: 'jumbled', uprightRotation: 180 },
     );
-    const result = await recognizeReceiptText('file:///sideways.jpg');
-    expect(result.rotation).toBe(270);
-    expect(result.uprightReadUri).toBe('file:///sideways.jpg#rot270');
-    expect(result.extractedTotal).toBe(7500);
-    expect(mockRotate.mock.calls.map((c) => c[1][0].rotate)).toEqual([90, 270]);
+    const result = await recognizeReceiptText('file:///upside-down.jpg');
+    expect(result.rotation).toBe(180);
+    expect(result.uprightReadUri).toBe('file:///upside-down.jpg#rot180');
+    expect(result.rawText).not.toBe('jumbled');
+    expect(mockRotate).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves upright receipts alone and keeps the original when no turn reads better', async () => {
+  it('leaves receipts alone when the text already reads upright or the direction is unknown', async () => {
     mockNormalize.mockResolvedValue(null);
-    mockProcessImage.mockResolvedValueOnce(goodRead);
+    mockProcessImage.mockResolvedValueOnce({ ...goodRead, uprightRotation: 0 });
     expect((await recognizeReceiptText('file:///upright.jpg')).rotation).toBe(0);
+    mockProcessImage.mockResolvedValueOnce(read(['blurry'], null));
+    expect((await recognizeReceiptText('file:///blurry.jpg')).rotation).toBe(0);
     expect(mockRotate).not.toHaveBeenCalled();
-
-    mockProcessImage.mockReset();
-    mockProcessImage.mockResolvedValue(read(['blurry'], null));
-    const blurry = await recognizeReceiptText('file:///blurry.jpg');
-    expect(blurry.rotation).toBe(0);
-    expect(mockRotate).toHaveBeenCalledTimes(3);
   });
 });

@@ -8,6 +8,32 @@ export interface OcrLine {
     width: number;
     height: number;
   };
+  /** ML Kit corner points in reading order: top-left, top-right, bottom-right, bottom-left of the text. */
+  cornerPoints?: ReadonlyArray<{ x: number; y: number }>;
+}
+
+/**
+ * Clockwise degrees to turn the image so its text reads upright, from the reading direction of the
+ * recognized lines (ML Kit corner points go top-left -> top-right along the text, whatever the photo's
+ * orientation). Longer lines count more. Undefined when there is too little text to tell.
+ */
+export function detectUprightRotation(lines: OcrLine[]): 0 | 90 | 180 | 270 | undefined {
+  const votes = { 0: 0, 90: 0, 180: 0, 270: 0 };
+  let total = 0;
+  for (const line of lines) {
+    const points = line.cornerPoints;
+    const weight = line.text.replace(/\s/g, '').length;
+    if (!points || points.length < 2 || weight < 3) continue;
+    const angle = (Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x) * 180) / Math.PI;
+    // Text reading downward means the photo is turned 90 degrees clockwise, so it needs 270 more to be upright.
+    const bucket = angle > -45 && angle <= 45 ? 0 : angle > 45 && angle <= 135 ? 270 : angle < -45 && angle >= -135 ? 90 : 180;
+    votes[bucket] += weight;
+    total += weight;
+  }
+  if (total < 20) return undefined;
+  const [best, weight] = (Object.entries(votes) as Array<[string, number]>).sort((a, b) => b[1] - a[1])[0];
+  // Only act on a clear majority.
+  return weight / total >= 0.6 ? (Number(best) as 0 | 90 | 180 | 270) : undefined;
 }
 
 interface FramedLine {
@@ -64,6 +90,8 @@ const METADATA_LINE_PREFIX_REGEX =
 // Indonesian phone numbers in footers/headers (e.g. "0800 140 3210", "WHATSAPP: 0812 1313 7035", "+62 21 555 0123").
 // Prices never start with a 0 digit group, so a 0/+62-prefixed group followed by 1-3 more digit groups is a phone number.
 const PHONE_NUMBER_REGEX = /(?:^|[\s:(])(?:\+62|0)\d{1,4}(?:[\s.-]\d{2,5}){1,3}(?=$|[\s),])/;
+// Cashier / receipt-number rows anywhere in the line ("Bon 6A5Q-555-020928K8 Kasir : AHMAD").
+const RECEIPT_ID_LINE_REGEX = /\b(?:kasir|cashier|operator|no\.?\s*(?:struk|bon|trans(?:aksi)?))\b|\b[A-Z0-9]{3,}-[A-Z0-9]{2,}-[A-Z0-9]{4,}\b/i;
 const CONTACT_LINE_REGEX = /\b(?:whats\s*app|bebas\s*pulsa|hotline|call\s*only|sms\s*only)\b/i;
 
 // Unambiguous multi-word receipt footers and tax/legal disclaimers (safe for item filtering).
@@ -224,6 +252,7 @@ export function isNonItemLine(text: string): boolean {
     PAYMENT_PREFIX_REGEX.test(trimmed) ||
     RECEIPT_DISCLAIMER_REGEX.test(trimmed) ||
     CONTACT_LINE_REGEX.test(trimmed) ||
+    RECEIPT_ID_LINE_REGEX.test(trimmed) ||
     PHONE_NUMBER_REGEX.test(trimmed)
   ) {
     return true;
@@ -459,7 +488,8 @@ export function extractAmounts(text: string): number[] {
   let match: RegExpExecArray | null;
   while ((match = AMOUNT_TOKEN_REGEX.exec(sanitized)) !== null) {
     const token = match[1];
-    if (!token || /^0\d/.test(token)) {
+    // Leading zeros are codes/phone numbers; 12+ unbroken digits are IDs (NPWP, card, reference), not money.
+    if (!token || /^0\d/.test(token) || /^\d{12,}$/.test(token)) {
       continue;
     }
     const parsed = Math.round(Math.abs(parseSignedAmount(token)));
