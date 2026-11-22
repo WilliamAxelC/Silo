@@ -52,6 +52,7 @@ import { NavigationProps } from '../navigation/types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
+import { CurrencyChangeModal } from '../components/CurrencyChangeModal';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider, WeekStartDay } from '../features/transactions/types';
 import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
@@ -424,11 +425,18 @@ export const SettingsScreen = () => {
     }
   };
 
+  const [pendingCurrency, setPendingCurrency] = useState<string | null>(null);
+
   const handleCurrencySelect = (nextCurrency: string) => {
     if (nextCurrency === currencyCode) return;
+    // With history, switching converts totals while every past amount keeps its real currency.
+    if (transactionsList.length > 0 || wallets.some((w) => w.currency)) {
+      setPendingCurrency(nextCurrency);
+      return;
+    }
     Alert.alert(
       'Change display currency?',
-      `Switching from ${currencyCode} to ${nextCurrency} changes the currency label and formatting only. Existing amounts will not be converted.`,
+      `You have no transactions yet, so amounts will simply show in ${nextCurrency}.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -2363,6 +2371,13 @@ export const SettingsScreen = () => {
           </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
+      {pendingCurrency ? (
+        <CurrencyChangeModal
+          fromCurrency={currencyCode}
+          toCurrency={pendingCurrency}
+          onClose={() => setPendingCurrency(null)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 };

@@ -14,6 +14,13 @@ import * as notificationService from '../../services/notifications';
 
 const ReactTestRenderer = require('react-test-renderer');
 
+jest.mock('../../services/fx/rates', () => ({
+  getDailyRate: jest.fn(async () => ({ rate: 0.0000625, date: '2026-11-22' })),
+  getCachedRate: jest.fn(() => null),
+  refreshDailyRates: jest.fn(async () => null),
+  walletHomeRate: jest.fn(() => 1),
+}));
+
 jest.mock('@react-native-community/datetimepicker', () => 'DateTimePicker');
 
 jest.mock('../../db/index', () => ({
@@ -733,9 +740,10 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     alertSpy.mockRestore();
   });
 
-  it('warns before changing display currency that existing amounts will not be converted (F-11)', async () => {
+  it('confirms before changing currency when there is no history yet (F-11)', async () => {
     ReactTestRenderer.act(() => {
       useSettingsStore.setState({ currencyCode: 'IDR' });
+      useTransactionStore.setState({ transactionsList: [], wallets: [] } as any);
     });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -750,7 +758,7 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
 
     expect(alertSpy).toHaveBeenCalledWith(
       'Change display currency?',
-      expect.stringContaining('will not be converted'),
+      expect.stringContaining('no transactions yet'),
       expect.any(Array)
     );
     // Currency has NOT changed yet until confirmed
@@ -766,6 +774,29 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     });
     expect(useSettingsStore.getState().currencyCode).toBe('USD');
 
+    alertSpy.mockRestore();
+  });
+
+  it('with history, asks for an exchange rate and keeps past amounts in their currency instead of relabelling', async () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ currencyCode: 'IDR' });
+      useTransactionStore.setState({
+        transactionsList: [{ id: 1, merchantName: 'Lunch', totalAmount: -50000, type: 'expense', category: 'Food & Dining', date: 1 }],
+      } as any);
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'Select USD currency' }).props.onPress();
+    });
+
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(renderer.root.findByProps({ testID: 'currency-change-modal' })).toBeTruthy();
+    // Today's rate is shown in the readable direction: 1 USD = Rp 16.000.
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Exchange rate, IDR per USD' }).props.value).toBe('16000');
+    expect(useSettingsStore.getState().currencyCode).toBe('IDR');
     alertSpy.mockRestore();
   });
 
