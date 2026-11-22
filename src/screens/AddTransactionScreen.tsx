@@ -40,7 +40,8 @@ import { buildEditableTransactionInput } from '../features/transactions/mappers'
 import type { Transaction, TransactionInput, TransactionType, TransactionUIInputMode } from '../features/transactions/types';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
-import { analyzeReceiptImage, type ParsedReceiptResult } from '../services/ai/agent';
+import { analyzeReceiptImage, RECEIPT_SCAN_CANCELLED, type ParsedReceiptResult } from '../services/ai/agent';
+import { getUnrealisticDateWarning } from '../features/transactions/dateSanity';
 import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfidence';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
@@ -155,6 +156,9 @@ export const AddTransactionScreen = () => {
 
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatusLabel, setScanStatusLabel] = useState<string | null>(null);
+  // Lets the user abandon a slow scan; the photo that was attached before the scan is restored.
+  const scanAbortRef = useRef<AbortController | null>(null);
+  const imageBeforeScanRef = useRef<string | null>(null);
   const [calculatorVisible, setCalculatorVisible] = useState(false);
   const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
   const [templateFeedback, setTemplateFeedback] = useState<string | null>(null);
@@ -577,6 +581,10 @@ export const AddTransactionScreen = () => {
   };
 
   const processScanReceipt = async (uri: string, base64String?: string) => {
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+    imageBeforeScanRef.current = imageUri;
     setImageUri(uri);
     setIsScanning(true);
     setScanStatusLabel('Reading text…');
@@ -584,21 +592,28 @@ export const AddTransactionScreen = () => {
     setIsRawTextExpanded(false);
 
     try {
-      const parsedData = await analyzeReceiptImage(uri, base64String ?? undefined, (status: string) => {
-        if (status === 'Reading receipt with AI vision…' || status.includes('vision')) {
-          setScanStatusLabel(status);
-        } else if (
-          status.includes('Structuring') ||
-          status.toLowerCase().includes('understanding') ||
-          status.includes('AI')
-        ) {
-          setScanStatusLabel('Understanding receipt…');
-        } else if (status.includes('OCR') || status.toLowerCase().includes('reading')) {
-          setScanStatusLabel('Reading text…');
-        } else {
-          setScanStatusLabel(status);
-        }
-      });
+      const parsedData = await analyzeReceiptImage(
+        uri,
+        base64String ?? undefined,
+        (status: string) => {
+          if (controller.signal.aborted) return;
+          if (status === 'Reading receipt with AI vision…' || status.includes('vision')) {
+            setScanStatusLabel(status);
+          } else if (
+            status.includes('Structuring') ||
+            status.toLowerCase().includes('understanding') ||
+            status.includes('AI')
+          ) {
+            setScanStatusLabel('Understanding receipt…');
+          } else if (status.includes('OCR') || status.toLowerCase().includes('reading')) {
+            setScanStatusLabel('Reading text…');
+          } else {
+            setScanStatusLabel(status);
+          }
+        },
+        { signal: controller.signal }
+      );
+      if (controller.signal.aborted) return;
 
       if (parsedData) {
         applyScanResult(parsedData);
@@ -608,6 +623,7 @@ export const AddTransactionScreen = () => {
         setScanStatusLabel(null);
       }
     } catch (error: any) {
+      if (controller.signal.aborted || error?.message === RECEIPT_SCAN_CANCELLED) return;
       console.warn('OCR error:', error);
       setScanStatusLabel(null);
       if (error?.message === 'NO_TEXT_DETECTED') {
@@ -619,9 +635,24 @@ export const AddTransactionScreen = () => {
         Alert.alert('Scan Failed', 'Failed to scan the receipt automatically. Please enter details manually.');
       }
     } finally {
-      setIsScanning(false);
+      if (scanAbortRef.current === controller) {
+        scanAbortRef.current = null;
+        setIsScanning(false);
+      }
     }
   };
+
+  const cancelScan = () => {
+    const controller = scanAbortRef.current;
+    if (!controller) return;
+    scanAbortRef.current = null;
+    controller.abort();
+    setIsScanning(false);
+    setScanStatusLabel(null);
+    setImageUri(imageBeforeScanRef.current);
+  };
+
+  useEffect(() => () => scanAbortRef.current?.abort(), []);
 
   const openScanSourceModal = () => {
     setSourceModalTarget('scan');
@@ -663,7 +694,9 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => saveTransaction();
+
+  const saveTransaction = async (skipDateCheck = false) => {
     let hasValidationError = false;
 
     if (type === 'transfer') {
@@ -694,6 +727,28 @@ export const AddTransactionScreen = () => {
     }
 
     if (hasValidationError) {
+      return;
+    }
+
+    // Warn before saving an implausible date (e.g. a scanned 07-07-97 tax date read as 2097),
+    // unless an edited transaction keeps the date it already had.
+    const keepsOriginalDate = Boolean(editingId && originalEditedTxRef.current?.date === selectedDate.getTime());
+    const dateWarning = skipDateCheck || keepsOriginalDate ? null : getUnrealisticDateWarning(selectedDate);
+    if (dateWarning) {
+      const dateLabel = selectedDate.toLocaleDateString(dateFormat || 'en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      Alert.alert('Check the date', `This transaction is dated ${dateLabel}. ${dateWarning} Save it anyway?`, [
+        { text: 'Change date', style: 'cancel', onPress: () => openPicker('date') },
+        {
+          text: 'Save anyway',
+          onPress: () => {
+            void saveTransaction(true);
+          },
+        },
+      ]);
       return;
     }
 
@@ -1036,6 +1091,15 @@ export const AddTransactionScreen = () => {
                   {scanStatusLabel || 'Extracting text and identifying line items...'}
                 </Text>
               </View>
+              <TouchableOpacity
+                onPress={cancelScan}
+                style={[styles.scanCancelButton, { borderColor: theme.primary }]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel scan"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[styles.scanCancelText, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>Cancel</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1713,6 +1777,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   scanSpinner: { marginRight: 10 },
+  scanCancelButton: { marginLeft: 8, paddingHorizontal: 12, minHeight: 36, borderWidth: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  scanCancelText: { fontWeight: '700' },
   scanStatusTextWrap: { flex: 1 },
   scanStatusTitle: { fontSize: 13, fontWeight: '700' },
   scanStatusSub: { fontSize: 12, marginTop: 2 },

@@ -52,6 +52,7 @@ jest.mock('expo-image-picker', () => ({
 
 jest.mock('../../services/ai/agent', () => ({
   analyzeReceiptImage: jest.fn(),
+  RECEIPT_SCAN_CANCELLED: 'SCAN_CANCELLED',
 }));
 
 describe('AddTransactionScreen', () => {
@@ -1225,6 +1226,94 @@ describe('AddTransactionScreen', () => {
     expect(saved.totalAmount).toBe(-23695);
     expect(saved.merchantName).toBe('Super Indo');
     expect(saved.lineItemsText).toBe('Telur Ayam Omega | 23.695 | 0.806 kg');
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('lets the user cancel a slow scan, ignoring its late result and restoring the form', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///slow-scan.jpg' }],
+    });
+    let finishScan: (value: unknown) => void = () => undefined;
+    let scanSignal: AbortSignal | undefined;
+    (analyzeReceiptImage as jest.Mock).mockImplementationOnce((_uri, _b64, _onStatus, options) => {
+      scanSignal = options?.signal;
+      return new Promise((resolve) => {
+        finishScan = resolve;
+      });
+    });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+
+    const cancelBtn = renderer.root.findByProps({ accessibilityLabel: 'Cancel scan' });
+    ReactTestRenderer.act(() => {
+      cancelBtn.props.onPress();
+    });
+    expect(scanSignal?.aborted).toBe(true);
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Cancel scan' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Remove photo' })).toHaveLength(0);
+
+    await ReactTestRenderer.act(async () => {
+      finishScan({ merchantName: 'Late Merchant', totalAmount: 99000, rawText: 'LATE' });
+    });
+    const values = renderer.root
+      .findAllByType(TextInput)
+      .map((node: any) => node.props.value)
+      .filter((v: any) => typeof v === 'string');
+    expect(values).not.toContain('Late Merchant');
+    expect(values).not.toContain('99.000');
+    expect(Alert.alert).not.toHaveBeenCalled();
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('asks before saving an unrealistic date and saves only after "Save anyway"', async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///superindo.jpg' }],
+    });
+    (analyzeReceiptImage as jest.Mock).mockResolvedValueOnce({
+      merchantName: 'Super Indo',
+      totalAmount: 23695,
+      date: '2097-07-07',
+      rawText: 'SUPER INDO',
+    });
+    mockAddTransaction.mockResolvedValue(undefined);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Scan receipt' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Select from gallery' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+    });
+
+    expect(mockAddTransaction).not.toHaveBeenCalled();
+    const call = (Alert.alert as jest.Mock).mock.calls.find((c) => c[0] === 'Check the date');
+    expect(call).toBeDefined();
+    expect(call[1]).toMatch(/2097.*years in the future\. Save it anyway\?/);
+    const buttons = call[2] as Array<{ text: string; onPress?: () => void }>;
+    expect(buttons.map((b) => b.text)).toEqual(['Change date', 'Save anyway']);
+
+    await ReactTestRenderer.act(async () => {
+      buttons[1].onPress?.();
+    });
+    expect(mockAddTransaction).toHaveBeenCalledTimes(1);
+    expect(new Date(mockAddTransaction.mock.calls[0][0].date).getFullYear()).toBe(2097);
     ReactTestRenderer.act(() => renderer.unmount());
   });
 

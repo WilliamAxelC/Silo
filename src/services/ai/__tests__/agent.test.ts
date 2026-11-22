@@ -11,6 +11,7 @@ import {
   parseTimePeriod,
   parseGroundedQuery,
   analyzeReceiptImage,
+  RECEIPT_SCAN_CANCELLED,
   type RetrievedContextItem,
   type GroundedSqliteDb,
 } from '../agent';
@@ -41,6 +42,7 @@ const mockGenService = {
     }),
   ),
   scheduleModelUnload: jest.fn(),
+  cancelGeneration: jest.fn(async () => true),
 };
 
 const mockIsVisionAvailable = jest.fn(async () => false);
@@ -1173,6 +1175,37 @@ describe('AI Agent & Context Engine', () => {
     it('returns null when imageUri is undefined', async () => {
       const result = await analyzeReceiptImage(undefined);
       expect(result).toBeNull();
+    });
+
+    it('stops the model and rejects with SCAN_CANCELLED when the scan is cancelled mid-generation', async () => {
+      const controller = new AbortController();
+      let finishGeneration: (text: string) => void = () => undefined;
+      (mockGenService.startGeneration as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+            controller.abort();
+          }),
+      );
+      mockGenService.cancelGeneration.mockImplementationOnce(async () => {
+        finishGeneration('');
+        return true;
+      });
+
+      await expect(
+        analyzeReceiptImage('file:///path/to/receipt.jpg', undefined, undefined, { signal: controller.signal }),
+      ).rejects.toThrow(RECEIPT_SCAN_CANCELLED);
+      expect(mockGenService.cancelGeneration).toHaveBeenCalledWith('Receipt scan cancelled.');
+    });
+
+    it('does not start the model when the scan was cancelled during OCR', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      (mockGenService.startGeneration as jest.Mock).mockClear();
+      await expect(
+        analyzeReceiptImage('file:///path/to/receipt.jpg', undefined, undefined, { signal: controller.signal }),
+      ).rejects.toThrow(RECEIPT_SCAN_CANCELLED);
+      expect(mockGenService.startGeneration).not.toHaveBeenCalled();
     });
 
     it('extracts receipt fields via schema-constrained LLM generation and returns rawText and formatted items', async () => {

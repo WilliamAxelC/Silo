@@ -2964,16 +2964,31 @@ export async function recognizeReceiptText(imageUri: string): Promise<OcrResult>
   return ocrResultScore(original) > ocrResultScore(normalized) ? original : normalized;
 }
 
+/** Thrown by analyzeReceiptImage when its AbortSignal fires; callers should treat it as a silent cancel. */
+export const RECEIPT_SCAN_CANCELLED = 'SCAN_CANCELLED';
+
+export interface AnalyzeReceiptOptions {
+  /** Aborting stops the scan between stages and stops an in-flight model generation. */
+  signal?: AbortSignal;
+}
+
 export const analyzeReceiptImage = async (
   imageUri?: string,
   _base64Image?: string,
   onStatusChange?: (status: string) => void,
+  options: AnalyzeReceiptOptions = {},
 ): Promise<ParsedReceiptResult | null> => {
   if (!imageUri) return null;
+  const { signal } = options;
+  const throwIfCancelled = () => {
+    if (signal?.aborted) throw new Error(RECEIPT_SCAN_CANCELLED);
+  };
+  throwIfCancelled();
 
   onStatusChange?.('Reading text…');
 
   const ocrResult = await recognizeReceiptText(imageUri);
+  throwIfCancelled();
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');
   }
@@ -3006,133 +3021,160 @@ export const analyzeReceiptImage = async (
 
   await useSettingsStore.getState().waitForSettingsLoaded?.();
 
-  if (useSettingsStore.getState().receiptReadingMode === 'vision' && (await isVisionAvailable())) {
-    onStatusChange?.('Reading receipt with AI vision…');
+  throwIfCancelled();
+
+  // While a model is generating for this scan, an abort stops the generation instead of waiting for it.
+  let generating = false;
+  const stopGenerationOnAbort = () => {
+    if (generating) void getGenerationService().cancelGeneration('Receipt scan cancelled.');
+  };
+  signal?.addEventListener?.('abort', stopGenerationOnAbort);
+  const generate = async (params: Parameters<ReturnType<typeof getGenerationService>['startGeneration']>[0]) => {
+    throwIfCancelled();
+    generating = true;
     try {
-      const processedUri = await downscaleReceiptImage(imageUri);
-      const responseText = await getGenerationService().startGeneration({
-        imageUri: processedUri,
-        prompt: VLM_RECEIPT_PROMPT,
+      return await getGenerationService().startGeneration(params);
+    } finally {
+      generating = false;
+      throwIfCancelled();
+    }
+  };
+
+  try {
+    if (useSettingsStore.getState().receiptReadingMode === 'vision' && (await isVisionAvailable())) {
+      onStatusChange?.('Reading receipt with AI vision…');
+      try {
+        const processedUri = await downscaleReceiptImage(imageUri);
+        const responseText = await generate({
+          imageUri: processedUri,
+          prompt: VLM_RECEIPT_PROMPT,
+          mode: 'chat',
+          systemPrompt: VLM_SYSTEM_PROMPT,
+          jsonSchema: RECEIPT_JSON_SCHEMA,
+          disableThinking: true,
+          maxTokens: 512,
+          temperature: 0,
+        });
+
+        const parsedData = parseReceiptJsonWithRepair(responseText);
+        if (!parsedData) {
+          throw new Error('FAILED_TO_PARSE_VISION_JSON');
+        }
+
+        let visionTotal: number | undefined;
+        if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
+          visionTotal = Math.round(parsedData.total);
+        } else if (typeof parsedData.total === 'string') {
+          const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
+          if (clean > 0) visionTotal = clean;
+        }
+
+        const usedVisionTotal = typeof visionTotal === 'number' && visionTotal > 0;
+        const finalTotal = usedVisionTotal ? visionTotal : heuristicTotal;
+
+        const rawVisionMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
+        const merchantName = sanitizeMerchantName(rawVisionMerchant, cleanOcrMerchant);
+        const date =
+          (typeof parsedData.date === 'string' &&
+            isDateGrounded(parsedData.date.trim(), rawText) &&
+            isPlausibleReceiptDate(parsedData.date.trim()) &&
+            parsedData.date.trim()) ||
+          ocrResult.extractedDate ||
+          undefined;
+        const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
+        const category =
+          ocrResult.extractedCategory ||
+          inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
+          undefined;
+
+        return withConfidence(
+          { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
+          rows,
+          usedVisionTotal ? keywordTotal : null,
+          rawVisionMerchant,
+        );
+      } catch (visionError) {
+        throwIfCancelled();
+        console.warn('Vision extraction failed, falling back to text LLM / OCR heuristics:', visionError);
+      } finally {
+        getGenerationService().scheduleModelUnload(300_000);
+      }
+    }
+
+    throwIfCancelled();
+    if (!(await canRunReceiptLlm())) {
+      return withConfidence(heuristicResult, rows, null, ocrResult.extractedMerchant);
+    }
+    throwIfCancelled();
+
+    onStatusChange?.('Structuring receipt with AI...');
+
+    try {
+      const responseText = await generate({
+        prompt: rawText.slice(0, RECEIPT_PROMPT_MAX_CHARS),
         mode: 'chat',
-        systemPrompt: VLM_SYSTEM_PROMPT,
+        maxTokens: 384,
+        temperature: 0,
+        systemPrompt: RECEIPT_SCHEMA_SYSTEM_PROMPT,
         jsonSchema: RECEIPT_JSON_SCHEMA,
         disableThinking: true,
-        maxTokens: 512,
-        temperature: 0,
       });
 
       const parsedData = parseReceiptJsonWithRepair(responseText);
-      if (!parsedData) {
-        throw new Error('FAILED_TO_PARSE_VISION_JSON');
+      if (parsedData) {
+        let llmTotal: number | undefined;
+        if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
+          llmTotal = Math.round(parsedData.total);
+        } else if (typeof parsedData.total === 'string') {
+          const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
+          if (clean > 0) llmTotal = clean;
+        }
+
+        let finalTotal: number | undefined = heuristicTotal;
+        let usedLlmTotal = false;
+        if (typeof llmTotal === 'number' && llmTotal > 0) {
+          if (isGrounded(llmTotal, rows)) {
+            finalTotal = llmTotal;
+            usedLlmTotal = true;
+          } else {
+            console.warn(
+              `Receipt LLM total (${llmTotal}) is not grounded in OCR rows; falling back to heuristic total (${heuristicTotal ?? 'none'}).`,
+            );
+          }
+        }
+
+        const rawLlmMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
+        const merchantName = sanitizeMerchantName(rawLlmMerchant, cleanOcrMerchant);
+        // Small models invent plausible dates (bench: Qwen3.5-0.8B on 34/39 receipts); keep only dates visible in the OCR text.
+        const date =
+          (typeof parsedData.date === 'string' &&
+            isDateGrounded(parsedData.date.trim(), rawText) &&
+            isPlausibleReceiptDate(parsedData.date.trim()) &&
+            parsedData.date.trim()) ||
+          ocrResult.extractedDate ||
+          undefined;
+        const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
+        const category =
+          ocrResult.extractedCategory ||
+          inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
+          undefined;
+
+        return withConfidence(
+          { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
+          rows,
+          usedLlmTotal ? keywordTotal : null,
+          rawLlmMerchant,
+        );
       }
-
-      let visionTotal: number | undefined;
-      if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
-        visionTotal = Math.round(parsedData.total);
-      } else if (typeof parsedData.total === 'string') {
-        const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
-        if (clean > 0) visionTotal = clean;
-      }
-
-      const usedVisionTotal = typeof visionTotal === 'number' && visionTotal > 0;
-      const finalTotal = usedVisionTotal ? visionTotal : heuristicTotal;
-
-      const rawVisionMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
-      const merchantName = sanitizeMerchantName(rawVisionMerchant, cleanOcrMerchant);
-      const date =
-        (typeof parsedData.date === 'string' &&
-          isDateGrounded(parsedData.date.trim(), rawText) &&
-          isPlausibleReceiptDate(parsedData.date.trim()) &&
-          parsedData.date.trim()) ||
-        ocrResult.extractedDate ||
-        undefined;
-      const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
-      const category =
-        ocrResult.extractedCategory ||
-        inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
-        undefined;
-
-      return withConfidence(
-        { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
-        rows,
-        usedVisionTotal ? keywordTotal : null,
-        rawVisionMerchant,
-      );
-    } catch (visionError) {
-      console.warn('Vision extraction failed, falling back to text LLM / OCR heuristics:', visionError);
+    } catch (error) {
+      throwIfCancelled();
+      console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
     } finally {
       getGenerationService().scheduleModelUnload(300_000);
     }
-  }
 
-  if (!(await canRunReceiptLlm())) {
     return withConfidence(heuristicResult, rows, null, ocrResult.extractedMerchant);
-  }
-
-  onStatusChange?.('Structuring receipt with AI...');
-
-  try {
-    const responseText = await getGenerationService().startGeneration({
-      prompt: rawText.slice(0, RECEIPT_PROMPT_MAX_CHARS),
-      mode: 'chat',
-      maxTokens: 384,
-      temperature: 0,
-      systemPrompt: RECEIPT_SCHEMA_SYSTEM_PROMPT,
-      jsonSchema: RECEIPT_JSON_SCHEMA,
-      disableThinking: true,
-    });
-
-    const parsedData = parseReceiptJsonWithRepair(responseText);
-    if (parsedData) {
-      let llmTotal: number | undefined;
-      if (typeof parsedData.total === 'number' && Number.isFinite(parsedData.total)) {
-        llmTotal = Math.round(parsedData.total);
-      } else if (typeof parsedData.total === 'string') {
-        const clean = Math.round(Math.abs(parseSignedAmount(parsedData.total)));
-        if (clean > 0) llmTotal = clean;
-      }
-
-      let finalTotal: number | undefined = heuristicTotal;
-      let usedLlmTotal = false;
-      if (typeof llmTotal === 'number' && llmTotal > 0) {
-        if (isGrounded(llmTotal, rows)) {
-          finalTotal = llmTotal;
-          usedLlmTotal = true;
-        } else {
-          console.warn(
-            `Receipt LLM total (${llmTotal}) is not grounded in OCR rows; falling back to heuristic total (${heuristicTotal ?? 'none'}).`,
-          );
-        }
-      }
-
-      const rawLlmMerchant = typeof parsedData.merchant === 'string' ? parsedData.merchant.trim() : undefined;
-      const merchantName = sanitizeMerchantName(rawLlmMerchant, cleanOcrMerchant);
-      // Small models invent plausible dates (bench: Qwen3.5-0.8B on 34/39 receipts); keep only dates visible in the OCR text.
-      const date =
-        (typeof parsedData.date === 'string' &&
-          isDateGrounded(parsedData.date.trim(), rawText) &&
-          isPlausibleReceiptDate(parsedData.date.trim()) &&
-          parsedData.date.trim()) ||
-        ocrResult.extractedDate ||
-        undefined;
-      const lineItemsText = formatReceiptItemsText(parsedData.items) || cleanOcrItems || undefined;
-      const category =
-        ocrResult.extractedCategory ||
-        inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
-        undefined;
-
-      return withConfidence(
-        { merchantName, totalAmount: finalTotal, category, lineItemsText, date, rawText },
-        rows,
-        usedLlmTotal ? keywordTotal : null,
-        rawLlmMerchant,
-      );
-    }
-  } catch (error) {
-    console.warn('LLM Extraction skipped or failed, falling back to OCR heuristics:', error);
   } finally {
-    getGenerationService().scheduleModelUnload(300_000);
+    signal?.removeEventListener?.('abort', stopGenerationOnAbort);
   }
-
-  return withConfidence(heuristicResult, rows, null, ocrResult.extractedMerchant);
 };
