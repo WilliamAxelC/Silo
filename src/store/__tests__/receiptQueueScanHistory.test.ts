@@ -23,7 +23,7 @@ jest.mock('expo-file-system/legacy', () => ({
 const mockAnalyze = jest.fn();
 jest.mock('../../services/ai/agent', () => ({ analyzeReceiptImage: (...args: unknown[]) => mockAnalyze(...args) }));
 const mockNormalize = jest.fn();
-const mockStartWork = jest.fn(() => true);
+const mockStartWork = jest.fn((_text: string) => true);
 const mockStopWork = jest.fn();
 jest.mock('../../services/ocr/normalizeImage', () => ({
   normalizeReceiptImage: (uri: string) => mockNormalize(uri),
