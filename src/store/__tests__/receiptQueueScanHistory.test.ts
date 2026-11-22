@@ -98,4 +98,14 @@ describe('receipt queue: gallery scans, background work and saved history', () =
     useReceiptQueueStore.getState().load();
     expect(useReceiptQueueStore.getState().savedItems).toEqual([]);
   });
+
+  it('stores the upright version when a receipt had to be turned to read', async () => {
+    mockAnalyze.mockResolvedValue({ merchantName: 'Sideways', totalAmount: 5000, imageUri: 'file:///cache/upright.jpg' });
+    await useReceiptQueueStore.getState().enqueue(['file:///cache/sideways.jpg']);
+    await waitIdle();
+    const [item] = useReceiptQueueStore.getState().items;
+    expect(item.imageUri).toMatch(/receipts\/receipt-upright-\d+-\d+\.jpg$/);
+    expect(item.result).toEqual({ merchantName: 'Sideways', totalAmount: 5000 });
+    expect(FileSystem.copyAsync).toHaveBeenCalledWith({ from: 'file:///cache/upright.jpg', to: item.imageUri });
+  });
 });

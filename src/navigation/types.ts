@@ -24,6 +24,8 @@ export type RootStackParamList = {
     duplicateFromId?: number;
     /** Optional epoch ms timestamp to prefill the transaction date (e.g. from Calendar view). */
     initialDate?: number;
+    /** A receipt photo shared to Silo from another app: scanned as soon as the screen opens. */
+    sharedImageUri?: string;
   };
   ReceiptInbox: undefined;
   /** editWalletId: open the account editor for that account on arrival. */

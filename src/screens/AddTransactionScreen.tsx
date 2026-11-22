@@ -98,6 +98,8 @@ export const AddTransactionScreen = () => {
   const reviewBatchIndexParam = route.params?.reviewBatchIndex;
   const reviewBatchTotalParam = route.params?.reviewBatchTotal;
   const initialDate = route.params?.initialDate;
+  const sharedImageUri = route.params?.sharedImageUri;
+  const handledSharedImageRef = useRef<string | null>(null);
   const theme = useAppTheme();
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
@@ -758,6 +760,8 @@ export const AddTransactionScreen = () => {
       if (controller.signal.aborted) return;
 
       if (parsedData) {
+        // A sideways/upside-down receipt comes back turned upright; keep that version as the photo.
+        if (parsedData.imageUri) setImageUri(parsedData.imageUri);
         applyScanResult(parsedData);
         setScanStatusLabel(null);
       } else {
@@ -795,6 +799,14 @@ export const AddTransactionScreen = () => {
   };
 
   useEffect(() => () => scanAbortRef.current?.abort(), []);
+
+  // A receipt photo shared from another app: treat it like a gallery pick (scan, then read).
+  useEffect(() => {
+    if (!sharedImageUri || handledSharedImageRef.current === sharedImageUri) return;
+    handledSharedImageRef.current = sharedImageUri;
+    void processScanReceipt(sharedImageUri, undefined, { fromGallery: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedImageUri]);
 
   const openScanSourceModal = () => {
     setSourceModalTarget('scan');

@@ -2668,6 +2668,8 @@ export interface ParsedReceiptResult {
   /** How far the total can be trusted; see receiptConfidence.ts. */
   confidence?: ReceiptConfidence;
   confidenceReasons?: string[];
+  /** The receipt photo turned upright, when it was sideways or upside down; use it instead of the original. */
+  imageUri?: string;
 }
 
 function itemPricesFromText(lineItemsText: string | null | undefined): number[] {
@@ -3024,23 +3026,77 @@ function ocrResultScore(result: OcrResult): number {
  * shadows, colour casts or low contrast), and also reads the original when the scan finds no total,
  * keeping whichever read looks more like a receipt. Without the native normalizer, reads the original.
  */
+/** A read with a total and at least two priced rows: good enough that the photo is clearly upright. */
+const UPRIGHT_SCORE = 1020;
+/** How much better a turned photo must read before it replaces the original orientation. */
+const ROTATION_MARGIN = 20;
+
+export interface RecognizedReceipt extends OcrResult {
+  /** Clockwise degrees the photo had to be turned to read upright (0 when it already was). */
+  rotation: 0 | 90 | 180 | 270;
+  /** The image that was read, turned upright (only when rotation is not 0). */
+  uprightReadUri?: string;
+}
+
+async function rotateImage(uri: string, degrees: number): Promise<string | null> {
+  try {
+    const result = await manipulateAsync(uri, [{ rotate: degrees }], { compress: 0.9, format: SaveFormat.JPEG });
+    return result?.uri ?? null;
+  } catch (error) {
+    console.warn('Could not rotate receipt image:', error);
+    return null;
+  }
+}
+
+/**
+ * Receipts photographed sideways or upside down read as garbage. When a read isn't clearly upright,
+ * reads the image turned 90, 270 and 180 degrees and keeps the orientation that reads clearly best.
+ */
+async function readUpright(
+  engine: ReturnType<typeof getOcrEngine>,
+  uri: string,
+  first: OcrResult,
+): Promise<RecognizedReceipt> {
+  const firstScore = ocrResultScore(first);
+  if (first.success && firstScore >= UPRIGHT_SCORE) return { ...first, rotation: 0 };
+  let best: { result: OcrResult; score: number; rotation: 0 | 90 | 180 | 270; uri?: string } = {
+    result: first,
+    score: firstScore,
+    rotation: 0,
+  };
+  for (const degrees of [90, 270, 180] as const) {
+    const rotatedUri = await rotateImage(uri, degrees);
+    if (!rotatedUri) continue;
+    const result = await engine.processImage(rotatedUri).catch(() => null);
+    if (!result) continue;
+    const score = ocrResultScore(result);
+    if (score > best.score) best = { result, score, rotation: degrees, uri: rotatedUri };
+    if (score >= UPRIGHT_SCORE) break;
+  }
+  if (best.rotation !== 0 && best.score >= firstScore + ROTATION_MARGIN) {
+    return { ...best.result, rotation: best.rotation, uprightReadUri: best.uri };
+  }
+  return { ...first, rotation: 0 };
+}
+
 export async function recognizeReceiptText(
   imageUri: string,
   options: { alreadyScanned?: boolean } = {},
-): Promise<OcrResult> {
+): Promise<RecognizedReceipt> {
   const engine = getOcrEngine();
   // A gallery photo already turned into a scan (cropped, black and white) is read as is.
   const normalizedUri = options.alreadyScanned ? null : await normalizeReceiptImage(imageUri);
   if (!normalizedUri) {
-    return engine.processImage(imageUri);
+    return readUpright(engine, imageUri, await engine.processImage(imageUri));
   }
 
   const normalized = await engine.processImage(normalizedUri);
-  if (normalized.success && normalized.extractedTotal) {
-    return normalized;
+  if (normalized.success && normalized.extractedTotal && ocrResultScore(normalized) >= UPRIGHT_SCORE) {
+    return { ...normalized, rotation: 0 };
   }
   const original = await engine.processImage(imageUri);
-  return ocrResultScore(original) > ocrResultScore(normalized) ? original : normalized;
+  const useOriginal = ocrResultScore(original) > ocrResultScore(normalized);
+  return readUpright(engine, useOriginal ? imageUri : normalizedUri, useOriginal ? original : normalized);
 }
 
 /** Thrown by analyzeReceiptImage when its AbortSignal fires; callers should treat it as a silent cancel. */
@@ -3055,9 +3111,21 @@ export interface AnalyzeReceiptOptions {
 
 export const analyzeReceiptImage = async (
   imageUri?: string,
-  _base64Image?: string,
+  base64Image?: string,
   onStatusChange?: (status: string) => void,
   options: AnalyzeReceiptOptions = {},
+): Promise<ParsedReceiptResult | null> => {
+  const out: { uprightUri?: string } = {};
+  const result = await analyzeReceiptImageCore(imageUri, base64Image, onStatusChange, options, out);
+  return result && out.uprightUri ? { ...result, imageUri: out.uprightUri } : result;
+};
+
+const analyzeReceiptImageCore = async (
+  imageUri: string | undefined,
+  _base64Image: string | undefined,
+  onStatusChange: ((status: string) => void) | undefined,
+  options: AnalyzeReceiptOptions,
+  out: { uprightUri?: string },
 ): Promise<ParsedReceiptResult | null> => {
   if (!imageUri) return null;
   const { signal } = options;
@@ -3070,6 +3138,15 @@ export const analyzeReceiptImage = async (
 
   const ocrResult = await recognizeReceiptText(imageUri, { alreadyScanned: options.alreadyScanned });
   throwIfCancelled();
+  if (ocrResult.rotation !== 0) {
+    // Keep the photo upright from now on (and give the vision model the upright version too).
+    const upright =
+      options.alreadyScanned && ocrResult.uprightReadUri ? ocrResult.uprightReadUri : await rotateImage(imageUri, ocrResult.rotation);
+    if (upright) {
+      out.uprightUri = upright;
+      imageUri = upright;
+    }
+  }
   if (!ocrResult.success || !ocrResult.rawText) {
     throw new Error('NO_TEXT_DETECTED');
   }

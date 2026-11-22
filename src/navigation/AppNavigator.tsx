@@ -1,6 +1,13 @@
 import React, { useEffect } from 'react';
 import { AppState, InteractionManager, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { NavigationContainer, DefaultTheme, DarkTheme, useNavigation } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+  DarkTheme,
+  createNavigationContainerRef,
+  useNavigation,
+} from '@react-navigation/native';
+import { addShareListener, takeSharedImages } from '../services/ocr/normalizeImage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationProps } from './types';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -34,6 +41,9 @@ import { ActivityScreen } from '../screens/ActivityScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
 import { RecurringScreen } from '../screens/RecurringScreen';
+
+/** How long after Silo goes to the background the AI model is released. */
+const BACKGROUND_MODEL_UNLOAD_MS = 10_000;
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -85,6 +95,23 @@ export const APP_LINKING = {
     };
   },
 };
+
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+/**
+ * Receipts shared to Silo from Gallery or any app: one photo opens a scan on Add Transaction,
+ * several go to the Receipt Inbox (scanned and read in the background).
+ */
+async function handleSharedReceipts() {
+  const uris = await takeSharedImages();
+  if (uris.length === 0 || !navigationRef.isReady()) return;
+  if (uris.length === 1) {
+    navigationRef.navigate('AddTransactionStack', { sharedImageUri: uris[0] });
+    return;
+  }
+  await useReceiptQueueStore.getState().enqueue(uris, { scan: true });
+  navigationRef.navigate('ReceiptInbox');
+}
 
 const TabNavigator = () => {
   const theme = useAppTheme();
@@ -172,8 +199,17 @@ export const AppNavigator = () => {
     };
     void useTransactionStore.getState().initDB().then(runRecurring);
     useReceiptQueueStore.getState().load();
+    const removeShareListener = addShareListener(() => void handleSharedReceipts());
     const appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void runRecurring();
+      if (state === 'active') {
+        void runRecurring();
+        void handleSharedReceipts();
+      }
+      // Free the on-device AI model's memory (~1 GB) soon after Silo leaves the screen, unless the
+      // Receipt Inbox is still reading receipts in the background (it frees it when it finishes).
+      if (state === 'background' && !useReceiptQueueStore.getState().isProcessing) {
+        void getGenerationService().scheduleModelUnload(BACKGROUND_MODEL_UNLOAD_MS);
+      }
     });
     const modelInitHandle = InteractionManager.runAfterInteractions(() => {
       void getModelLifecycleManager().initialize();
@@ -182,6 +218,7 @@ export const AppNavigator = () => {
     return () => {
       modelInitHandle?.cancel?.();
       appStateSub.remove();
+      removeShareListener();
       void getGenerationService().dispose();
       getModelLifecycleManager().dispose();
     };
@@ -203,7 +240,12 @@ export const AppNavigator = () => {
 
   return (
     <View style={[styles.appShell, { backgroundColor: theme.background }]}>
-      <NavigationContainer theme={navigationTheme} linking={APP_LINKING as any}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navigationTheme}
+        linking={APP_LINKING as any}
+        onReady={() => void handleSharedReceipts()}
+      >
         <Stack.Navigator
           initialRouteName="MainTabs"
           screenOptions={{

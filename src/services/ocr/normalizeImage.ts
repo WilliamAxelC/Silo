@@ -4,6 +4,8 @@ interface ReceiptNormalizeNative {
   normalize(uri: string): Promise<string>;
   startBackgroundWork?(text: string): boolean;
   stopBackgroundWork?(): boolean;
+  takeSharedImages?(): Promise<string[]>;
+  addListener?(event: 'onShareReceived', listener: () => void): { remove(): void };
 }
 
 // Local Expo module in modules/receipt-normalize (Android only); absent in Expo Go, iOS and Jest.
@@ -43,5 +45,26 @@ export function stopBackgroundWork(): void {
     native?.stopBackgroundWork?.();
   } catch (error) {
     console.warn('Could not stop background receipt work:', error);
+  }
+}
+
+/** Images shared to Silo from another app (each share is returned once), as file:// URIs. */
+export async function takeSharedImages(): Promise<string[]> {
+  try {
+    const uris = await native?.takeSharedImages?.();
+    return Array.isArray(uris) ? uris.filter((uri) => typeof uri === 'string' && uri.length > 0) : [];
+  } catch (error) {
+    console.warn('Could not read shared images:', error);
+    return [];
+  }
+}
+
+/** Called when images are shared to Silo while it is already open. */
+export function addShareListener(listener: () => void): () => void {
+  try {
+    const subscription = native?.addListener?.('onShareReceived', listener);
+    return () => subscription?.remove();
+  } catch {
+    return () => undefined;
   }
 }

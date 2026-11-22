@@ -9,6 +9,7 @@ jest.mock('@react-navigation/native', () => ({
   DefaultTheme: { dark: false, colors: {} },
   DarkTheme: { dark: true, colors: {} },
   useNavigation: () => ({ navigate: jest.fn() }),
+  createNavigationContainerRef: () => ({ isReady: () => false, navigate: jest.fn() }),
 }));
 
 jest.mock('@react-navigation/bottom-tabs', () => ({

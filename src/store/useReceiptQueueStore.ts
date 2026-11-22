@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { AppState } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
@@ -81,6 +82,16 @@ interface ReceiptQueueState {
 
 const THUMBNAIL_WIDTH_PX = 168;
 const THUMBNAIL_COMPRESS = 0.7;
+
+/** Loaded lazily: the generation service pulls in the native AI runtime. */
+function getGenerationServiceLazy(): { scheduleModelUnload(ms: number): Promise<void> } | null {
+  try {
+    const { getGenerationService } = require('../services/ai/generationService') as typeof import('../services/ai/generationService');
+    return getGenerationService();
+  } catch {
+    return null;
+  }
+}
 
 function getReceiptsDir(): string {
   return `${FileSystem.documentDirectory ?? ''}receipts/`;
@@ -270,27 +281,30 @@ function persistImageHash(id: number, imageUri: string, imageHash: string) {
 export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
   const refresh = () => set({ items: readAll(), savedItems: readSaved() });
 
-  /** Turns a gallery import into a document-style scan (cropped, black and white) and swaps the stored image. */
-  const scanQueuedImage = async (item: ReceiptQueueItem): Promise<string> => {
-    const scanned = await normalizeReceiptImage(item.imageUri);
+  /** Swaps a queued receipt's stored photo for a processed version (scan or upright), deleting the old copy. */
+  const replaceQueuedImage = async (item: ReceiptQueueItem, processedUri: string | null, tag: string): Promise<string> => {
     let nextUri = item.imageUri;
-    if (scanned) {
-      const dest = `${getReceiptsDir()}receipt-scan-${item.id}-${Date.now()}.jpg`;
+    if (processedUri && processedUri !== item.imageUri) {
+      const dest = `${getReceiptsDir()}receipt-${tag}-${item.id}-${Date.now()}.jpg`;
       try {
-        await FileSystem.copyAsync({ from: scanned, to: dest });
+        await FileSystem.copyAsync({ from: processedUri, to: dest });
         nextUri = dest;
-        await FileSystem.deleteAsync(scanned, { idempotent: true }).catch(() => undefined);
+        await FileSystem.deleteAsync(processedUri, { idempotent: true }).catch(() => undefined);
         if (item.imageUri.startsWith(getReceiptsDir())) {
           await FileSystem.deleteAsync(item.imageUri, { idempotent: true }).catch(() => undefined);
         }
       } catch (error) {
-        console.warn('Could not store the scanned receipt; keeping the original photo:', error);
+        console.warn('Could not store the processed receipt; keeping the original photo:', error);
       }
     }
     try {
       expoDb.runSync(`UPDATE receipt_queue SET image_uri = ?, needs_scan = 0 WHERE id = ?;`, [nextUri, item.id]);
     } catch {
-      // Older test tables without needs_scan.
+      try {
+        expoDb.runSync(`UPDATE receipt_queue SET image_uri = ? WHERE id = ?;`, [nextUri, item.id]);
+      } catch {
+        // Ignore: isolated test tables.
+      }
     }
     if (nextUri !== item.imageUri) {
       inMemoryHashByUri.set(nextUri, item.imageHash ?? `uri:${nextUri}`);
@@ -302,6 +316,10 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
     }
     return nextUri;
   };
+
+  /** Turns a gallery import into a document-style scan (cropped, black and white) and swaps the stored image. */
+  const scanQueuedImage = async (item: ReceiptQueueItem): Promise<string> =>
+    replaceQueuedImage(item, await normalizeReceiptImage(item.imageUri), 'scan');
 
   // Reads queued receipts one at a time; the generation service serializes model access with chat and single scans.
   const processQueue = async () => {
@@ -330,7 +348,14 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
         refresh();
         try {
           const imageUri = next.needsScan ? await scanQueuedImage(next) : next.imageUri;
-          const result = await analyzeReceiptImage(imageUri);
+          const analyzed = await analyzeReceiptImage(imageUri);
+          let result = analyzed;
+          if (analyzed?.imageUri) {
+            // Keep the receipt upright from now on.
+            await replaceQueuedImage({ ...next, imageUri }, analyzed.imageUri, 'upright');
+            const { imageUri: _upright, ...rest } = analyzed;
+            result = rest;
+          }
           expoDb.runSync(`UPDATE receipt_queue SET status = 'done', result_json = ? WHERE id = ?;`, [
             JSON.stringify(result ?? {}),
             next.id,
@@ -347,6 +372,10 @@ export const useReceiptQueueStore = create<ReceiptQueueState>((set, get) => {
     } finally {
       stopBackgroundWork();
       set({ isProcessing: false });
+      // Finished in the background: release the AI model right away instead of after 5 minutes.
+      if (AppState.currentState !== 'active') {
+        void getGenerationServiceLazy()?.scheduleModelUnload(1_000);
+      }
     }
   };
 
