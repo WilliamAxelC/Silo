@@ -141,6 +141,15 @@ const TransactionRow = React.memo(function TransactionRow({
     currencyCode,
     useThousandsSeparator
   );
+  // Foreign-currency entries show what was actually paid, with the home value underneath.
+  const isForeign = Boolean(item.originalCurrency && item.originalCurrency !== currencyCode && item.originalAmount != null);
+  const foreignText = isForeign
+    ? formatDisplayCurrency(
+        isTransfer ? Math.abs(item.originalAmount ?? 0) : item.originalAmount ?? 0,
+        item.originalCurrency as string,
+        useThousandsSeparator
+      )
+    : null;
 
   const handlePress = useCallback(() => {
     onPress(item.id);
@@ -151,7 +160,7 @@ const TransactionRow = React.memo(function TransactionRow({
       style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${amountText}, ${subtitle}`}
+      accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${foreignText ? `${foreignText} (${amountText})` : amountText}, ${subtitle}`}
     >
       <View style={[styles.iconContainer, { backgroundColor: tint + '18' }]}>
         <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
@@ -167,10 +176,20 @@ const TransactionRow = React.memo(function TransactionRow({
           {subtitle}
         </Text>
       </View>
-      <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
-        {isIncome ? '+' : ''}
-        {amountText}
-      </Text>
+      {foreignText ? (
+        <View style={styles.foreignAmountWrap}>
+          <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
+            {isIncome ? '+' : ''}
+            {foreignText}
+          </Text>
+          <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(11) }}>≈ {amountText}</Text>
+        </View>
+      ) : (
+        <Text style={[styles.transactionAmount, { color: tint, fontSize: theme.scaleFont(13) }]}>
+          {isIncome ? '+' : ''}
+          {amountText}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 });
@@ -1695,6 +1714,7 @@ const styles = StyleSheet.create({
   transactionDetails: { flex: 1, marginRight: 10 },
   transactionTitle: { fontSize: 14, fontWeight: '600' },
   transactionSubtitle: { fontSize: 12, marginTop: 1 },
+  foreignAmountWrap: { alignItems: 'flex-end' },
   transactionAmount: { fontSize: 13, fontWeight: '700' },
   emptyCard: { marginHorizontal: 14, marginTop: 24, padding: 24, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   emptyIcon: { marginBottom: 10 },

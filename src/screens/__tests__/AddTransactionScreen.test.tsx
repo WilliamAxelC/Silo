@@ -50,6 +50,11 @@ jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(),
 }));
 
+jest.mock('../../services/fx/rates', () => ({
+  getCachedRate: jest.fn(() => ({ rate: 104.6, date: '2026-11-22' })),
+  getDailyRate: jest.fn(async () => ({ rate: 104.6, date: '2026-11-22' })),
+}));
+
 jest.mock('../../services/ai/agent', () => ({
   analyzeReceiptImage: jest.fn(),
   RECEIPT_SCAN_CANCELLED: 'SCAN_CANCELLED',
@@ -1315,6 +1320,98 @@ describe('AddTransactionScreen', () => {
     expect(mockAddTransaction).toHaveBeenCalledTimes(1);
     expect(new Date(mockAddTransaction.mock.calls[0][0].date).getFullYear()).toBe(2097);
     ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  describe('foreign-currency accounts', () => {
+    const wallets = [
+      { id: 1, name: 'BCA', type: 'bank', isActive: true, initialBalance: 0, balance: 5_000_000, currency: null, averageRate: null },
+      { id: 2, name: 'Japan Cash', type: 'cash', isActive: true, initialBalance: 0, balance: 20_000, currency: 'JPY', averageRate: 105 },
+    ];
+    const render = () => {
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        useTransactionStore.setState({ wallets } as any);
+        renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+      });
+      return renderer;
+    };
+    const pickAccount = (renderer: any, name: string) => {
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Account: BCA' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        const modal = renderer.root.findAll((n: any) => typeof n.props.onSelect === 'function' && n.props.wallets)[0];
+        modal.props.onSelect(wallets.find((w) => w.name === name)!.id);
+      });
+    };
+
+    it('records yen spent from a yen account at today\'s rate, and can switch to the average cost', async () => {
+      mockAddTransaction.mockResolvedValue(undefined);
+      const renderer = render();
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Ramen');
+      });
+      pickAccount(renderer, 'Japan Cash');
+      await ReactTestRenderer.act(async () => {});
+      ReactTestRenderer.act(() => {
+        renderer.root.findAllByType(TextInput).find((n: any) => n.props.onChangeText && n.props.placeholder === '0' && n.props.showSoftInputOnFocus === false).props.onChangeText('3200');
+      });
+
+      expect(renderer.root.findByProps({ testID: 'currency-exchange-panel' })).toBeTruthy();
+      const rateInput = renderer.root.findByProps({ accessibilityLabel: 'Exchange rate, IDR per JPY' });
+      expect(rateInput.props.value).toBe('104.6');
+      expect(renderer.root.findByProps({ testID: 'amount-currency-badge' }).findAllByType(Text).map((t: any) => t.props.children)).toContain('¥');
+
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Use my average exchange cost' }).props.onPress();
+      });
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+      });
+
+      expect(mockAddTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ walletId: 2, totalAmount: -336000, originalAmount: -3200, originalCurrency: 'JPY', fxRate: 105 })
+      );
+      ReactTestRenderer.act(() => renderer.unmount());
+    });
+
+    it('records buying yen with rupiah as a transfer with the amount received', async () => {
+      mockAddTransaction.mockResolvedValue(undefined);
+      const renderer = render();
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Set Transfer type' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Transfer to: Choose account' }).props.onPress();
+      });
+      ReactTestRenderer.act(() => {
+        const modal = renderer.root.findAll((n: any) => typeof n.props.onSelect === 'function' && n.props.wallets)[0];
+        modal.props.onSelect(2);
+      });
+      ReactTestRenderer.act(() => {
+        renderer.root.findAllByType(TextInput).find((n: any) => n.props.showSoftInputOnFocus === false).props.onChangeText('1000000');
+      });
+
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+      });
+      expect(mockAddTransaction).not.toHaveBeenCalled();
+      expect(renderer.root.findAllByType(Text).some((t: any) => t.props.children === 'Enter how much JPY arrived.')).toBe(true);
+
+      ReactTestRenderer.act(() => {
+        renderer.root.findByProps({ accessibilityLabel: 'Amount received in JPY' }).props.onChangeText('9560');
+      });
+      expect(
+        renderer.root.findAllByType(Text).some((t: any) => typeof t.props.children === 'string' && t.props.children.startsWith('Exchange rate: 1 JPY = Rp 104,6'))
+      ).toBe(true);
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Save transaction' }).props.onPress();
+      });
+      expect(mockAddTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'transfer', walletId: 1, toWalletId: 2, totalAmount: -1000000, toAmount: 9560, fxRate: 104.603 })
+      );
+      ReactTestRenderer.act(() => renderer.unmount());
+    });
   });
 
   it('calls navigation.goBack() on delete and edit save when canGoBack() is true to preserve caller screen state (F-17)', async () => {

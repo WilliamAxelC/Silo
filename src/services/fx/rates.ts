@@ -107,3 +107,15 @@ export async function getDailyRate(foreignCurrency: string, homeCurrency: string
   await refreshDailyRates(homeCurrency);
   return getCachedRate(foreignCurrency, homeCurrency);
 }
+
+/**
+ * Rate used to value a foreign account in the home currency (net worth, defaults when spending from it):
+ * the account's average exchange cost when known, otherwise the cached daily market rate.
+ */
+export function walletHomeRate(
+  wallet: { currency: string | null; averageRate: number | null },
+  homeCurrency: string,
+): number | null {
+  if (!wallet.currency || wallet.currency === normalizeCurrencyCode(homeCurrency)) return 1;
+  return wallet.averageRate ?? getCachedRate(wallet.currency, homeCurrency)?.rate ?? null;
+}

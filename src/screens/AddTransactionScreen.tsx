@@ -42,6 +42,14 @@ import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { NavigationProps, AddTransactionScreenRouteProp } from '../navigation/types';
 import { analyzeReceiptImage, RECEIPT_SCAN_CANCELLED, type ParsedReceiptResult } from '../services/ai/agent';
 import { getUnrealisticDateWarning } from '../features/transactions/dateSanity';
+import { walletCurrencyOf } from '../features/currency/currencies';
+import {
+  CurrencyConversionError,
+  resolveEntryAmounts,
+  resolveTransferAmounts,
+  type CurrencyFields,
+} from '../features/currency/conversion';
+import { getCachedRate, getDailyRate } from '../services/fx/rates';
 import type { ReceiptConfidenceAssessment } from '../services/ocr/receiptConfidence';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { ConfidenceNotice } from '../components/ConfidenceBadge';
@@ -132,6 +140,78 @@ export const AddTransactionScreen = () => {
     if (!match) return 'Choose account';
     return match.isActive ? match.name : `${match.name} (archived)`;
   };
+
+  // ---- Foreign-currency accounts -------------------------------------------------------------
+  // Amounts on a foreign account can be typed in its currency or the home currency; a rate converts
+  // between them. Transfers between currencies record what arrived. See features/currency/conversion.ts.
+  const fromWallet = wallets.find((w) => w.id === effectiveWalletId) ?? null;
+  const toWallet = wallets.find((w) => w.id === effectiveToWalletId) ?? null;
+  const fromCurrency = walletCurrencyOf(fromWallet, currencyCode);
+  const toCurrency = walletCurrencyOf(toWallet, currencyCode);
+  const [entryCurrency, setEntryCurrency] = useState<string | null>(null);
+  const amountCurrency =
+    type === 'transfer'
+      ? fromCurrency
+      : entryCurrency && (entryCurrency === fromCurrency || entryCurrency === currencyCode)
+        ? entryCurrency
+        : fromCurrency;
+  const isCrossCurrencyTransfer = type === 'transfer' && Boolean(effectiveToWalletId) && fromCurrency !== toCurrency;
+  // A typed rate is needed when the home value can't be derived from a home-currency side.
+  const rateCurrency =
+    fromCurrency === currencyCode
+      ? null
+      : type !== 'transfer' || (toCurrency !== currencyCode && Boolean(effectiveToWalletId))
+        ? fromCurrency
+        : null;
+  const involvesForeignCurrency = fromCurrency !== currencyCode || (type === 'transfer' && toCurrency !== currencyCode);
+  const [rateText, setRateText] = useState('');
+  const [rateSource, setRateSource] = useState<string | null>(null);
+  const rateEditedRef = useRef(false);
+  const [receivedText, setReceivedText] = useState('');
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
+  const prevAmountCurrencyRef = useRef(amountCurrency);
+  const prevRateCurrencyRef = useRef<string | null>(rateCurrency);
+
+  // Keep the typed number when the amount's currency changes (e.g. switching to a ¥ account).
+  useEffect(() => {
+    const previous = prevAmountCurrencyRef.current;
+    prevAmountCurrencyRef.current = amountCurrency;
+    if (previous === amountCurrency) return;
+    setAmount((current) =>
+      current ? formatAmountForInput(Math.abs(parseSignedAmount(current, undefined, previous)), amountCurrency) : current
+    );
+  }, [amountCurrency]);
+
+  // Default rate: today's market rate (fetched once a day), else the account's average exchange cost.
+  useEffect(() => {
+    if (prevRateCurrencyRef.current !== rateCurrency && prevRateCurrencyRef.current !== null) {
+      rateEditedRef.current = false;
+    }
+    prevRateCurrencyRef.current = rateCurrency;
+    if (!rateCurrency) return;
+    let alive = true;
+    const apply = (rate: number, source: string) => {
+      if (!alive || rateEditedRef.current) return;
+      setRateText(String(rate));
+      setRateSource(source);
+    };
+    const describeDaily = (date: string) => `Today's market rate${date ? ` (${date})` : ''}`;
+    const cached = getCachedRate(rateCurrency, currencyCode);
+    if (cached) apply(cached.rate, describeDaily(cached.date));
+    else if (fromWallet?.averageRate) apply(fromWallet.averageRate, 'Your average exchange cost');
+    void getDailyRate(rateCurrency, currencyCode).then((daily) => {
+      if (daily) apply(daily.rate, describeDaily(daily.date));
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rateCurrency, currencyCode]);
+
+  // Recurring rules don't carry foreign amounts yet, so Repeat is off for foreign-currency entries.
+  useEffect(() => {
+    if (involvesForeignCurrency) setRepeat(null);
+  }, [involvesForeignCurrency]);
   const [category, setCategory] = useState('');
   const [pendingScannedCategory, setPendingScannedCategory] = useState<string | null>(null);
   const [note, setNote] = useState('');
@@ -237,6 +317,12 @@ export const AddTransactionScreen = () => {
     setIsRawTextExpanded(false);
     setWalletId(null);
     setToWalletId(null);
+    setEntryCurrency(null);
+    setRateText('');
+    setRateSource(null);
+    rateEditedRef.current = false;
+    setReceivedText('');
+    setCurrencyError(null);
     setRepeat(null);
     linkedRecurringRuleIdRef.current = null;
     initialRepeatRef.current = null;
@@ -261,11 +347,20 @@ export const AddTransactionScreen = () => {
     skipNextCategorySyncRef.current = true;
     setTitle(editableTransaction.merchantName);
     setTitleError(null);
-    setAmount(
-      editableTransaction.totalAmount !== 0
-        ? formatAmountForInput(editableTransaction.totalAmount, currencyCode)
-        : ''
-    );
+    // Foreign amounts reopen in the currency they were recorded in, with the rate they used.
+    const recordedCurrency = editableTransaction.originalCurrency ?? currencyCode;
+    const recordedAmount =
+      editableTransaction.originalCurrency && editableTransaction.originalAmount != null
+        ? editableTransaction.originalAmount
+        : editableTransaction.totalAmount;
+    prevAmountCurrencyRef.current = recordedCurrency;
+    setEntryCurrency(recordedCurrency);
+    setAmount(recordedAmount !== 0 ? formatAmountForInput(recordedAmount, recordedCurrency) : '');
+    setRateText(editableTransaction.fxRate ? String(editableTransaction.fxRate) : '');
+    rateEditedRef.current = Boolean(editableTransaction.fxRate);
+    setRateSource(editableTransaction.fxRate ? 'Rate saved with this transaction' : null);
+    setReceivedText('');
+    setCurrencyError(null);
     setAmountError(null);
     setToAccountError(null);
     setScanConfidence(null);
@@ -309,6 +404,12 @@ export const AddTransactionScreen = () => {
         : rawToId;
     setWalletId(resolvedFromId);
     setToWalletId(resolvedToId);
+    if (editableType === 'transfer' && editableTransaction.toAmount != null) {
+      const receivingWallet = knownWallets.find((w) => w.id === resolvedToId) ?? null;
+      setReceivedText(
+        formatAmountForInput(Math.abs(editableTransaction.toAmount), walletCurrencyOf(receivingWallet, currencyCode))
+      );
+    }
 
     if (options.loadRecurring) {
       const matchedRule = findRecurringRuleForTransaction({
@@ -349,7 +450,7 @@ export const AddTransactionScreen = () => {
       setTitleError(null);
     }
     if (parsedData.totalAmount) {
-      setAmount(formatAmountForInput(parsedData.totalAmount, currencyCode));
+      setAmount(formatAmountForInput(parsedData.totalAmount, amountCurrency));
       setAmountError(isAmountWithinRange(parsedData.totalAmount) ? null : 'Amount is too large');
     }
     if (parsedData.category) {
@@ -462,10 +563,10 @@ export const AddTransactionScreen = () => {
 
   const handleAmountChange = (text: string) => {
     setScanConfidence(null);
-    const formatted = formatAmountInput(text, currencyCode);
+    const formatted = formatAmountInput(text, amountCurrency);
     setAmount(formatted);
     if (text.trim().length > 0) {
-      const parsed = Math.abs(parseSignedAmount(text, undefined, currencyCode));
+      const parsed = Math.abs(parseSignedAmount(text, undefined, amountCurrency));
       if (parsed === 0 || Number.isNaN(parsed)) {
         setAmountError('Amount must be greater than 0');
       } else if (!isAmountWithinRange(parsed)) {
@@ -664,13 +765,48 @@ export const AddTransactionScreen = () => {
     setSourceModalVisible(true);
   };
 
+  const parseRate = (text: string): number | null => {
+    const value = Number(text.replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+
+  /** Home amount plus the foreign side for this entry; throws CurrencyConversionError when a rate/amount is missing. */
+  const computeCurrencyFields = (): CurrencyFields => {
+    const typed = Math.abs(parseSignedAmount(amount, undefined, amountCurrency));
+    if (type === 'transfer') {
+      return resolveTransferAmounts({
+        homeCurrency: currencyCode,
+        fromCurrency,
+        toCurrency: effectiveToWalletId ? toCurrency : fromCurrency,
+        sent: typed,
+        received: receivedText ? Math.abs(parseSignedAmount(receivedText, undefined, toCurrency)) : null,
+        sourceRate: parseRate(rateText),
+      });
+    }
+    return resolveEntryAmounts({
+      homeCurrency: currencyCode,
+      walletCurrency: fromCurrency,
+      enteredCurrency: amountCurrency,
+      amount: typed,
+      sign: type === 'income' ? 1 : -1,
+      rate: parseRate(rateText),
+    });
+  };
+
   const buildTransactionPayload = (categoryOverride?: string): TransactionInput => {
     const signedType = type === 'transfer' ? 'expense' : type;
+    let currencyFields: CurrencyFields | null = null;
+    try {
+      currencyFields = computeCurrencyFields();
+    } catch {
+      currencyFields = null;
+    }
 
     return normalizeTransactionInput(
       createTransactionInput({
+        ...(currencyFields ?? {}),
         merchantName: title.trim() || (type === 'transfer' ? 'Transfer' : title),
-        totalAmount: parseSignedAmount(amount, signedType, currencyCode),
+        totalAmount: currencyFields ? currencyFields.totalAmount : parseSignedAmount(amount, signedType, currencyCode),
         type,
         category:
           type === 'transfer'
@@ -715,7 +851,7 @@ export const AddTransactionScreen = () => {
       setTitleError(null);
     }
 
-    const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, currencyCode));
+    const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, amountCurrency));
     if (!amount || parsedAmt === 0 || Number.isNaN(parsedAmt)) {
       setAmountError('Amount must be greater than 0');
       hasValidationError = true;
@@ -724,6 +860,16 @@ export const AddTransactionScreen = () => {
       hasValidationError = true;
     } else {
       setAmountError(null);
+    }
+
+    if (!hasValidationError && involvesForeignCurrency) {
+      try {
+        computeCurrencyFields();
+        setCurrencyError(null);
+      } catch (error) {
+        setCurrencyError(error instanceof CurrencyConversionError ? error.message : 'Check the exchange details.');
+        hasValidationError = true;
+      }
     }
 
     if (hasValidationError) {
@@ -861,7 +1007,7 @@ export const AddTransactionScreen = () => {
     }
 
     if (amount.trim().length > 0) {
-      const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, currencyCode));
+      const parsedAmt = Math.abs(parseSignedAmount(amount, undefined, amountCurrency));
       if (parsedAmt === 0 || Number.isNaN(parsedAmt)) {
         setAmountError('Amount must be greater than 0');
         return;
@@ -960,7 +1106,32 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const currencySymbol = getCurrencySymbol(currencyCode);
+  const currencySymbol = getCurrencySymbol(amountCurrency);
+
+  const fxSummary = (() => {
+    if (!involvesForeignCurrency) return null;
+    const typed = amount ? Math.abs(parseSignedAmount(amount, undefined, amountCurrency)) : 0;
+    const rate = parseRate(rateText);
+    const rateLabel = (value: number, code: string) =>
+      `${getCurrencySymbol(code)} ${value.toLocaleString('id-ID', { maximumFractionDigits: 4 })}`;
+    const sourceNote = rateSource ? ` · ${rateSource}` : '';
+    if (type !== 'transfer') {
+      if (!typed || !rate) return rateSource;
+      return amountCurrency === currencyCode
+        ? `≈ ${formatDisplayCurrency(typed / rate, fromCurrency, useThousandsSeparator)} from this account${sourceNote}`
+        : `≈ ${formatDisplayCurrency(typed * rate, currencyCode, useThousandsSeparator)}${sourceNote}`;
+    }
+    const received = receivedText ? Math.abs(parseSignedAmount(receivedText, undefined, toCurrency)) : 0;
+    if (isCrossCurrencyTransfer && typed && received) {
+      if (fromCurrency === currencyCode) return `Exchange rate: 1 ${toCurrency} = ${rateLabel(typed / received, currencyCode)}`;
+      if (toCurrency === currencyCode) return `Exchange rate: 1 ${fromCurrency} = ${rateLabel(received / typed, currencyCode)}`;
+      return `Exchange rate: 1 ${fromCurrency} = ${rateLabel(received / typed, toCurrency)}`;
+    }
+    if (rateCurrency && typed && rate) {
+      return `≈ ${formatDisplayCurrency(typed * rate, currencyCode, useThousandsSeparator)}${sourceNote}`;
+    }
+    return null;
+  })();
   const titleLabel = type === 'transfer' ? 'Description' : type === 'income' ? 'Source *' : 'Title *';
   const titlePlaceholder =
     type === 'transfer'
@@ -1358,6 +1529,113 @@ export const AddTransactionScreen = () => {
             ) : null}
           </View>
 
+          {involvesForeignCurrency ? (
+            <View
+              testID="currency-exchange-panel"
+              style={[styles.fieldCard, styles.fxPanel, { backgroundColor: theme.surface, borderColor: theme.border }]}
+            >
+              {type !== 'transfer' && fromCurrency !== currencyCode ? (
+                <View style={styles.fxRow}>
+                  <Text style={[styles.label, styles.fxRowLabel, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                    Amount in
+                  </Text>
+                  {[fromCurrency, currencyCode].map((code) => {
+                    const selected = amountCurrency === code;
+                    return (
+                      <TouchableOpacity
+                        key={code}
+                        onPress={() => setEntryCurrency(code)}
+                        style={[
+                          styles.fxChip,
+                          {
+                            borderColor: selected ? theme.primary : theme.border,
+                            backgroundColor: selected ? theme.primaryMuted : 'transparent',
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Enter amount in ${code}`}
+                        accessibilityState={{ selected }}
+                      >
+                        <Text style={{ color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(13), fontWeight: '700' }}>
+                          {code}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {isCrossCurrencyTransfer ? (
+                <View style={styles.fxRow}>
+                  <Text style={[styles.label, styles.fxRowLabel, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                    Received ({getCurrencySymbol(toCurrency)})
+                  </Text>
+                  <TextInput
+                    style={[styles.fxInput, { borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(14) }]}
+                    value={receivedText}
+                    onChangeText={(text) => {
+                      setReceivedText(formatAmountInput(text, toCurrency));
+                      setCurrencyError(null);
+                    }}
+                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                    placeholder="0"
+                    placeholderTextColor={theme.textMuted}
+                    accessibilityLabel={`Amount received in ${toCurrency}`}
+                  />
+                </View>
+              ) : null}
+
+              {rateCurrency ? (
+                <View style={styles.fxRow}>
+                  <Text style={[styles.label, styles.fxRowLabel, { color: theme.text, fontSize: theme.scaleFont(12) }]}>
+                    1 {rateCurrency} = {getCurrencySymbol(currencyCode)}
+                  </Text>
+                  <TextInput
+                    style={[styles.fxInput, { borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(14) }]}
+                    value={rateText}
+                    onChangeText={(text) => {
+                      rateEditedRef.current = true;
+                      setRateText(text.replace(/[^0-9.,]/g, ''));
+                      setRateSource('Entered by you');
+                      setCurrencyError(null);
+                    }}
+                    keyboardType="decimal-pad"
+                    placeholder="Exchange rate"
+                    placeholderTextColor={theme.textMuted}
+                    accessibilityLabel={`Exchange rate, ${currencyCode} per ${rateCurrency}`}
+                  />
+                </View>
+              ) : null}
+              {rateCurrency && fromWallet?.averageRate && parseRate(rateText) !== fromWallet.averageRate ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    rateEditedRef.current = true;
+                    setRateText(String(fromWallet.averageRate));
+                    setRateSource('Your average exchange cost');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Use my average exchange cost"
+                >
+                  <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
+                    Use my exchange cost ({getCurrencySymbol(currencyCode)} {fromWallet.averageRate})
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {fxSummary ? (
+                <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>{fxSummary}</Text>
+              ) : null}
+              {currencyError ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={[styles.inlineErrorText, { color: theme.expense, fontSize: theme.scaleFont(11) }]}
+                >
+                  {currencyError}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {/* Category & Date Pickers */}
           <View style={styles.compactRow}>
             {type !== 'transfer' ? (
@@ -1410,7 +1688,12 @@ export const AddTransactionScreen = () => {
           <View style={styles.inputGroupCompact}>
             <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Repeat</Text>
             <View style={styles.repeatRow}>
-              {[{ key: null, label: 'Never' }, ...RECURRING_FREQUENCIES].map((option) => {
+              {involvesForeignCurrency ? (
+                <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>
+                  Repeat isn&apos;t available for foreign-currency accounts yet.
+                </Text>
+              ) : null}
+              {(involvesForeignCurrency ? [] : [{ key: null, label: 'Never' }, ...RECURRING_FREQUENCIES]).map((option) => {
                 const selected = repeat === option.key;
                 return (
                   <TouchableOpacity
@@ -1688,7 +1971,7 @@ export const AddTransactionScreen = () => {
       <AmountCalculatorModal
         visible={calculatorVisible}
         initialValue={amount}
-        currencyCode={currencyCode}
+        currencyCode={amountCurrency}
         onDone={(formatted) => handleAmountChange(formatted)}
         onClose={() => setCalculatorVisible(false)}
       />
@@ -1705,6 +1988,7 @@ export const AddTransactionScreen = () => {
             setToAccountError(null);
           } else {
             setWalletId(id);
+            setEntryCurrency(null);
             if (id === effectiveToWalletId) setToWalletId(null);
           }
         }}
@@ -1818,6 +2102,11 @@ const styles = StyleSheet.create({
   amountTextInput: { flex: 1, minHeight: 44, paddingVertical: 0, marginRight: 4 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
   inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
+  fxPanel: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8, marginBottom: 12 },
+  fxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  fxRowLabel: { marginBottom: 0, minWidth: 96 },
+  fxChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
+  fxInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, minHeight: 40 },
   inlineWarningText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   compactPicker: {
     minHeight: 46,

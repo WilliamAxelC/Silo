@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -29,6 +29,8 @@ import type { Wallet, WalletType } from '../features/transactions/types';
 import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
 import { WALLET_TYPE_META } from '../components/AccountPickerModal';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
+import { SUPPORTED_CURRENCIES, walletCurrencyOf } from '../features/currency/currencies';
+import { refreshDailyRates, walletHomeRate } from '../services/fx/rates';
 import { useAppTheme } from '../theme/useAppTheme';
 
 interface Draft {
@@ -37,9 +39,9 @@ interface Draft {
   type: WalletType;
   openingBalance: string;
   openingNegative: boolean;
+  /** Account currency; the home currency for ordinary accounts. */
+  currency: string;
 }
-
-const EMPTY_DRAFT: Draft = { id: null, name: '', type: 'bank', openingBalance: '', openingNegative: false };
 
 export const AccountsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -55,17 +57,45 @@ export const AccountsScreen = () => {
 
   const active = wallets.filter((w) => w.isActive);
   const archived = wallets.filter((w) => !w.isActive);
-  const { netWorth, assets, debts } = useMemo(() => {
-    const totals = { netWorth: 0, assets: 0, debts: 0 };
+  const hasForeign = wallets.some((w) => w.currency && w.currency !== currencyCode);
+  const [ratesVersion, setRatesVersion] = useState(0);
+  useEffect(() => {
+    if (!hasForeign) return;
+    let alive = true;
+    void refreshDailyRates(currencyCode).then(() => alive && setRatesVersion((v) => v + 1));
+    return () => {
+      alive = false;
+    };
+  }, [hasForeign, currencyCode]);
+
+  // Foreign accounts count toward net worth at their average exchange cost (or today's rate when unknown).
+  const homeValue = (w: Wallet): number | null => {
+    const rate = walletHomeRate(w, currencyCode);
+    return rate == null ? null : w.balance * rate;
+  };
+  const { netWorth, assets, debts, unpriced } = useMemo(() => {
+    const totals = { netWorth: 0, assets: 0, debts: 0, unpriced: 0 };
     for (const w of active) {
-      totals.netWorth += w.balance;
-      if (w.balance >= 0) totals.assets += w.balance;
-      else totals.debts += -w.balance;
+      const value = homeValue(w);
+      if (value == null) {
+        totals.unpriced += 1;
+        continue;
+      }
+      totals.netWorth += value;
+      if (value >= 0) totals.assets += value;
+      else totals.debts += -value;
     }
     return totals;
-  }, [active]);
-  const archivedNet = useMemo(() => archived.reduce((sum, w) => sum + w.balance, 0), [archived]);
-  const money = (n: number) => formatDisplayCurrency(n, currencyCode, useThousands);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, currencyCode, ratesVersion]);
+  const archivedNet = useMemo(
+    () => archived.reduce((sum, w) => sum + (homeValue(w) ?? 0), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [archived, currencyCode, ratesVersion]
+  );
+  const money = (n: number, code: string = currencyCode) => formatDisplayCurrency(n, code, useThousands);
+  const emptyDraft: Draft = { id: null, name: '', type: 'bank', openingBalance: '', openingNegative: false, currency: currencyCode };
+  const draftCurrency = draft?.currency ?? currencyCode;
 
   const editingWallet = draft?.id != null ? wallets.find((w) => w.id === draft.id) ?? null : null;
   const editingWalletHasHistory = Boolean(
@@ -89,23 +119,27 @@ export const AccountsScreen = () => {
             id: wallet.id,
             name: wallet.name,
             type: wallet.type,
-            openingBalance: wallet.initialBalance ? formatAmountForInput(wallet.initialBalance, currencyCode) : '',
+            openingBalance: wallet.initialBalance
+              ? formatAmountForInput(wallet.initialBalance, walletCurrencyOf(wallet, currencyCode))
+              : '',
             openingNegative: wallet.initialBalance < 0,
+            currency: walletCurrencyOf(wallet, currencyCode),
           }
-        : EMPTY_DRAFT,
+        : emptyDraft,
     );
 
   const save = () => {
     if (!draft) return;
-    const magnitude = Math.abs(parseSignedAmount(draft.openingBalance || '0', undefined, currencyCode));
+    const magnitude = Math.abs(parseSignedAmount(draft.openingBalance || '0', undefined, draft.currency));
     if (!isAmountWithinRange(magnitude)) {
       Alert.alert('Amount too large', 'Enter an opening balance within the supported range.');
       return;
     }
     const initialBalance = draft.openingNegative ? -magnitude : magnitude;
+    const currency = draft.currency === currencyCode ? null : draft.currency;
     try {
-      if (draft.id === null) addWallet({ name: draft.name, type: draft.type, initialBalance });
-      else updateWallet(draft.id, { name: draft.name, type: draft.type, initialBalance });
+      if (draft.id === null) addWallet({ name: draft.name, type: draft.type, initialBalance, currency });
+      else updateWallet(draft.id, { name: draft.name, type: draft.type, initialBalance, currency });
       setDraft(null);
     } catch (error) {
       Alert.alert('Could not save account', error instanceof Error ? error.message : String(error));
@@ -134,13 +168,20 @@ export const AccountsScreen = () => {
     ]);
   };
 
-  const renderWallet = (wallet: Wallet) => (
+  const renderWallet = (wallet: Wallet) => {
+    const code = walletCurrencyOf(wallet, currencyCode);
+    const isForeign = code !== currencyCode;
+    const value = isForeign ? homeValue(wallet) : null;
+    const subtitle = isForeign
+      ? `${WALLET_TYPE_META[wallet.type].label} · ${code}${value != null ? ` · ≈ ${money(value)}` : ''}`
+      : WALLET_TYPE_META[wallet.type].label;
+    return (
     <TouchableOpacity
       key={wallet.id}
       style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: wallet.isActive ? 1 : 0.6 }]}
       onPress={() => openEditor(wallet)}
       accessibilityRole="button"
-      accessibilityLabel={`${wallet.name}, ${WALLET_TYPE_META[wallet.type].label}, balance ${money(wallet.balance)}`}
+      accessibilityLabel={`${wallet.name}, ${WALLET_TYPE_META[wallet.type].label}, balance ${money(wallet.balance, code)}`}
     >
       <View style={[styles.iconWrap, { backgroundColor: theme.primaryMuted }]}>
         <Ionicons name={WALLET_TYPE_META[wallet.type].icon} size={20} color={theme.primary} />
@@ -149,8 +190,8 @@ export const AccountsScreen = () => {
         <Text style={[styles.rowTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
           {wallet.name}
         </Text>
-        <Text style={[styles.rowSub, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-          {WALLET_TYPE_META[wallet.type].label}
+        <Text style={[styles.rowSub, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]} numberOfLines={1}>
+          {subtitle}
         </Text>
       </View>
       <Text
@@ -159,10 +200,11 @@ export const AccountsScreen = () => {
           { color: wallet.balance < 0 ? theme.expense : theme.text, fontSize: theme.scaleFont(15) },
         ]}
       >
-        {money(wallet.balance)}
+        {money(wallet.balance, code)}
       </Text>
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -216,6 +258,11 @@ export const AccountsScreen = () => {
               style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}
             >
               Active accounts only{archivedNet !== 0 ? ` · Archived: ${money(archivedNet)}` : ''}
+            </Text>
+          ) : null}
+          {unpriced > 0 ? (
+            <Text style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+              {unpriced} foreign account{unpriced === 1 ? '' : 's'} left out until an exchange rate is available
             </Text>
           ) : null}
         </View>
@@ -298,6 +345,56 @@ export const AccountsScreen = () => {
                 })}
               </View>
 
+              <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Currency</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+                {[currencyCode, ...SUPPORTED_CURRENCIES.map((c) => c.code).filter((c) => c !== currencyCode)].map((code) => {
+                  const selected = draftCurrency === code;
+                  const locked = editingWalletHasHistory && !selected;
+                  return (
+                    <TouchableOpacity
+                      key={code}
+                      disabled={locked}
+                      style={[
+                        styles.chip,
+                        {
+                          borderColor: selected ? theme.primary : theme.border,
+                          backgroundColor: selected ? theme.primaryMuted : 'transparent',
+                          opacity: locked ? 0.4 : 1,
+                        },
+                      ]}
+                      onPress={() =>
+                        setDraft((d) =>
+                          d ? { ...d, currency: code, openingBalance: formatAmountInput(d.openingBalance, code) } : d
+                        )
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`Account currency ${code}${code === currencyCode ? ' (home)' : ''}`}
+                      accessibilityState={{ selected, disabled: locked }}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
+                        ]}
+                      >
+                        {code}
+                        {code === currencyCode ? ' · home' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              {editingWalletHasHistory ? (
+                <Text style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Currency is fixed once an account has transactions.
+                </Text>
+              ) : draftCurrency !== currencyCode ? (
+                <Text style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
+                  Balance is kept in {draftCurrency}. Fill it with a Transfer from a {currencyCode} account to record the
+                  exchange rate.
+                </Text>
+              ) : null}
+
               <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Opening balance</Text>
               <View style={styles.balanceRow}>
                 <TouchableOpacity
@@ -322,7 +419,7 @@ export const AccountsScreen = () => {
                 <TextInput
                   style={[styles.input, styles.flex, { borderColor: theme.border, color: theme.text, fontSize: theme.scaleFont(15) }]}
                   value={draft?.openingBalance ?? ''}
-                  onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v, currencyCode) } : d))}
+                  onChangeText={(v) => setDraft((d) => (d ? { ...d, openingBalance: formatAmountInput(v, d.currency) } : d))}
                   keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                   placeholder="0"
                   placeholderTextColor={theme.textMuted}

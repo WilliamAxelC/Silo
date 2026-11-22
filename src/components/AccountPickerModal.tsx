@@ -61,7 +61,7 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={`${item.name}, balance ${formatDisplayCurrency(item.balance, currencyCode, useThousands)}`}
+                  accessibilityLabel={`${item.name}, balance ${formatDisplayCurrency(item.balance, item.currency ?? currencyCode, useThousands)}`}
                 >
                   <Ionicons name={WALLET_TYPE_META[item.type].icon} size={20} color={theme.primary} />
                   <Text style={[styles.name, { color: theme.text, fontSize: theme.scaleFont(15) }]} numberOfLines={1}>
@@ -73,7 +73,7 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
                       { color: item.balance < 0 ? theme.expense : theme.textMuted, fontSize: theme.scaleFont(13) },
                     ]}
                   >
-                    {formatDisplayCurrency(item.balance, currencyCode, useThousands)}
+                    {formatDisplayCurrency(item.balance, item.currency ?? currencyCode, useThousands)}
                   </Text>
                   {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
                 </TouchableOpacity>
