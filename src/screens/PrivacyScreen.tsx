@@ -35,6 +35,12 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
     when: 'Only if you switch AI to External in Settings. Off by default.',
   },
   {
+    icon: 'logo-google',
+    title: 'Google Drive (optional)',
+    what: 'Your backups, and receipt photos you choose to move, go to a Silo folder in your own Google Drive. Silo can only see files it created there.',
+    when: 'Only after you connect Drive in Settings, Data. Disconnect any time.',
+  },
+  {
     icon: 'bug-outline',
     title: 'Bug reports and feature requests',
     what: 'Your text, Silo version, phone model and Android version; the error log or a screenshot only if you add them.',
@@ -45,7 +51,7 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
 const STAYS = [
   'All your transactions, accounts, budgets, goals and receipt photos',
   'Receipt reading (OCR) and the on-device AI chat',
-  'Backups: saved on your phone, or wherever you choose to share them',
+  'Backups: saved on your phone, or in your own Google Drive if you connect it',
 ];
 
 export const PrivacyScreen = () => {

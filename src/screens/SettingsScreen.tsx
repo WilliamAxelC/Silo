@@ -79,6 +79,7 @@ import { clearErrorLog } from '../services/errorLog';
 import { useUpdateStore } from '../services/updates';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useGoalsStore } from '../features/goals/goals';
+import { DriveSyncSection } from '../components/DriveSyncSection';
 import appConfig from '../../app.json';
 
 const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -2325,6 +2326,10 @@ export const SettingsScreen = () => {
           >
             <Text style={[styles.rowSubText, { color: theme.primary, fontWeight: '700' }, captionScale]}>Back up now</Text>
           </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <DriveSyncSection onRestoreFile={(uri) => runRestore(uri)} locale={dateFormat || 'en-GB'} />
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 

@@ -3,8 +3,30 @@ import { Linking } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { create } from 'zustand';
 
+import { expoDb } from '../db/index';
 import { recordError } from './errorLog';
-import { getInstalledVersion, type UpdateManifest } from './updates';
+import { getInstalledVersion, useUpdateStore, type UpdateManifest } from './updates';
+
+/**
+ * Android kills Silo's process when the user grants "Install unknown apps", so an update waiting for that
+ * permission is remembered here and resumed on the next start (resumePendingUpdate).
+ */
+const PENDING_KEY = 'pendingUpdateInstall';
+function setPending(versionCode: number | null) {
+  try {
+    if (versionCode) expoDb.runSync('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', [PENDING_KEY, String(versionCode)]);
+    else expoDb.runSync('DELETE FROM app_settings WHERE key = ?;', [PENDING_KEY]);
+  } catch {
+    // best effort
+  }
+}
+function getPending(): number {
+  try {
+    return Number(expoDb.getFirstSync<{ value: string }>('SELECT value FROM app_settings WHERE key = ?;', [PENDING_KEY])?.value ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * In-app updates for the sideloaded APK: download from the download site, check the SHA-256 from
@@ -31,6 +53,10 @@ interface AppUpdateState {
   progress: number;
   error: string | null;
   fileUri: string | null;
+  /** The update shown in the (app-wide) update sheet; null when closed. */
+  sheet: UpdateManifest | null;
+  openSheet: (manifest: UpdateManifest) => void;
+  closeSheet: () => void;
   start: (manifest: UpdateManifest) => Promise<void>;
   /** After the user allowed "Install unknown apps" (or to retry the installer). */
   install: () => void;
@@ -50,6 +76,9 @@ export const useAppUpdateStore = create<AppUpdateState>((set, get) => ({
   progress: 0,
   error: null,
   fileUri: null,
+  sheet: null,
+  openSheet: (manifest) => set({ sheet: manifest }),
+  closeSheet: () => set((s) => ({ sheet: null, ...(s.status === 'error' ? { status: 'idle' as const, error: null } : {}) })),
 
   start: async (manifest) => {
     if (get().status === 'downloading' || get().status === 'verifying') return;
@@ -110,10 +139,13 @@ export const useAppUpdateStore = create<AppUpdateState>((set, get) => ({
     const { fileUri } = get();
     if (!native || !fileUri) return;
     if (!native.canInstallPackages()) {
+      const code = Number(/-(\d+)\.apk$/.exec(fileUri)?.[1] ?? 0);
+      setPending(code || null);
       set({ status: 'needs-permission', error: null });
       return;
     }
     try {
+      setPending(null);
       native.installApk(fileUri);
       set({ status: 'installing', error: null });
     } catch (error) {
@@ -147,6 +179,25 @@ export const useAppUpdateStore = create<AppUpdateState>((set, get) => ({
 }));
 
 class UpdateError extends Error {}
+
+/**
+ * Called at startup: if Silo was restarted while waiting for the install permission (Android does that
+ * when the permission is granted), reopen the update and continue. The file is re-verified before install.
+ */
+export async function resumePendingUpdate(): Promise<boolean> {
+  const pending = getPending();
+  if (!pending) return false;
+  const latest = useUpdateStore.getState().latest;
+  if (!latest || latest.versionCode !== pending || latest.versionCode <= getInstalledVersion().versionCode) {
+    setPending(null);
+    return false;
+  }
+  if (!native?.canInstallPackages()) return false; // still waiting; the banner/More stay available
+  const store = useAppUpdateStore.getState();
+  store.openSheet(latest);
+  await store.start(latest);
+  return true;
+}
 
 /** Deletes downloaded update APKs once they are installed (or older than what is running). */
 export async function cleanUpInstalledUpdates(): Promise<void> {

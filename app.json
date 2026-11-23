@@ -65,6 +65,7 @@
       "./plugins/withMlKitLatinOnly",
       "./plugins/withAndroidReleaseOptimization",
       "./plugins/withAndroidThemePolish",
+      "./plugins/withReleaseSigning",
       [
         "expo-local-authentication",
         {

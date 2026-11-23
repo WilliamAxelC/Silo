@@ -40,6 +40,7 @@ export const RESTORE_TABLES = [
   'recurring_rules',
   'transaction_templates',
   'goals',
+  'drive_receipts',
 ] as const;
 // Every user-data table must be listed above (regression 2026-11-23: tags, tag links and budget plans
 // were silently dropped on restore). activity_log is history, not data, and is left out on purpose.
@@ -63,6 +64,11 @@ export const DEVICE_ONLY_SETTING_KEYS = [
   'appLockEnabled',
   'activeModelId',
   'aiWifiOnlyDownload',
+  // Google Drive connection belongs to this phone's Google sign-in, not to the backup's.
+  'driveAccount',
+  'driveFolders',
+  'driveLastBackupAt',
+  'driveLastOffloadAt',
 ] as const;
 
 function plainPath(uri: string): string {

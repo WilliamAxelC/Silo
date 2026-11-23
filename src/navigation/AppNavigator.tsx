@@ -42,7 +42,9 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
 import { useUpdateStore } from '../services/updates';
 import { runAutoBackupIfDue } from '../services/autoBackup';
-import { cleanUpInstalledUpdates } from '../services/appUpdate';
+import { cleanUpInstalledUpdates, resumePendingUpdate } from '../services/appUpdate';
+import { UpdateSheet } from '../components/UpdateSheet';
+import { runDriveSyncIfDue } from '../services/drive/driveSync';
 import { RecurringScreen } from '../screens/RecurringScreen';
 import { ReportScreen } from '../screens/ReportScreen';
 import { PrivacyScreen } from '../screens/PrivacyScreen';
@@ -215,9 +217,10 @@ export const AppNavigator = () => {
       .then(() => {
         // New-version notice: reads a small static file from the download page at most once a day.
         useUpdateStore.getState().hydrate();
+        void resumePendingUpdate();
         void useUpdateStore.getState().check();
         // Today's automatic backup, a few seconds after startup so it never slows the first screen.
-        setTimeout(() => void runAutoBackupIfDue(), 5000);
+        setTimeout(() => void runAutoBackupIfDue().then(() => runDriveSyncIfDue()), 5000);
         void cleanUpInstalledUpdates();
       });
     useReceiptQueueStore.getState().load();
@@ -292,6 +295,7 @@ export const AppNavigator = () => {
           <Stack.Screen name="Goals" component={GoalsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
+      <UpdateSheet />
     </View>
   );
 };

@@ -9,7 +9,7 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { DOWNLOAD_PAGE_URL, isNewer, useUpdateStore } from '../services/updates';
-import { UpdateSheet } from '../components/UpdateSheet';
+import { useAppUpdateStore } from '../services/appUpdate';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
 import { DB_SCHEMA_VERSION } from '../db/index';
 
@@ -31,7 +31,7 @@ export const MoreScreen = () => {
   const setAutoCheck = useUpdateStore((s) => s.setEnabled);
   const channel = useUpdateStore((s) => s.channel);
   const setChannel = useUpdateStore((s) => s.setChannel);
-  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
+  const openUpdateSheet = useAppUpdateStore((s) => s.openSheet);
   const versionTaps = useRef<{ count: number; at: number }>({ count: 0, at: 0 });
 
   /** Seven quick taps on Version switch to (or from) the test channel: early builds from the test branch. */
@@ -307,7 +307,7 @@ export const MoreScreen = () => {
               {updateAvailable && latest ? (
                 <TouchableOpacity
                   style={[styles.infoBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}
-                  onPress={() => setUpdateSheetOpen(true)}
+                  onPress={() => openUpdateSheet(latest)}
                   accessibilityRole="button"
                   accessibilityLabel={`Update to Silo ${latest.version}`}
                 >
@@ -410,8 +410,6 @@ export const MoreScreen = () => {
             <Ionicons name="open-outline" size={18} color={theme.textMuted} />
           </TouchableOpacity>
         </View>
-
-        {updateSheetOpen ? <UpdateSheet manifest={latest} onClose={() => setUpdateSheetOpen(false)} /> : null}
 
         <View style={styles.footerWrap}>
           <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by CDev</Text>

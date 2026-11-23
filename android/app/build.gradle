@@ -104,6 +104,18 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // silo: release-signing
+        release {
+            def siloSigning = System.getenv('SILO_RELEASE_SIGNING')
+            if (siloSigning && new File(siloSigning).isFile()) {
+                def p = new Properties()
+                new File(siloSigning).withInputStream { p.load(it) }
+                storeFile file(p.getProperty('storeFile'))
+                storePassword p.getProperty('storePassword')
+                keyAlias p.getProperty('keyAlias')
+                keyPassword p.getProperty('keyPassword')
+            }
+        }
     }
     buildTypes {
         debug {
@@ -112,7 +124,7 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig (System.getenv('SILO_RELEASE_SIGNING') && new File(System.getenv('SILO_RELEASE_SIGNING')).isFile()) ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

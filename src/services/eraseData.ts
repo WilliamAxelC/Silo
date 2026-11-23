@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { expoDb, rebuildFtsIndex, runMigrations } from '../db/index';
 import { deleteAllAutoBackups } from './autoBackup';
+import { disconnectDrive } from './drive/googleAuth';
 
 /** Settings kept through an erase: they describe the downloaded AI model, which is not personal data. */
 const KEEP_SETTING_KEYS = ['activeModelId', 'aiWifiOnlyDownload'];
@@ -46,6 +47,9 @@ export async function eraseAllData(): Promise<void> {
   } catch {
     // VACUUM can fail inside an open transaction elsewhere; the rows are gone either way.
   }
+
+  // Sign Silo out of Google too (files already in the user's Drive are theirs and stay).
+  await disconnectDrive().catch(() => undefined);
 
   const docs = FileSystem.documentDirectory ?? '';
   await Promise.all([

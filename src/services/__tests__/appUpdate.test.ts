@@ -5,7 +5,16 @@ const mockOpenURL = jest.fn(async () => true);
 jest.mock('react-native', () => ({ Linking: { openURL: (...a: unknown[]) => mockOpenURL(...(a as [])) } }));
 jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));
 jest.mock('../errorLog', () => ({ recordError: jest.fn() }));
-jest.mock('../../db/index', () => ({ expoDb: { getFirstSync: () => null, runSync: () => undefined } }));
+const mockSettings = new Map<string, string>();
+jest.mock('../../db/index', () => ({
+  expoDb: {
+    getFirstSync: (_sql: string, params: string[]) => (mockSettings.has(params[0]) ? { value: mockSettings.get(params[0]) } : null),
+    runSync: (sql: string, params: string[]) => {
+      if (sql.startsWith('DELETE')) mockSettings.delete(params[0]);
+      else mockSettings.set(params[0], params[1]);
+    },
+  },
+}));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { version: '1.3.3', android: { versionCode: 10 } } } }));
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
@@ -25,7 +34,8 @@ jest.mock('expo-file-system/legacy', () => ({
   })),
 }));
 
-import { __setUpdateNativeForTests, cleanUpInstalledUpdates, useAppUpdateStore } from '../appUpdate';
+import { __setUpdateNativeForTests, cleanUpInstalledUpdates, resumePendingUpdate, useAppUpdateStore } from '../appUpdate';
+import { useUpdateStore } from '../updates';
 import { parseApk, parseManifest } from '../updates';
 
 const SHA = 'a'.repeat(64);
@@ -48,6 +58,7 @@ function fakeNative(over: Partial<Record<string, any>> = {}) {
 }
 
 beforeEach(() => {
+  mockSettings.clear();
   mockFiles.clear();
   mockDownloadStatus = 200;
   mockOpenURL.mockClear();
@@ -149,5 +160,33 @@ describe('in-app update', () => {
     mockFiles.set('file:///cache/updates/silo-1.3.4-11.apk', 1);
     await cleanUpInstalledUpdates();
     expect([...mockFiles.keys()]).toEqual(['file:///cache/updates/silo-1.3.4-11.apk']);
+  });
+
+  // Regression (emulator 2026-11-23): granting "Install unknown apps" makes Android restart Silo, which lost
+  // the update sheet and left the user on the home screen with nothing happening.
+  it('regression: resumes the update after Android restarts Silo for the install permission', async () => {
+    let allowed = false;
+    const native = fakeNative({ canInstallPackages: jest.fn(() => allowed) });
+    __setUpdateNativeForTests(native as any);
+    await useAppUpdateStore.getState().start(manifest);
+    expect(useAppUpdateStore.getState().status).toBe('needs-permission');
+
+    // "Process restart": in-memory state gone, files and settings remain.
+    useAppUpdateStore.setState({ status: 'idle', fileUri: null, sheet: null });
+    useUpdateStore.setState({ latest: manifest as any });
+    allowed = true;
+    expect(await resumePendingUpdate()).toBe(true);
+    expect(useAppUpdateStore.getState().sheet).toEqual(manifest);
+    expect(native.installApk).toHaveBeenCalledWith('file:///cache/updates/silo-1.3.4-11.apk');
+    expect(native.sha256File).toHaveBeenCalled(); // re-verified before installing
+    expect(await resumePendingUpdate()).toBe(false); // cleared once handed to the installer
+  });
+
+  it('forgets a pending update that is no longer offered', async () => {
+    mockSettings.set('pendingUpdateInstall', '11');
+    useUpdateStore.setState({ latest: { ...manifest, versionCode: 12 } as any });
+    __setUpdateNativeForTests(fakeNative() as any);
+    expect(await resumePendingUpdate()).toBe(false);
+    expect(mockSettings.has('pendingUpdateInstall')).toBe(false);
   });
 });

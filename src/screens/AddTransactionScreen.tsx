@@ -2160,6 +2160,7 @@ export const AddTransactionScreen = () => {
       <ReceiptPhotoModal
         visible={photoViewerVisible}
         imageUri={imageUri}
+        transactionId={editingId}
         onClose={() => setPhotoViewerVisible(false)}
       />
     </SafeAreaView>

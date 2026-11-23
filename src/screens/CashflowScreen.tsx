@@ -20,7 +20,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
 import { FilterSheet } from '../components/FilterSheet';
 import { selectShowUpdateBanner, useUpdateStore } from '../services/updates';
-import { UpdateSheet } from '../components/UpdateSheet';
+import { useAppUpdateStore } from '../services/appUpdate';
 import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
 import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
@@ -173,7 +173,7 @@ export const CashflowScreen = () => {
   const showUpdateBanner = useUpdateStore(selectShowUpdateBanner);
   const latestVersion = useUpdateStore((s) => s.latest);
   const dismissUpdate = useUpdateStore((s) => s.dismiss);
-  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
+  const openUpdateSheet = useAppUpdateStore((s) => s.openSheet);
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
@@ -716,7 +716,7 @@ export const CashflowScreen = () => {
         >
           <TouchableOpacity
             style={styles.updateBannerBody}
-            onPress={() => setUpdateSheetOpen(true)}
+            onPress={() => openUpdateSheet(latestVersion)}
             accessibilityRole="button"
             accessibilityLabel={`Silo ${latestVersion.version} is available. Update`}
           >
@@ -996,7 +996,6 @@ export const CashflowScreen = () => {
       />
 
       <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding} />
-      {updateSheetOpen ? <UpdateSheet manifest={latestVersion} onClose={() => setUpdateSheetOpen(false)} /> : null}
     </SafeAreaView>
   );
 };

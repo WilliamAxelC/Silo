@@ -13,26 +13,50 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
+import { fetchFullReceipt } from '../services/drive/driveSync';
 
 interface ReceiptPhotoModalProps {
   visible: boolean;
   imageUri: string | null;
   onClose: () => void;
+  /** Saved transaction: if its photo was moved to Google Drive, the full photo is fetched from there. */
+  transactionId?: number;
 }
 
 const ZOOM_STEPS = [1, 2, 3] as const;
 
-export const ReceiptPhotoModal: React.FC<ReceiptPhotoModalProps> = ({ visible, imageUri, onClose }) => {
+export const ReceiptPhotoModal: React.FC<ReceiptPhotoModalProps> = ({ visible, imageUri: localUri, onClose, transactionId }) => {
   const theme = useAppTheme();
   const insets = useSafeInsets();
   const [zoomIndex, setZoomIndex] = useState(0);
+  const [driveUri, setDriveUri] = useState<string | null>(null);
+  const [driveNote, setDriveNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) {
       setZoomIndex(0);
     }
-  }, [visible, imageUri]);
+  }, [visible, localUri]);
 
+  // Photos moved to Drive keep only a preview on the phone: load the full photo when the viewer opens.
+  useEffect(() => {
+    setDriveUri(null);
+    setDriveNote(null);
+    if (!visible || !transactionId) return;
+    let active = true;
+    fetchFullReceipt(transactionId, localUri)
+      .then((uri) => {
+        if (active && uri) setDriveUri(uri);
+      })
+      .catch(() => {
+        if (active) setDriveNote('Showing the preview: the full photo is in Google Drive and could not be loaded.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [visible, transactionId, localUri]);
+
+  const imageUri = driveUri ?? localUri;
   if (!visible || !imageUri) {
     return null;
   }
@@ -108,6 +132,9 @@ export const ReceiptPhotoModal: React.FC<ReceiptPhotoModalProps> = ({ visible, i
           </ScrollView>
         </ScrollView>
 
+        {driveNote ? (
+          <Text style={{ color: '#fff', textAlign: 'center', paddingHorizontal: 16, fontSize: theme.scaleFont(12) }}>{driveNote}</Text>
+        ) : null}
         <View style={styles.controlsBar}>
           <TouchableOpacity
             style={[styles.zoomBtn, { opacity: zoomIndex === 0 ? 0.45 : 1 }]}

@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-export const DB_SCHEMA_VERSION = 19;
+export const DB_SCHEMA_VERSION = 20;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -535,6 +535,21 @@ function migrateToVersion19(sqliteDb: typeof expoDb = expoDb) {
   `);
 }
 
+/**
+ * Receipt photos moved to Google Drive (services/drive): the phone keeps a thumbnail in image_uri, the full
+ * photo is fetched from Drive on demand.
+ */
+function migrateToVersion20(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS drive_receipts (
+      transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+      drive_file_id TEXT NOT NULL,
+      thumb_uri TEXT NOT NULL,
+      offloaded_at INTEGER NOT NULL
+    );
+  `);
+}
+
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -991,6 +1006,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 19) {
     migrateToVersion19(sqliteDb);
+  }
+
+  if (currentVersion < 20) {
+    migrateToVersion20(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

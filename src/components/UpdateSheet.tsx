@@ -5,15 +5,15 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppUpdateStore } from '../services/appUpdate';
-import { getInstalledVersion, type UpdateManifest } from '../services/updates';
+import { getInstalledVersion } from '../services/updates';
 
 const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 
-/** Download, verify and install a new Silo version without leaving the app. */
-export function UpdateSheet({ manifest, onClose }: { manifest: UpdateManifest | null; onClose: () => void }) {
+/** Download, verify and install a new Silo version without leaving the app. Mounted once, app-wide. */
+export function UpdateSheet() {
   const theme = useAppTheme();
   const insets = useSafeInsets();
-  const { status, progress, error, start, install, openPermissionSettings, cancel, reset } = useAppUpdateStore();
+  const { status, progress, error, start, install, openPermissionSettings, cancel, sheet: manifest, closeSheet } = useAppUpdateStore();
   const installed = getInstalledVersion();
 
   // Coming back from Android's "Install unknown apps" screen: try the installer again.
@@ -27,10 +27,7 @@ export function UpdateSheet({ manifest, onClose }: { manifest: UpdateManifest | 
 
   if (!manifest) return null;
   const busy = status === 'downloading' || status === 'verifying';
-  const close = () => {
-    if (status === 'error') reset();
-    onClose();
-  };
+  const close = closeSheet;
   const body = { color: theme.text, fontSize: theme.scaleFont(14) };
   const muted = { color: theme.textMuted, fontSize: theme.scaleFont(13) };
 
