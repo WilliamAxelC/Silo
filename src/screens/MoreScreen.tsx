@@ -10,6 +10,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { DOWNLOAD_PAGE_URL, isNewer, useUpdateStore } from '../services/updates';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
+import { DB_SCHEMA_VERSION } from '../db/index';
 
 export const MoreScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -219,6 +220,18 @@ export const MoreScreen = () => {
             </View>
             <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="app-version">
               {installed.version} (build {installed.versionCode})
+            </Text>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.menuRow}>
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="server-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Database</Text>
+            </View>
+            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="db-version">
+              v{DB_SCHEMA_VERSION}
             </Text>
           </View>
 

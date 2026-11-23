@@ -4,6 +4,7 @@ import { MoreScreen } from '../MoreScreen';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useUpdateStore } from '../../services/updates';
+import { DB_SCHEMA_VERSION } from '../../db/index';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -143,6 +144,32 @@ describe('MoreScreen (F-24, F-25, F-32, NIT-02)', () => {
     expect(renderer.root.findByProps({ accessibilityLabel: 'Download Silo 1.4.0' })).toBeTruthy();
     ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Check for updates' }).props.onPress());
     expect(mockCheck).toHaveBeenCalledWith({ force: true });
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('shows the database schema version row under Version in App info', () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<MoreScreen />);
+    });
+
+    const appInfo = renderer.root.findByProps({ testID: 'app-info' });
+    const appInfoTexts = appInfo.findAllByType(Text).map((node: any) => {
+      const c = node.props.children;
+      return Array.isArray(c) ? c.join('') : String(c);
+    });
+
+    const versionIdx = appInfoTexts.indexOf('Version');
+    const dbIdx = appInfoTexts.indexOf('Database');
+    expect(versionIdx).toBeGreaterThanOrEqual(0);
+    expect(dbIdx).toBeGreaterThan(versionIdx);
+
+    const dbVersionNode = renderer.root.findByProps({ testID: 'db-version' });
+    const dbVersionText = Array.isArray(dbVersionNode.props.children)
+      ? dbVersionNode.props.children.join('')
+      : String(dbVersionNode.props.children);
+    expect(dbVersionText).toBe(`v${DB_SCHEMA_VERSION}`);
+
     ReactTestRenderer.act(() => renderer.unmount());
   });
 });
