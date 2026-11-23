@@ -6,15 +6,11 @@ import {
   SectionList,
   FlatList,
   ScrollView,
-  Modal,
   TouchableOpacity,
   RefreshControl,
-  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { endOfDay, startOfDay, subDays } from 'date-fns';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -22,13 +18,15 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
+import { FilterSheet } from '../components/FilterSheet';
+import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
+import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
 import {
   formatCachedLocaleDate,
   formatPeriodLabel,
   getCalendarMonthBounds,
   getLocalDayBounds,
-  getPeriodBounds,
   isSamePeriod,
   shiftPeriod,
   toLocalDayKey,
@@ -36,7 +34,6 @@ import {
 } from '../features/transactions/periods';
 import { MonthlyCalendarView } from '../components/MonthlyCalendarView';
 import { WelcomeSheet } from '../components/WelcomeSheet';
-import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
 import type { Transaction, TransactionType } from '../features/transactions/types';
 import type { DailyTotal, SearchTransactionsOptions } from '../db/index';
@@ -45,48 +42,6 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NavigationProps } from '../navigation/types';
 
 type CashflowViewMode = 'list' | 'calendar';
-type DateRangePreset = 'today' | 'last7' | 'thisMonth' | 'lastMonth' | 'last30' | 'custom';
-type FilterSheetKind = 'type' | 'account' | 'category' | 'date';
-
-const TYPE_OPTIONS: Array<{ key: TransactionType | null; label: string }> = [
-  { key: null, label: 'All types' },
-  { key: 'expense', label: 'Expense' },
-  { key: 'income', label: 'Income' },
-  { key: 'transfer', label: 'Transfer' },
-];
-
-const DATE_PRESETS: Array<{ key: Exclude<DateRangePreset, 'custom'>; label: string }> = [
-  { key: 'today', label: 'Today' },
-  { key: 'last7', label: 'Last 7 days' },
-  { key: 'thisMonth', label: 'This month' },
-  { key: 'lastMonth', label: 'Last month' },
-  { key: 'last30', label: 'Last 30 days' },
-];
-
-function computeDatePresetBounds(
-  preset: Exclude<DateRangePreset, 'custom'>,
-  now = new Date(),
-  monthStartDay = 1
-): { from: number; to: number } {
-  switch (preset) {
-    case 'today':
-      return { from: startOfDay(now).getTime(), to: endOfDay(now).getTime() };
-    case 'last7':
-      return { from: startOfDay(subDays(now, 6)).getTime(), to: endOfDay(now).getTime() };
-    case 'thisMonth': {
-      const bounds = getPeriodBounds(now, monthStartDay);
-      return { from: bounds.startMs, to: bounds.endMs };
-    }
-    case 'lastMonth': {
-      const prev = shiftPeriod(now, -1, monthStartDay);
-      const bounds = getPeriodBounds(prev, monthStartDay);
-      return { from: bounds.startMs, to: bounds.endMs };
-    }
-    case 'last30':
-      return { from: startOfDay(subDays(now, 29)).getTime(), to: endOfDay(now).getTime() };
-  }
-}
-
 const SECTION_HEADER_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
   day: 'numeric',
@@ -209,10 +164,10 @@ export const CashflowScreen = () => {
   const error = useTransactionStore((state) => state.error);
   const clearError = useTransactionStore((state) => state.clearError);
   const theme = useAppTheme();
-  const insets = useSafeInsets();
   const queueItems = useReceiptQueueStore((s) => s.items);
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
+  const tags = useTransactionStore((s) => s.tags);
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
@@ -236,15 +191,15 @@ export const CashflowScreen = () => {
   const [datePreset, setDatePreset] = useState<DateRangePreset | null>(null);
   const [dateFrom, setDateFrom] = useState<number | null>(null);
   const [dateTo, setDateTo] = useState<number | null>(null);
-  const [activeFilterSheet, setActiveFilterSheet] = useState<FilterSheetKind | null>(null);
-  const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | null>(null);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [filterRefreshTick, setFilterRefreshTick] = useState(0);
   const [searchResults, setSearchResults] = useState<Transaction[] | null>(null);
   const [searchSummaryState, setSearchSummaryState] = useState<TransactionFilterSummary | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
   const hasActiveFilters = Boolean(
-    typeFilter || walletFilterId != null || categoryFilter || dateFrom != null || dateTo != null
+    typeFilter || walletFilterId != null || categoryFilter || tagFilter || dateFrom != null || dateTo != null
   );
 
   const onRefresh = useCallback(async () => {
@@ -279,6 +234,7 @@ export const CashflowScreen = () => {
 
     const options: SearchTransactionsOptions = {};
     if (tagQuery) options.tag = tagQuery;
+    else if (tagFilter) options.tag = tagFilter;
     if (typeFilter) options.type = typeFilter;
     if (walletFilterId != null) options.walletId = walletFilterId;
     if (categoryFilter) options.category = categoryFilter;
@@ -325,6 +281,7 @@ export const CashflowScreen = () => {
     typeFilter,
     walletFilterId,
     categoryFilter,
+    tagFilter,
     dateFrom,
     dateTo,
     dataVersion,
@@ -550,22 +507,6 @@ export const CashflowScreen = () => {
   const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
   const showAccountNames = useMemo(() => wallets.filter((w) => w.isActive).length > 1, [wallets]);
 
-  const filterableCategories = useMemo(() => {
-    const filtered =
-      typeFilter === 'expense' || typeFilter === 'income'
-        ? categories.filter((c) => c.type === typeFilter)
-        : categories;
-    const seen = new Set<string>();
-    const names: string[] = [];
-    for (const cat of filtered) {
-      if (!seen.has(cat.name)) {
-        seen.add(cat.name);
-        names.push(cat.name);
-      }
-    }
-    return names.sort((a, b) => a.localeCompare(b));
-  }, [categories, typeFilter]);
-
   const searchSummary = useMemo(
     () => searchSummaryState ?? summarizeTransactions(searchResults ?? []),
     [searchSummaryState, searchResults]
@@ -573,79 +514,25 @@ export const CashflowScreen = () => {
 
   const isListTruncated = searchResults !== null && searchSummary.count > searchResults.length;
 
-  const dateRangeChipLabel = useMemo(() => {
-    if (dateFrom == null && dateTo == null) return 'Date range';
-    if (datePreset && datePreset !== 'custom') {
-      return DATE_PRESETS.find((p) => p.key === datePreset)?.label ?? 'Date range';
-    }
-    const fmt = (ms: number) => formatCachedLocaleDate(ms, locale, SHORT_DAY_OPTIONS);
-    if (dateFrom != null && dateTo != null) return `${fmt(dateFrom)} – ${fmt(dateTo)}`;
-    if (dateFrom != null) return `From ${fmt(dateFrom)}`;
-    return `Until ${fmt(dateTo!)}`;
-  }, [dateFrom, datePreset, dateTo, locale]);
-
-  const typeChipLabel = useMemo(() => {
-    if (!typeFilter) return 'Type';
-    return TYPE_OPTIONS.find((opt) => opt.key === typeFilter)?.label ?? 'Type';
-  }, [typeFilter]);
-
-  const accountChipLabel = useMemo(() => {
-    if (walletFilterId == null) return 'Account';
-    return walletNames.get(walletFilterId) ?? 'Account';
-  }, [walletFilterId, walletNames]);
-
-  const clearAllFilters = () => {
-    setTypeFilter(null);
-    setWalletFilterId(null);
-    setCategoryFilter(null);
-    setDatePreset(null);
-    setDateFrom(null);
-    setDateTo(null);
+  const filters: TransactionFilters = {
+    type: typeFilter,
+    walletId: walletFilterId,
+    category: categoryFilter,
+    tag: tagFilter,
+    datePreset,
+    dateFrom,
+    dateTo,
   };
+  const activeFilterCount = countActiveFilters(filters);
 
-  const handleSelectTypeFilter = (nextType: TransactionType | null) => {
-    setTypeFilter(nextType);
-    if (nextType === 'transfer') {
-      setCategoryFilter(null);
-    } else if (nextType && categoryFilter) {
-      const stillValid = categories.some((c) => c.type === nextType && c.name === categoryFilter);
-      if (!stillValid) setCategoryFilter(null);
-    }
-    setActiveFilterSheet(null);
-  };
-
-  const handleSelectDatePreset = (preset: Exclude<DateRangePreset, 'custom'> | null) => {
-    if (!preset) {
-      setDatePreset(null);
-      setDateFrom(null);
-      setDateTo(null);
-    } else {
-      const bounds = computeDatePresetBounds(preset, new Date(), monthStartDay);
-      setDatePreset(preset);
-      setDateFrom(bounds.from);
-      setDateTo(bounds.to);
-    }
-    setActiveFilterSheet(null);
-  };
-
-  const handleCustomDateChange = (_event: unknown, picked?: Date) => {
-    const target = datePickerTarget;
-    setDatePickerTarget(null);
-    if (!picked || !target) return;
-    setDatePreset('custom');
-    if (target === 'from') {
-      const nextFrom = startOfDay(picked).getTime();
-      setDateFrom(nextFrom);
-      if (dateTo != null && nextFrom > dateTo) {
-        setDateTo(endOfDay(picked).getTime());
-      }
-    } else {
-      const nextTo = endOfDay(picked).getTime();
-      setDateTo(nextTo);
-      if (dateFrom != null && nextTo < dateFrom) {
-        setDateFrom(startOfDay(picked).getTime());
-      }
-    }
+  const applyFilters = (next: TransactionFilters) => {
+    setTypeFilter(next.type);
+    setWalletFilterId(next.walletId);
+    setCategoryFilter(next.category);
+    setTagFilter(next.tag);
+    setDatePreset(next.datePreset);
+    setDateFrom(next.dateFrom);
+    setDateTo(next.dateTo);
   };
 
   const renderSearchSummaryHeader = () => (
@@ -791,206 +678,30 @@ export const CashflowScreen = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
-      {/* Top List | Calendar View Toggle */}
-      <View style={[styles.viewModeWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <TouchableOpacity
-          style={[
-            styles.viewModeBtn,
-            viewMode === 'list' ? { backgroundColor: theme.primary } : { backgroundColor: 'transparent' },
-          ]}
-          onPress={() => handleSwitchViewMode('list')}
-          accessibilityRole="button"
-          accessibilityLabel="List view"
-          accessibilityState={{ selected: viewMode === 'list' }}
-        >
-          <Ionicons
-            name="list-outline"
-            size={16}
-            color={viewMode === 'list' ? theme.onPrimary : theme.textMuted}
-          />
-          <Text style={[styles.viewModeText, { color: viewMode === 'list' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) }]}>
-            List
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.viewModeBtn,
-            viewMode === 'calendar' ? { backgroundColor: theme.primary } : { backgroundColor: 'transparent' },
-          ]}
-          onPress={() => handleSwitchViewMode('calendar')}
-          accessibilityRole="button"
-          accessibilityLabel="Calendar view"
-          accessibilityState={{ selected: viewMode === 'calendar' }}
-        >
-          <Ionicons
-            name="calendar-outline"
-            size={16}
-            color={viewMode === 'calendar' ? theme.onPrimary : theme.textMuted}
-          />
-          <Text style={[styles.viewModeText, { color: viewMode === 'calendar' ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) }]}>
-            Calendar
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {viewMode === 'list' ? (
-        <>
-          {/* Search Bar */}
-          <View style={[styles.searchBarWrap, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Ionicons name="search-outline" size={18} color={theme.textMuted} style={styles.searchIcon} />
-            <TextInput
-              style={[styles.searchInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
-              placeholder="Search merchant, note, items, or #tag"
-              placeholderTextColor={theme.textMuted}
-              selectionColor={theme.primary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              accessibilityLabel="Search transactions"
+      <View style={styles.toolbarWrap}>
+        <ListToolbar
+          leading={
+            <IconToggle
+              value={viewMode}
+              onChange={handleSwitchViewMode}
+              options={[
+                { key: 'list', icon: 'list', label: 'List view' },
+                { key: 'calendar', icon: 'calendar-outline', label: 'Calendar view' },
+              ]}
             />
-            {searchQuery.length > 0 ? (
-              <TouchableOpacity
-                onPress={() => setSearchQuery('')}
-                style={styles.clearSearchBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-              >
-                <Ionicons name="close-circle" size={18} color={theme.textMuted} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* Filter Chips Row */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterBarScroll}
-            contentContainerStyle={styles.filterBarContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: typeFilter ? theme.primaryMuted : theme.surface,
-                  borderColor: typeFilter ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => setActiveFilterSheet('type')}
-              accessibilityRole="button"
-              accessibilityLabel="Filter by type"
-              accessibilityState={{ selected: Boolean(typeFilter) }}
-            >
-              <Text
-                style={[styles.filterChipText, { color: typeFilter ? theme.primary : theme.text, fontSize: theme.scaleFont(13) }]}
-                numberOfLines={1}
-              >
-                {typeChipLabel}
-              </Text>
-              <Ionicons name="chevron-down" size={14} color={typeFilter ? theme.primary : theme.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: walletFilterId != null ? theme.primaryMuted : theme.surface,
-                  borderColor: walletFilterId != null ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => setActiveFilterSheet('account')}
-              accessibilityRole="button"
-              accessibilityLabel="Filter by account"
-              accessibilityState={{ selected: walletFilterId != null }}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  { color: walletFilterId != null ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
-                ]}
-                numberOfLines={1}
-              >
-                {accountChipLabel}
-              </Text>
-              <Ionicons name="chevron-down" size={14} color={walletFilterId != null ? theme.primary : theme.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: categoryFilter ? theme.primaryMuted : theme.surface,
-                  borderColor: categoryFilter ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => setActiveFilterSheet('category')}
-              accessibilityRole="button"
-              accessibilityLabel="Filter by category"
-              accessibilityState={{ selected: Boolean(categoryFilter) }}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  { color: categoryFilter ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
-                ]}
-                numberOfLines={1}
-              >
-                {categoryFilter ?? 'Category'}
-              </Text>
-              <Ionicons name="chevron-down" size={14} color={categoryFilter ? theme.primary : theme.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: dateFrom != null || dateTo != null ? theme.primaryMuted : theme.surface,
-                  borderColor: dateFrom != null || dateTo != null ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => setActiveFilterSheet('date')}
-              accessibilityRole="button"
-              accessibilityLabel="Filter by date range"
-              accessibilityState={{ selected: dateFrom != null || dateTo != null }}
-            >
-              <Ionicons
-                name="calendar-outline"
-                size={14}
-                color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
-              />
-              <Text
-                style={[
-                  styles.filterChipText,
-                  { color: dateFrom != null || dateTo != null ? theme.primary : theme.text, fontSize: theme.scaleFont(13) },
-                ]}
-                numberOfLines={1}
-              >
-                {dateRangeChipLabel}
-              </Text>
-              <Ionicons
-                name="chevron-down"
-                size={14}
-                color={dateFrom != null || dateTo != null ? theme.primary : theme.textMuted}
-              />
-            </TouchableOpacity>
-
-            {hasActiveFilters ? (
-              <TouchableOpacity
-                style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: theme.border }]}
-                onPress={clearAllFilters}
-                accessibilityRole="button"
-                accessibilityLabel="Clear filters"
-              >
-                <Ionicons name="close-circle-outline" size={15} color={theme.textMuted} />
-                <Text style={[styles.filterChipText, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>Clear</Text>
-              </TouchableOpacity>
-            ) : null}
-          </ScrollView>
-        </>
-      ) : null}
+          }
+          hideSearchAndFilters={viewMode !== 'list'}
+          searchQuery={searchQuery}
+          onChangeSearch={setSearchQuery}
+          searchPlaceholder="Merchant, note, items or #tag"
+          searchAccessibilityLabel="Search transactions"
+          activeFilterCount={activeFilterCount}
+          onOpenFilters={() => setFilterSheetOpen(true)}
+        />
+        {viewMode === 'list' ? (
+          <ActiveFilterChips filters={filters} onChange={applyFilters} walletNames={walletNames} locale={locale} />
+        ) : null}
+      </View>
 
       {queueReady + queueWaiting > 0 && searchResults === null ? (
         <TouchableOpacity
@@ -1237,326 +948,18 @@ export const CashflowScreen = () => {
         </>
       )}
 
-      {/* Filter Selection Bottom Sheet */}
-      <Modal
-        visible={activeFilterSheet !== null}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setActiveFilterSheet(null)}
-      >
-        <TouchableOpacity
-          style={styles.sheetOverlay}
-          activeOpacity={1}
-          onPress={() => setActiveFilterSheet(null)}
-        >
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-            testID="cashflow-filter-sheet"
-            style={[
-              styles.sheetCard,
-              {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-                paddingBottom: getBottomInsetPadding(insets.bottom, 16),
-              },
-            ]}
-          >
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
-                {activeFilterSheet === 'type'
-                  ? 'Filter by type'
-                  : activeFilterSheet === 'account'
-                    ? 'Filter by account'
-                    : activeFilterSheet === 'category'
-                      ? 'Filter by category'
-                      : 'Filter by date range'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setActiveFilterSheet(null)}
-                style={styles.sheetCloseBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Close filter"
-              >
-                <Ionicons name="close" size={20} color={theme.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            {activeFilterSheet === 'type' ? (
-              <View style={styles.sheetList}>
-                {TYPE_OPTIONS.map((opt) => {
-                  const selected = typeFilter === opt.key;
-                  return (
-                    <TouchableOpacity
-                      key={opt.label}
-                      style={[
-                        styles.sheetRow,
-                        {
-                          borderColor: selected ? theme.primary : theme.border,
-                          backgroundColor: selected ? theme.primaryMuted : theme.background,
-                        },
-                      ]}
-                      onPress={() => handleSelectTypeFilter(opt.key)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Type option ${opt.label}`}
-                      accessibilityState={{ selected }}
-                    >
-                      <Text
-                        style={[
-                          styles.sheetRowText,
-                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                      {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ) : null}
-
-            {activeFilterSheet === 'account' ? (
-              <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetList}>
-                <TouchableOpacity
-                  style={[
-                    styles.sheetRow,
-                    {
-                      borderColor: walletFilterId == null ? theme.primary : theme.border,
-                      backgroundColor: walletFilterId == null ? theme.primaryMuted : theme.background,
-                    },
-                  ]}
-                  onPress={() => {
-                    setWalletFilterId(null);
-                    setActiveFilterSheet(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Account option All accounts"
-                  accessibilityState={{ selected: walletFilterId == null }}
-                >
-                  <Text
-                    style={[
-                      styles.sheetRowText,
-                      { color: walletFilterId == null ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                    ]}
-                  >
-                    All accounts
-                  </Text>
-                  {walletFilterId == null ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                </TouchableOpacity>
-                {wallets.map((w) => {
-                  const selected = walletFilterId === w.id;
-                  return (
-                    <TouchableOpacity
-                      key={w.id}
-                      style={[
-                        styles.sheetRow,
-                        {
-                          borderColor: selected ? theme.primary : theme.border,
-                          backgroundColor: selected ? theme.primaryMuted : theme.background,
-                        },
-                      ]}
-                      onPress={() => {
-                        setWalletFilterId(w.id);
-                        setActiveFilterSheet(null);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Account option ${w.name}`}
-                      accessibilityState={{ selected }}
-                    >
-                      <Text
-                        style={[
-                          styles.sheetRowText,
-                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                        ]}
-                      >
-                        {w.name}
-                        {!w.isActive ? ' (archived)' : ''}
-                      </Text>
-                      {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-
-            {activeFilterSheet === 'category' ? (
-              <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetList}>
-                <TouchableOpacity
-                  style={[
-                    styles.sheetRow,
-                    {
-                      borderColor: categoryFilter == null ? theme.primary : theme.border,
-                      backgroundColor: categoryFilter == null ? theme.primaryMuted : theme.background,
-                    },
-                  ]}
-                  onPress={() => {
-                    setCategoryFilter(null);
-                    setActiveFilterSheet(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Category option All categories"
-                  accessibilityState={{ selected: categoryFilter == null }}
-                >
-                  <Text
-                    style={[
-                      styles.sheetRowText,
-                      { color: categoryFilter == null ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                    ]}
-                  >
-                    All categories
-                  </Text>
-                  {categoryFilter == null ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                </TouchableOpacity>
-                {filterableCategories.map((name) => {
-                  const selected = categoryFilter === name;
-                  return (
-                    <TouchableOpacity
-                      key={name}
-                      style={[
-                        styles.sheetRow,
-                        {
-                          borderColor: selected ? theme.primary : theme.border,
-                          backgroundColor: selected ? theme.primaryMuted : theme.background,
-                        },
-                      ]}
-                      onPress={() => {
-                        setCategoryFilter(name);
-                        setActiveFilterSheet(null);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Category option ${name}`}
-                      accessibilityState={{ selected }}
-                    >
-                      <Text
-                        style={[
-                          styles.sheetRowText,
-                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                        ]}
-                      >
-                        {name}
-                      </Text>
-                      {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-
-            {activeFilterSheet === 'date' ? (
-              <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetList}>
-                <TouchableOpacity
-                  style={[
-                    styles.sheetRow,
-                    {
-                      borderColor: dateFrom == null && dateTo == null ? theme.primary : theme.border,
-                      backgroundColor: dateFrom == null && dateTo == null ? theme.primaryMuted : theme.background,
-                    },
-                  ]}
-                  onPress={() => handleSelectDatePreset(null)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Date option Any time"
-                  accessibilityState={{ selected: dateFrom == null && dateTo == null }}
-                >
-                  <Text
-                    style={[
-                      styles.sheetRowText,
-                      {
-                        color: dateFrom == null && dateTo == null ? theme.primary : theme.text,
-                        fontSize: theme.scaleFont(14),
-                      },
-                    ]}
-                  >
-                    Any time
-                  </Text>
-                  {dateFrom == null && dateTo == null ? (
-                    <Ionicons name="checkmark" size={18} color={theme.primary} />
-                  ) : null}
-                </TouchableOpacity>
-                {DATE_PRESETS.map((preset) => {
-                  const selected = datePreset === preset.key;
-                  return (
-                    <TouchableOpacity
-                      key={preset.key}
-                      style={[
-                        styles.sheetRow,
-                        {
-                          borderColor: selected ? theme.primary : theme.border,
-                          backgroundColor: selected ? theme.primaryMuted : theme.background,
-                        },
-                      ]}
-                      onPress={() => handleSelectDatePreset(preset.key)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Date option ${preset.label}`}
-                      accessibilityState={{ selected }}
-                    >
-                      <Text
-                        style={[
-                          styles.sheetRowText,
-                          { color: selected ? theme.primary : theme.text, fontSize: theme.scaleFont(14) },
-                        ]}
-                      >
-                        {preset.label}
-                      </Text>
-                      {selected ? <Ionicons name="checkmark" size={18} color={theme.primary} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-
-                <Text style={[styles.customDateLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-                  Custom range
-                </Text>
-                <View style={styles.customDateRow}>
-                  <TouchableOpacity
-                    style={[styles.customDateBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
-                    onPress={() => setDatePickerTarget('from')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Pick start date"
-                  >
-                    <Text style={[styles.customDateHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                      From
-                    </Text>
-                    <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
-                      {dateFrom != null
-                        ? formatCachedLocaleDate(dateFrom, locale, FULL_SHORT_DATE_OPTIONS)
-                        : 'Any'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.customDateBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
-                    onPress={() => setDatePickerTarget('to')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Pick end date"
-                  >
-                    <Text style={[styles.customDateHint, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
-                      To
-                    </Text>
-                    <Text style={[styles.customDateValue, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
-                      {dateTo != null
-                        ? formatCachedLocaleDate(dateTo, locale, FULL_SHORT_DATE_OPTIONS)
-                        : 'Any'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-            ) : null}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {datePickerTarget !== null ? (
-        <DateTimePicker
-          value={
-            datePickerTarget === 'from'
-              ? new Date(dateFrom ?? Date.now())
-              : new Date(dateTo ?? Date.now())
-          }
-          mode="date"
-          display="default"
-          accentColor={theme.primary}
-          onChange={handleCustomDateChange}
-        />
-      ) : null}
+      <FilterSheet
+        visible={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        sections={['type', 'account', 'category', 'tag', 'date']}
+        filters={filters}
+        onChange={applyFilters}
+        wallets={wallets}
+        categories={categories}
+        tags={tags}
+        monthStartDay={monthStartDay}
+        locale={locale}
+      />
 
       <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding} />
     </SafeAreaView>
@@ -1565,41 +968,7 @@ export const CashflowScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  viewModeWrap: {
-    flexDirection: 'row',
-    marginHorizontal: 14,
-    marginTop: 8,
-    marginBottom: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  viewModeBtn: {
-    flex: 1,
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  viewModeText: { fontSize: 13, fontWeight: '700' },
-  searchBarWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 2, marginBottom: 6, paddingHorizontal: 10, minHeight: 44, borderRadius: 12, borderWidth: 1 },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14, paddingVertical: 0, minHeight: 42 },
-  clearSearchBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
-  filterBarScroll: { flexGrow: 0, marginBottom: 8 },
-  filterBarContent: { paddingHorizontal: 14, gap: 8, alignItems: 'center' },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 44,
-    paddingHorizontal: 12,
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 5,
-    maxWidth: 190,
-  },
-  filterChipText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  toolbarWrap: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 6 },
   filterSummaryCard: {
     marginHorizontal: 14,
     marginTop: 6,
@@ -1628,36 +997,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   truncationFooterText: { fontSize: 12, fontWeight: '500', textAlign: 'center', lineHeight: 17 },
-  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheetCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, padding: 16, maxHeight: '72%' },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  sheetTitle: { fontSize: 16, fontWeight: '700' },
-  sheetCloseBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  sheetScroll: { maxHeight: 360 },
-  sheetList: { gap: 8, paddingBottom: 12 },
-  sheetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 46,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-  },
-  sheetRowText: { fontSize: 14, fontWeight: '600', flex: 1, marginRight: 8 },
-  customDateLabel: { fontSize: 12, fontWeight: '700', marginTop: 8, marginBottom: 4 },
-  customDateRow: { flexDirection: 'row', gap: 10 },
-  customDateBtn: {
-    flex: 1,
-    minHeight: 52,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    justifyContent: 'center',
-  },
-  customDateHint: { fontSize: 11, fontWeight: '600' },
-  customDateValue: { fontSize: 13, fontWeight: '700', marginTop: 2 },
   errorBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
   errorBannerIcon: { marginRight: 8 },
   errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },

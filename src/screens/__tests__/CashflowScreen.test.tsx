@@ -183,7 +183,7 @@ describe('CashflowScreen', () => {
 
     // Open Account filter with empty search box and select GoPay
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Filter by account' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Filters' }).props.onPress();
     });
     await ReactTestRenderer.act(async () => {
       renderer.root.findByProps({ accessibilityLabel: 'Account option GoPay' }).props.onPress();
@@ -205,7 +205,7 @@ describe('CashflowScreen', () => {
 
     // Clear filters returns to monthly view
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Clear filters' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Clear all filters' }).props.onPress();
     });
     expect(renderer.root.findByProps({ accessibilityLabel: 'Previous month' })).toBeDefined();
 
@@ -250,7 +250,7 @@ describe('CashflowScreen', () => {
     });
 
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Filter by account' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Filters' }).props.onPress();
     });
     await ReactTestRenderer.act(async () => {
       renderer.root.findByProps({ accessibilityLabel: 'Account option Main Wallet' }).props.onPress();
@@ -468,9 +468,9 @@ describe('CashflowScreen', () => {
       renderer = ReactTestRenderer.create(<CashflowScreen />);
     });
 
-    // Open type filter sheet
+    // Open the filter sheet
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Filter by type' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Filters' }).props.onPress();
     });
 
     const getSize = (label: string) => {
@@ -481,16 +481,16 @@ describe('CashflowScreen', () => {
       return StyleSheet.flatten(node.props.style).fontSize;
     };
 
-    const chip100 = getSize('Type');
-    const sheetTitle100 = getSize('Filter by type');
+    const button100 = getSize('Filters');
+    const sheetTitle100 = getSize('Type');
     const sheetOption100 = getSize('Expense');
 
     ReactTestRenderer.act(() => {
       useSettingsStore.setState({ fontScale: 1.2 });
     });
 
-    expect(getSize('Type')).toBeGreaterThan(chip100);
-    expect(getSize('Filter by type')).toBeGreaterThan(sheetTitle100);
+    expect(getSize('Filters')).toBeGreaterThan(button100);
+    expect(getSize('Type')).toBeGreaterThan(sheetTitle100);
     expect(getSize('Expense')).toBeGreaterThan(sheetOption100);
 
     ReactTestRenderer.act(() => {
@@ -544,7 +544,7 @@ describe('CashflowScreen', () => {
 
     // Activate filter/search
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Filter by account' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Filters' }).props.onPress();
     });
     await ReactTestRenderer.act(async () => {
       renderer.root.findByProps({ accessibilityLabel: 'Account option GoPay' }).props.onPress();
@@ -561,7 +561,7 @@ describe('CashflowScreen', () => {
 
     // Clearing filter brings receipt banner back
     ReactTestRenderer.act(() => {
-      renderer.root.findByProps({ accessibilityLabel: 'Clear filters' }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: 'Clear all filters' }).props.onPress();
     });
     expect(renderer.root.findByProps({ accessibilityLabel: 'Open Receipt Inbox' })).toBeTruthy();
 
@@ -660,5 +660,31 @@ describe('CashflowScreen', () => {
       consoleErrorSpy.mockRestore();
       jest.useRealTimers();
     }
+  });
+
+  it('filters by tag from the filter sheet, and a list/calendar icon toggle replaces the labelled tabs', async () => {
+    useTransactionStore.setState({ tags: [{ id: 1, name: 'date', usage: 2 }] } as any);
+    mockSearchTransactions.mockResolvedValue([]);
+    mockSummarizeSearchTransactions.mockResolvedValue({ count: 0, totalIn: 0, totalOut: 0, net: 0 });
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+    // Compact toggle: icons only, no "List"/"Calendar" words.
+    const words = renderer.root.findAllByType(Text).map((t: any) => String(t.props.children ?? ''));
+    expect(words).not.toContain('List');
+    expect(words).not.toContain('Calendar');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'List view' }).props.accessibilityState).toEqual({ selected: true });
+
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Filters' }).props.onPress());
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'Tag option date' }).props.onPress();
+    });
+    expect(mockSearchTransactions).toHaveBeenCalledWith('', { tag: 'date' });
+    expect(renderer.root.findByProps({ testID: 'toolbar-filter-button' }).props.accessibilityLabel).toBe('Filters, 1 on');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Remove filter #date' })).toBeTruthy();
+
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 });

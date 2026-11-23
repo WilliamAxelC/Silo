@@ -9,6 +9,14 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
+import { FilterSheet } from '../components/FilterSheet';
+import { ActiveFilterChips, ListToolbar } from '../components/ListToolbar';
+import {
+  EMPTY_FILTERS,
+  countActiveFilters,
+  matchesTransactionFilters,
+  type TransactionFilters,
+} from '../features/transactions/filters';
 import { formatCompactAmount, formatDisplayCurrency } from '../features/transactions/amount';
 import {
   formatCachedLocaleDate,
@@ -76,6 +84,8 @@ export const ReportsScreen = () => {
   const fetchTransactions = useTransactionStore((state) => state.fetchTransactions);
   const transactionsList = useTransactionStore((state) => state.transactionsList);
   const wallets = useTransactionStore((state) => state.wallets);
+  const categories = useTransactionStore((state) => state.categories);
+  const tags = useTransactionStore((state) => state.tags);
   const theme = useAppTheme();
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
@@ -93,6 +103,20 @@ export const ReportsScreen = () => {
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
   /** What the breakdown and chart split by. */
   const [groupBy, setGroupBy] = useState<ReportGroupBy>('category');
+  /** Account / category / tag filters and search text narrowing the whole report. */
+  const [filters, setFilters] = useState<TransactionFilters>(EMPTY_FILTERS);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const activeFilterCount = countActiveFilters(filters);
+  const isNarrowed = activeFilterCount > 0 || searchQuery.trim().length > 0;
+  const matchesNarrowing = (tx: Parameters<typeof matchesTransactionFilters>[0]) =>
+    !isNarrowed || matchesTransactionFilters(tx, filters, searchQuery);
+  const applyFilters = (next: TransactionFilters) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setFilters(next);
+    setExpandedCategories({});
+    setSelectedCategoryName(null);
+  };
 
   useEffect(() => {
     if (isLoaded && !hasSyncedInitialReportTypeRef.current && !hasUserToggledReportTypeRef.current) {
@@ -130,13 +154,33 @@ export const ReportsScreen = () => {
     setSelectedCategoryName((prev) => (prev === category ? null : category));
   };
 
-  const { currentMonthData, totalIncome, totalExpense, balance, periodBounds } = useMonthlySummary(currentDate);
+  const monthly = useMonthlySummary(currentDate);
+  const { periodBounds } = monthly;
+
+  // With filters or search on, every number on the page comes from the matching transactions only.
+  const scopedMonthData = useMemo(
+    () => (isNarrowed ? monthly.currentMonthData.filter(matchesNarrowing) : monthly.currentMonthData),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [monthly.currentMonthData, isNarrowed, filters, searchQuery]
+  );
+  const { totalIncome, totalExpense, balance } = useMemo(() => {
+    if (!isNarrowed) return monthly;
+    let income = 0;
+    let expense = 0;
+    for (const tx of scopedMonthData) {
+      if (tx.type === 'transfer') continue;
+      const amt = tx.totalAmount || 0;
+      if (amt > 0) income += amt;
+      else expense += Math.abs(amt);
+    }
+    return { totalIncome: income, totalExpense: expense, balance: income - expense };
+  }, [isNarrowed, monthly, scopedMonthData]);
 
   const filteredTransactions = useMemo(() => {
-    return currentMonthData.filter(
+    return scopedMonthData.filter(
       (tx) => tx.type !== 'transfer' && (reportType === 'expense' ? (tx.totalAmount || 0) < 0 : (tx.totalAmount || 0) > 0)
     );
-  }, [currentMonthData, reportType]);
+  }, [scopedMonthData, reportType]);
 
   const totalForType = reportType === 'expense' ? totalExpense : totalIncome;
 
@@ -215,6 +259,7 @@ export const ReportsScreen = () => {
       const tx = transactionsList[i];
       if (!tx || tx.type === 'transfer' || typeof tx.date !== 'number') continue;
       if (tx.date < windowStart || tx.date > windowEnd) continue;
+      if (!matchesNarrowing(tx)) continue;
       for (let p = 0; p < periods.length; p += 1) {
         if (tx.date >= periods[p].startMs && tx.date <= periods[p].endMs) {
           const amt = tx.totalAmount || 0;
@@ -227,7 +272,8 @@ export const ReportsScreen = () => {
 
     const maxVal = periods.reduce((m, item) => Math.max(m, item.income, item.expense), 0);
     return { periods, maxVal };
-  }, [transactionsList, currentDate, monthStartDay, locale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactionsList, currentDate, monthStartDay, locale, isNarrowed, filters, searchQuery]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -269,59 +315,76 @@ export const ReportsScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Income / Expense Toggle */}
-        <View style={[styles.toggleContainer, { borderColor: theme.border, backgroundColor: theme.background }]}>
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              reportType === 'expense' ? { backgroundColor: theme.expense } : { backgroundColor: 'transparent' },
-            ]}
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-            onPress={() => {
-              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-              hasUserToggledReportTypeRef.current = true;
-              setReportType('expense');
-              setExpandedCategories({});
-              setSelectedCategoryName(null);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Show expense reports"
-          >
-            <Text
-              style={[
-                styles.toggleText,
-                { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
-              ]}
-            >
-              Expenses
-            </Text>
-          </TouchableOpacity>
+        {/* Income / Expense toggle, with search and filters beside it */}
+        <View style={styles.toolbarWrap}>
+          <ListToolbar
+            leading={
+              <View style={[styles.toggleContainer, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleBtn,
+                    reportType === 'expense' ? { backgroundColor: theme.expense } : { backgroundColor: 'transparent' },
+                  ]}
+                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    hasUserToggledReportTypeRef.current = true;
+                    setReportType('expense');
+                    setExpandedCategories({});
+                    setSelectedCategoryName(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show expense reports"
+                >
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
+                    ]}
+                  >
+                    Expenses
+                  </Text>
+                </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              reportType === 'income' ? { backgroundColor: theme.income } : { backgroundColor: 'transparent' },
-            ]}
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-            onPress={() => {
-              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-              hasUserToggledReportTypeRef.current = true;
-              setReportType('income');
-              setExpandedCategories({});
+                <TouchableOpacity
+                  style={[
+                    styles.toggleBtn,
+                    reportType === 'income' ? { backgroundColor: theme.income } : { backgroundColor: 'transparent' },
+                  ]}
+                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    hasUserToggledReportTypeRef.current = true;
+                    setReportType('income');
+                    setExpandedCategories({});
+                    setSelectedCategoryName(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show income reports"
+                >
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      { color: reportType === 'income' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
+                    ]}
+                  >
+                    Income
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            }
+            searchPlacement="below"
+            searchQuery={searchQuery}
+            onChangeSearch={(text) => {
+              setSearchQuery(text);
               setSelectedCategoryName(null);
             }}
-            accessibilityRole="button"
-            accessibilityLabel="Show income reports"
-          >
-            <Text
-              style={[
-                styles.toggleText,
-                { color: reportType === 'income' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
-              ]}
-            >
-              Income
-            </Text>
-          </TouchableOpacity>
+            searchPlaceholder="Merchant, note, items or #tag"
+            searchAccessibilityLabel="Search reports"
+            activeFilterCount={activeFilterCount}
+            onOpenFilters={() => setFilterSheetOpen(true)}
+          />
+          <ActiveFilterChips filters={filters} onChange={applyFilters} walletNames={walletNames} locale={locale} />
         </View>
       </View>
 
@@ -444,7 +507,9 @@ export const ReportsScreen = () => {
             <View style={[styles.emptyChartCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} style={{ marginBottom: 8 }} />
               <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13), fontWeight: '600' }}>
-                No {reportType} records for {compactPeriodLabel}.
+                {isNarrowed
+                  ? `No ${reportType} records match your filters for ${compactPeriodLabel}.`
+                  : `No ${reportType} records for ${compactPeriodLabel}.`}
               </Text>
             </View>
           )}
@@ -678,6 +743,19 @@ export const ReportsScreen = () => {
           </View>
         ) : null}
       </ScrollView>
+      <FilterSheet
+        visible={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        sections={['account', 'category', 'tag']}
+        filters={filters}
+        onChange={applyFilters}
+        wallets={wallets}
+        categories={categories}
+        tags={tags}
+        categoryType={reportType}
+        monthStartDay={monthStartDay}
+        locale={locale}
+      />
     </SafeAreaView>
   );
 };
@@ -696,9 +774,10 @@ const styles = StyleSheet.create({
   monthTextWrap: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
   monthText: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  toolbarWrap: { paddingHorizontal: 14 },
   toggleContainer: {
+    flex: 1,
     flexDirection: 'row',
-    marginHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,
     overflow: 'hidden',

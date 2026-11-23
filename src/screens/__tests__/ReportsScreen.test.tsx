@@ -419,4 +419,61 @@ describe('ReportsScreen', () => {
     );
     ReactTestRenderer.act(() => renderer.unmount());
   });
+
+  it('narrows every total, the chart and the trend with filters and search, and shows the Filters button as on', () => {
+    const now = Date.now();
+    useTransactionStore.setState({
+      wallets: [
+        { id: 1, name: 'Main Wallet', type: 'cash', isActive: true, initialBalance: 0, balance: 0 },
+        { id: 2, name: 'GoPay', type: 'ewallet', isActive: true, initialBalance: 0, balance: 0 },
+      ],
+      categories: [
+        { id: 1, name: 'Food & Dining', type: 'expense', isSystem: true, createdAt: 1 },
+        { id: 2, name: 'Transport', type: 'expense', isSystem: true, createdAt: 1 },
+      ],
+      tags: [{ id: 1, name: 'date', usage: 1 }],
+      transactionsList: [
+        { id: 1, merchantName: 'Kopi Kenangan', totalAmount: -30000, type: 'expense', category: 'Food & Dining', date: now, walletId: 2, tags: ['date'] },
+        { id: 2, merchantName: 'Shell', totalAmount: -200000, type: 'expense', category: 'Transport', date: now, walletId: 1, tags: [] },
+        { id: 3, merchantName: 'Gaji', totalAmount: 5000000, type: 'income', category: 'Salary', date: now, walletId: 1, tags: [] },
+      ],
+    } as any);
+
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<ReportsScreen />);
+    });
+    const texts = () =>
+      renderer.root
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+    const filterButton = () => renderer.root.findByProps({ testID: 'toolbar-filter-button' });
+    const offColor = StyleSheet.flatten(filterButton().props.style).backgroundColor;
+    expect(texts().some((t: string) => t.includes('230.000'))).toBe(true);
+
+    // Account filter: only GoPay spending is left, in the summary and the chart total.
+    ReactTestRenderer.act(() => filterButton().props.onPress());
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Account option GoPay' }).props.onPress();
+    });
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Done filtering' }).props.onPress());
+    expect(texts().some((t: string) => t.includes('230.000'))).toBe(false);
+    expect(texts().filter((t: string) => t.includes('30.000')).length).toBeGreaterThan(0);
+    expect(texts().some((t: string) => t.includes('5.000.000'))).toBe(false);
+    expect(filterButton().props.accessibilityLabel).toBe('Filters, 1 on');
+    expect(StyleSheet.flatten(filterButton().props.style).backgroundColor).not.toBe(offColor);
+
+    // Removing the chip restores everything; a search that matches nothing explains why it's empty.
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Remove filter GoPay' }).props.onPress();
+    });
+    expect(texts().some((t: string) => t.includes('230.000'))).toBe(true);
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Open search' }).props.onPress());
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Search reports' }).props.onChangeText('indomaret');
+    });
+    expect(texts().some((t: string) => t.includes('match your filters'))).toBe(true);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });
