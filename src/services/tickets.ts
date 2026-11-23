@@ -7,7 +7,7 @@ import { getInstalledVersion } from './updates';
 export const TICKETS_URL = 'https://cuang.dev/projects/silo/api/tickets';
 const SENT_KEY = 'sentTickets';
 /** Which consent text the user saw above Send (UU PDP Art. 22: consent must be recorded). */
-export const REPORT_CONSENT_VERSION = 'report-form-2026-11-23';
+export const REPORT_CONSENT_VERSION = 'report-form-2026-11-23b';
 const MAX_SENT = 30;
 
 export type TicketKind = 'bug' | 'feature';

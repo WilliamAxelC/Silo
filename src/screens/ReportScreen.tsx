@@ -232,7 +232,8 @@ export const ReportScreen = () => {
             Sent to the developer: your title and text, Silo {installed.version} (build {installed.versionCode}), {device}, Android{' '}
             {osVersion}
             {attachLog ? ', the error log' : ''}
-            {screenshot ? ', the screenshot' : ''}. Sending is voluntary. It goes to the developer's server and private Discord (stored in the USA). Your transactions
+            {screenshot ? ', the screenshot' : ''}. Sending is voluntary. It goes to the developer's server and private Discord (stored in the USA), and if the
+            developer has it fixed with AI tools, Google's AI models read it. Your transactions
             and amounts are never added automatically.{' '}
             <Text style={{ color: theme.primary, fontWeight: '700' }} onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} accessibilityRole="link">
               Privacy Policy
