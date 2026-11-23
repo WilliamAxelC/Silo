@@ -21,6 +21,7 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
+import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
 import {
   formatCachedLocaleDate,
@@ -1053,11 +1054,7 @@ export const CashflowScreen = () => {
                 {calendarMonthLabel}
               </Text>
               {!isCalendarCurrentMonth && (
-                <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                  <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
-                    Today
-                  </Text>
-                </View>
+                <BackToCurrentPeriodButton onPress={resetCalendarToToday} locale={locale} />
               )}
             </TouchableOpacity>
             <TouchableOpacity
@@ -1203,11 +1200,7 @@ export const CashflowScreen = () => {
                 {periodLabel}
               </Text>
               {!isCurrentMonthNow && (
-                <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                  <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
-                    Today
-                  </Text>
-                </View>
+                <BackToCurrentPeriodButton onPress={resetToCurrentMonth} locale={locale} />
               )}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => changeMonth(1)} style={styles.arrowBtn} accessibilityRole="button" accessibilityLabel="Next month">
@@ -1707,8 +1700,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyDayText: { fontSize: 13, fontWeight: '500', textAlign: 'center' },
-  todayBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
-  todayBadgeText: { fontSize: 10, fontWeight: '700' },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   summaryCard: { flexDirection: 'row', marginHorizontal: 14, marginTop: 12, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1, justifyContent: 'space-between', alignItems: 'center' },
   summaryCol: { alignItems: 'center', flex: 1 },

@@ -601,12 +601,20 @@ describe('CashflowScreen', () => {
 
       expect(readTexts()).toContain('October 2026');
 
-      // Tapping Today resets back to November 2026
+      // Regression (reported 2026-11-23): a bare "Today" pill beside the month name read as a label
+      // saying the open month is the current one. It must read as an action and name where it goes.
+      expect(readTexts()).not.toContain('Today');
+      const backButton = renderer.root.findByProps({ testID: 'back-to-current-period' });
+      expect(backButton.props.accessibilityRole).toBe('button');
+      expect(readTexts()).toContain('Back to Nov');
+
+      // Tapping it resets back to November 2026, and it disappears there
       ReactTestRenderer.act(() => {
-        renderer.root.findByProps({ accessibilityLabel: 'Jump to current month' }).props.onPress();
+        backButton.props.onPress();
       });
       expect(readTexts()).toContain('November 2026');
       expect(useTransactionStore.getState().selectedCashflowDateMs).toBeNull();
+      expect(renderer.root.findAllByProps({ testID: 'back-to-current-period' })).toHaveLength(0);
 
       ReactTestRenderer.act(() => {
         renderer.unmount();

@@ -117,8 +117,9 @@ const TabNavigator = () => {
   const theme = useAppTheme();
   const globalNav = useNavigation<NavigationProps>();
   const insets = useSafeAreaInsets();
-  const bottomInset = Math.max(insets.bottom, 10);
-  const tabBarHeight = 60 + bottomInset;
+  // Extra room under the labels so they clear the phone's gesture bar / nav buttons.
+  const bottomInset = Math.max(insets.bottom, 8) + 10;
+  const tabBarHeight = 62 + bottomInset;
 
   return (
     <Tab.Navigator
@@ -158,12 +159,13 @@ const TabNavigator = () => {
           tabBarButton: () => (
             <View style={styles.addButtonWrap} pointerEvents="box-none">
               <TouchableOpacity
-                style={[styles.customButton, { backgroundColor: theme.primary }]}
+                testID="tab-add-button"
+                style={[styles.customButton, { backgroundColor: theme.primary, borderColor: theme.surface }]}
                 onPress={() => globalNav.navigate('AddTransactionStack', {})}
                 accessibilityRole="button"
                 accessibilityLabel="Add transaction"
               >
-                <Ionicons name="add" size={28} color={theme.onPrimary} />
+                <Ionicons name="add" size={34} color={theme.onPrimary} />
               </TouchableOpacity>
             </View>
           ),
@@ -274,25 +276,28 @@ const styles = StyleSheet.create({
   appShell: { flex: 1 },
   tabBar: {
     elevation: 0,
+    overflow: 'visible',
     borderTopWidth: 1,
     paddingTop: 6,
   },
   addButtonWrap: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 2,
+    overflow: 'visible',
   },
+  // Larger than the tab icons and lifted half out of the bar, with a ring in the bar colour.
   customButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 4,
+    marginTop: -24,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2.5,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
   },
 });

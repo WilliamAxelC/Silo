@@ -8,6 +8,7 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
+import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
 import { formatCompactAmount, formatDisplayCurrency } from '../features/transactions/amount';
 import {
   formatCachedLocaleDate,
@@ -254,11 +255,7 @@ export const ReportsScreen = () => {
               {periodLabel}
             </Text>
             {!isCurrentMonthNow && (
-              <View style={[styles.todayBadge, { backgroundColor: theme.primaryMuted }]}>
-                <Text style={[styles.todayBadgeText, { color: theme.primary, fontSize: theme.scaleFont(10) }]}>
-                  Today
-                </Text>
-              </View>
+              <BackToCurrentPeriodButton onPress={resetToCurrentMonth} locale={locale} />
             )}
           </TouchableOpacity>
 
@@ -698,8 +695,6 @@ const styles = StyleSheet.create({
   },
   monthTextWrap: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 4 },
   monthText: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
-  todayBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  todayBadgeText: { fontSize: 10, fontWeight: '700' },
   arrowBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   toggleContainer: {
     flexDirection: 'row',
