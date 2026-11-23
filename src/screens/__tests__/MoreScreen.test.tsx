@@ -3,6 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 import { MoreScreen } from '../MoreScreen';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useUpdateStore } from '../../services/updates';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -116,6 +117,32 @@ describe('MoreScreen (F-24, F-25, F-32, NIT-02)', () => {
     });
     expect(getDevSize()).toBeGreaterThan(size100);
 
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('shows the app version and an available update with a Download button, and Check now forces a check', () => {
+    const mockCheck = jest.fn(async () => undefined);
+    useUpdateStore.setState({
+      installed: { version: '1.3.1', versionCode: 8 },
+      latest: { version: '1.4.0', versionCode: 9, url: 'https://cuang.dev/projects/silo/', notes: ['Faster receipts'] },
+      checkedAt: Date.now(),
+      checking: false,
+      lastCheckFailed: false,
+      check: mockCheck,
+    } as any);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<MoreScreen />);
+    });
+    const text = (testID: string) => {
+      const c = renderer.root.findByProps({ testID }).props.children;
+      return Array.isArray(c) ? c.join('') : String(c);
+    };
+    expect(text('app-version')).toBe('1.3.1 (build 8)');
+    expect(text('update-status')).toBe('Silo 1.4.0 is available');
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Download Silo 1.4.0' })).toBeTruthy();
+    ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Check for updates' }).props.onPress());
+    expect(mockCheck).toHaveBeenCalledWith({ force: true });
     ReactTestRenderer.act(() => renderer.unmount());
   });
 });

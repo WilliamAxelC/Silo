@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Linking, Switch, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
@@ -7,6 +7,9 @@ import { NavigationProps } from '../navigation/types';
 
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { useSettingsStore } from '../store/useSettingsStore';
+import { DOWNLOAD_PAGE_URL, isNewer, useUpdateStore } from '../services/updates';
+import { formatCachedLocaleDate } from '../features/transactions/periods';
 
 export const MoreScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -15,6 +18,25 @@ export const MoreScreen = () => {
 
   const clearAllData = useTransactionStore((state) => state.clearAllData);
   const injectDummyData = useTransactionStore((state) => state.injectDummyData);
+  const locale = useSettingsStore((s) => s.dateFormat) || 'en-GB';
+  const installed = useUpdateStore((s) => s.installed);
+  const latest = useUpdateStore((s) => s.latest);
+  const checkedAt = useUpdateStore((s) => s.checkedAt);
+  const checking = useUpdateStore((s) => s.checking);
+  const autoCheck = useUpdateStore((s) => s.enabled);
+  const lastCheckFailed = useUpdateStore((s) => s.lastCheckFailed);
+  const checkForUpdates = useUpdateStore((s) => s.check);
+  const setAutoCheck = useUpdateStore((s) => s.setEnabled);
+  const updateAvailable = isNewer(latest, installed);
+  const updateStatus = checking
+    ? 'Checking…'
+    : lastCheckFailed
+      ? "Couldn't reach the download page. Check your connection."
+      : updateAvailable && latest
+        ? `Silo ${latest.version} is available`
+        : checkedAt
+          ? `Up to date · checked ${formatCachedLocaleDate(checkedAt, locale, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`
+          : 'Not checked yet';
 
   const handleClear = () => {
     Alert.alert('Warning', 'This will wipe the entire Silo database.', [
@@ -188,6 +210,102 @@ export const MoreScreen = () => {
           </TouchableOpacity>
         </View>
 
+        <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>App info</Text>
+        <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="app-info">
+          <View style={styles.menuRow}>
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="information-circle-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Version</Text>
+            </View>
+            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="app-version">
+              {installed.version} (build {installed.versionCode})
+            </Text>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.infoBlock}>
+            <View style={styles.settingRowLeft}>
+              <Ionicons
+                name={updateAvailable ? 'arrow-up-circle' : 'checkmark-circle-outline'}
+                size={20}
+                color={updateAvailable ? theme.income : theme.primary}
+              />
+              <Text
+                style={[styles.settingText, styles.flexText, { color: updateAvailable ? theme.income : theme.text, fontSize: theme.scaleFont(14) }]}
+                testID="update-status"
+              >
+                {updateStatus}
+              </Text>
+            </View>
+            {updateAvailable && latest?.notes?.length ? (
+              <Text style={[styles.notesText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                {latest.notes.map((n) => `• ${n}`).join('\n')}
+              </Text>
+            ) : null}
+            <View style={styles.infoButtons}>
+              {updateAvailable && latest ? (
+                <TouchableOpacity
+                  style={[styles.infoBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}
+                  onPress={() => void Linking.openURL(latest.url)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Download Silo ${latest.version}`}
+                >
+                  <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Download</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.infoBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={() => void checkForUpdates({ force: true })}
+                disabled={checking}
+                accessibilityRole="button"
+                accessibilityLabel="Check for updates"
+              >
+                {checking ? (
+                  <ActivityIndicator size="small" color={theme.primary} />
+                ) : (
+                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Check now</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.menuRow}>
+            <View style={[styles.settingRowLeft, styles.flexText]}>
+              <Ionicons name="notifications-outline" size={20} color={theme.primary} />
+              <View style={styles.flexText}>
+                <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Tell me about new versions</Text>
+                <Text style={[styles.settingText, { color: theme.textMuted, fontSize: theme.scaleFont(11), fontWeight: '400' }]}>
+                  Once a day Silo reads a small file from cuang.dev. Nothing about you is sent.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={autoCheck}
+              onValueChange={setAutoCheck}
+              accessibilityLabel="Tell me about new versions"
+              trackColor={{ true: theme.primary, false: theme.border }}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
+            accessibilityRole="link"
+            accessibilityLabel="Open the Silo download page"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="globe-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Download page</Text>
+            </View>
+            <Ionicons name="open-outline" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.footerWrap}>
           <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by CDev</Text>
         </View>
@@ -225,6 +343,11 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 14 },
   settingRowLeft: { flexDirection: 'row', alignItems: 'center' },
   settingText: { marginLeft: 10, fontSize: 14, fontWeight: '500' },
+  infoBlock: { paddingHorizontal: 14, paddingVertical: 12, gap: 8 },
+  flexText: { flex: 1 },
+  notesText: { marginLeft: 30, lineHeight: 18 },
+  infoButtons: { flexDirection: 'row', gap: 8, marginLeft: 30 },
+  infoBtn: { minHeight: 36, minWidth: 96, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   footerWrap: { alignItems: 'center', marginTop: 16, marginBottom: 8 },
   footerText: { fontSize: 12, fontWeight: '500' },
 });

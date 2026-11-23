@@ -40,6 +40,7 @@ import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import { ActivityScreen } from '../screens/ActivityScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
+import { useUpdateStore } from '../services/updates';
 import { RecurringScreen } from '../screens/RecurringScreen';
 
 /** How long after Silo goes to the background the AI model is released. */
@@ -199,13 +200,22 @@ export const AppNavigator = () => {
         console.warn('Recurring transactions failed:', error);
       }
     };
-    void useTransactionStore.getState().initDB().then(runRecurring);
+    void useTransactionStore
+      .getState()
+      .initDB()
+      .then(runRecurring)
+      .then(() => {
+        // New-version notice: reads a small static file from the download page at most once a day.
+        useUpdateStore.getState().hydrate();
+        void useUpdateStore.getState().check();
+      });
     useReceiptQueueStore.getState().load();
     const removeShareListener = addShareListener(() => void handleSharedReceipts());
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void runRecurring();
         void handleSharedReceipts();
+        void useUpdateStore.getState().check();
       }
       // Free the on-device AI model's memory (~1 GB) soon after Silo leaves the screen, unless the
       // Receipt Inbox is still reading receipts in the background (it frees it when it finishes).

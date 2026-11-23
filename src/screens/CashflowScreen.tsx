@@ -8,6 +8,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -19,6 +20,7 @@ import { useMonthlySummary } from '../hooks/useMonthlySummary';
 import { useAppTheme } from '../theme/useAppTheme';
 import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
 import { FilterSheet } from '../components/FilterSheet';
+import { selectShowUpdateBanner, useUpdateStore } from '../services/updates';
 import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
 import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
@@ -168,6 +170,9 @@ export const CashflowScreen = () => {
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
   const tags = useTransactionStore((s) => s.tags);
+  const showUpdateBanner = useUpdateStore(selectShowUpdateBanner);
+  const latestVersion = useUpdateStore((s) => s.latest);
+  const dismissUpdate = useUpdateStore((s) => s.dismiss);
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
@@ -703,6 +708,34 @@ export const CashflowScreen = () => {
         ) : null}
       </View>
 
+      {showUpdateBanner && latestVersion ? (
+        <View
+          testID="update-banner"
+          style={[styles.errorBanner, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
+        >
+          <TouchableOpacity
+            style={styles.updateBannerBody}
+            onPress={() => void Linking.openURL(latestVersion.url)}
+            accessibilityRole="link"
+            accessibilityLabel={`Silo ${latestVersion.version} is available. Open the download page`}
+          >
+            <Ionicons name="arrow-up-circle-outline" size={18} color={theme.primary} style={styles.errorBannerIcon} />
+            <Text style={[styles.errorBannerText, { color: theme.primary, fontSize: theme.scaleFont(12) }]} numberOfLines={1}>
+              Silo {latestVersion.version} is available · Download
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={dismissUpdate}
+            style={styles.errorDismissBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss update notice"
+          >
+            <Ionicons name="close" size={18} color={theme.primary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {queueReady + queueWaiting > 0 && searchResults === null ? (
         <TouchableOpacity
           style={[styles.errorBanner, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
@@ -968,6 +1001,7 @@ export const CashflowScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  updateBannerBody: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   toolbarWrap: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 6 },
   filterSummaryCard: {
     marginHorizontal: 14,
