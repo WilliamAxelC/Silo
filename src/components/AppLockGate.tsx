@@ -95,6 +95,6 @@ const styles = StyleSheet.create({
   cover: { alignItems: 'center', justifyContent: 'center', gap: 16, zIndex: 100, elevation: 100 },
   logo: { width: 72, height: 72, borderRadius: 18 },
   title: { fontSize: 18, fontWeight: '700' },
-  button: { borderRadius: 999, paddingHorizontal: 28, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  button: { borderRadius: 999, paddingHorizontal: 28, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
   buttonText: { fontSize: 15, fontWeight: '700' },
 });

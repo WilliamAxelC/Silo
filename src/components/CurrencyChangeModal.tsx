@@ -142,8 +142,8 @@ const styles = StyleSheet.create({
   body: { lineHeight: 19 },
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rateLabel: { fontWeight: '600' },
-  rateInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, minHeight: 44 },
+  rateInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, minHeight: 48 },
   primary: { borderRadius: 12, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   primaryText: { fontWeight: '700' },
-  secondary: { minHeight: 40, alignItems: 'center', justifyContent: 'center' },
+  secondary: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
 });

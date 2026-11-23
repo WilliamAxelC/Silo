@@ -74,10 +74,12 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
         <TouchableOpacity
           style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 16)]}
           activeOpacity={1}
+          accessible={false}
           onPress={handleClose}
         >
           <TouchableOpacity
             activeOpacity={1}
+          accessible={false}
             onPress={(e) => e.stopPropagation()}
             style={[styles.modalContent, { backgroundColor: theme.surface, borderColor: theme.border }]}
           >
@@ -139,7 +141,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                   accessibilityLabel={`Create ${searchQuery.trim()}`}
                 >
                   <View style={[styles.instantCreateIcon, { backgroundColor: theme.primary }]}>
-                    <Ionicons name="add" size={18} color="#fff" />
+                    <Ionicons name="add" size={18} color={theme.onPrimary} />
                   </View>
                   <View style={styles.instantCreateTextWrap}>
                     <Text style={[styles.instantCreateLabel, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
@@ -226,7 +228,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Add category"
               >
-                <Ionicons name="add" size={22} color="#fff" />
+                <Ionicons name="add" size={22} color={theme.onPrimary} />
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -268,8 +270,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   closeIconButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -279,7 +281,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 12,
-    minHeight: 46,
+    minHeight: 48,
     marginBottom: 12,
   },
   searchIcon: {
@@ -288,11 +290,11 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
-    minHeight: 44,
+    minHeight: 48,
   },
   clearSearchBtn: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: -6,
@@ -363,7 +365,7 @@ const styles = StyleSheet.create({
   },
   customCategoryInput: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 14,
@@ -371,8 +373,8 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   addCategoryBtn: {
-    width: 46,
-    height: 46,
+    width: 48,
+    height: 48,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',

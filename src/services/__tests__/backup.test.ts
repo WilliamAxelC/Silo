@@ -54,7 +54,7 @@ jest.mock('expo-file-system/legacy', () => {
 });
 
 import { runMigrations } from '../../db/index';
-import { restoreBackupFile } from '../backup';
+import { RESTORE_TABLES, restoreBackupFile } from '../backup';
 
 function makeDb(file: string) {
   const raw = new DatabaseSync(file);
@@ -152,6 +152,37 @@ describe('restoreBackupFile', () => {
     expect(setting('localSystemPrompt') ?? '').toBe('');
     // Ordinary preferences still come from the backup.
     expect(setting('currencyCode')).toBe('USD');
+  });
+
+  // Regression (found 2026-11-23): tags, tag links and budget plans were missing from the restore list,
+  // so restoring a backup silently dropped them. Every new table must be restored or excluded on purpose.
+  it('regression: restores every user-data table (no table is silently left out)', () => {
+    const NOT_RESTORED = new Set(['receipt_queue', 'activity_log']);
+    const tables = (mockMain.getAllSync(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%';",
+    ) as Array<{ name: string }>).map((r) => r.name);
+    const missing = tables.filter((t) => !NOT_RESTORED.has(t) && !(RESTORE_TABLES as readonly string[]).includes(t));
+    expect(missing).toEqual([]);
+  });
+
+  it('regression: brings back tags, tagged transactions, budget plans and goals', async () => {
+    const file = path.join(mockTmp, 'tags.db');
+    const { raw, db } = makeDb(file);
+    db.runSync(`INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (7, 1, 'Dinner', -250000, 'expense', 5);`);
+    db.runSync(`INSERT INTO tags (id, name, created_at) VALUES (3, 'date', 1);`);
+    db.runSync(`INSERT INTO transaction_tags (transaction_id, tag_id) VALUES (7, 3);`);
+    db.runSync(
+      `INSERT INTO budget_plans (name, amount, kind, start_date, every, unit, rollover, categories, created_at) VALUES ('Japan trip', 100000, 'once', 1, 1, 'month', 'reset', '[]', 1);`,
+    );
+    db.runSync(`INSERT INTO goals (name, target_amount, created_at) VALUES ('Emergency fund', 10000000, 1);`);
+    raw.close();
+
+    await restoreBackupFile(`file://${file}`);
+
+    expect(mockMain.getAllSync('SELECT name FROM tags;').map((r: any) => r.name)).toEqual(['date']);
+    expect(mockMain.getAllSync('SELECT transaction_id FROM transaction_tags;').map((r: any) => r.transaction_id)).toEqual([7]);
+    expect(mockMain.getAllSync('SELECT name FROM budget_plans;').map((r: any) => r.name)).toEqual(['Japan trip']);
+    expect(mockMain.getAllSync('SELECT name FROM goals;').map((r: any) => r.name)).toEqual(['Emergency fund']);
   });
 
   it('restores older backups that predate transaction_templates cleanly', async () => {

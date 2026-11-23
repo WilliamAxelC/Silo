@@ -7,6 +7,9 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { useAppTheme } from './src/theme/useAppTheme';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { AppLockGate } from './src/components/AppLockGate';
+import { installGlobalErrorLogging } from './src/services/errorLog';
+
+installGlobalErrorLogging();
 
 export default function App() {
   const { isDarkMode } = useAppTheme();

@@ -352,8 +352,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   headerIconButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 6,
     paddingHorizontal: 6,
-    minHeight: 44,
+    minHeight: 48,
   },
   filterPillText: {
     fontSize: 11,
@@ -424,8 +424,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   clearSearchBtn: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 48,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: -8,
@@ -515,8 +515,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   copySingleBtn: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 48,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: -8,

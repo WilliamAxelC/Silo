@@ -1398,7 +1398,7 @@ export const AddTransactionScreen = () => {
                 <Text
                   style={[
                     styles.toggleText,
-                    { color: type === 'expense' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                    { color: type === 'expense' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(14) },
                   ]}
                 >
                   Expense
@@ -1417,7 +1417,7 @@ export const AddTransactionScreen = () => {
                 <Text
                   style={[
                     styles.toggleText,
-                    { color: type === 'income' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                    { color: type === 'income' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(14) },
                   ]}
                 >
                   Income
@@ -1436,7 +1436,7 @@ export const AddTransactionScreen = () => {
                 <Text
                   style={[
                     styles.toggleText,
-                    { color: type === 'transfer' ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(14) },
+                    { color: type === 'transfer' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(14) },
                   ]}
                 >
                   Transfer
@@ -1458,14 +1458,14 @@ export const AddTransactionScreen = () => {
                 accessibilityLabel="Scan receipt"
               >
                 {isScanning ? (
-                  <ActivityIndicator color={type === 'income' ? theme.primary : '#fff'} size="small" />
+                  <ActivityIndicator color={type === 'income' ? theme.primary : theme.onPrimary} size="small" />
                 ) : (
-                  <Ionicons name="scan-outline" size={18} color={type === 'income' ? theme.primary : '#fff'} />
+                  <Ionicons name="scan-outline" size={18} color={type === 'income' ? theme.primary : theme.onPrimary} />
                 )}
                 <Text
                   style={[
                     styles.scanButtonTextCompact,
-                    { color: type === 'income' ? theme.primary : '#fff', fontSize: theme.scaleFont(13) },
+                    { color: type === 'income' ? theme.primary : theme.onPrimary, fontSize: theme.scaleFont(13) },
                   ]}
                 >
                   {isScanning ? 'Scanning…' : 'Scan'}
@@ -1887,7 +1887,7 @@ export const AddTransactionScreen = () => {
                       <Text
                         style={[
                           styles.detailsModeText,
-                          { color: isActive ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(13) },
+                          { color: isActive ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
                         ]}
                       >
                         {option.label}
@@ -2086,9 +2086,9 @@ export const AddTransactionScreen = () => {
             accessibilityLabel="Save transaction"
           >
             {isSaving ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.onPrimary} />
             ) : (
-              <Text style={[styles.saveButtonText, { fontSize: theme.scaleFont(15) }]}>
+              <Text style={[styles.saveButtonText, { fontSize: theme.scaleFont(15), color: theme.onPrimary }]}>
                 {editingId ? 'Update Transaction' : 'Save Transaction'}
               </Text>
             )}
@@ -2179,8 +2179,8 @@ const styles = StyleSheet.create({
     minHeight: 56,
   },
   headerBackButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2209,11 +2209,11 @@ const styles = StyleSheet.create({
   typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   compactTypeToggle: { flex: 1, marginRight: 10 },
   toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  compactToggleBtn: { minHeight: 46 },
+  compactToggleBtn: { minHeight: 48 },
   toggleText: { fontSize: 14, fontWeight: '700' },
   scanButtonCompact: {
     minWidth: 100,
-    minHeight: 46,
+    minHeight: 48,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2226,19 +2226,19 @@ const styles = StyleSheet.create({
   amountField: { width: 160, marginLeft: 10 },
   dateGroup: { width: 180, marginLeft: 10 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
+  repeatChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 48, justifyContent: 'center' },
   repeatChipText: { fontSize: 13, fontWeight: '600' },
   transferArrow: { alignSelf: 'flex-end', marginHorizontal: 6, marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  compactInput: { minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontSize: 14 },
+  compactInput: { minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontSize: 14 },
   amountInputContainer: { flexDirection: 'row', alignItems: 'center' },
   currencyBadge: { borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  compactCurrencyBadge: { width: 50, height: 46, marginRight: 8 },
+  compactCurrencyBadge: { width: 50, height: 48, marginRight: 8 },
   currencyText: { fontSize: 12, fontWeight: '700' },
-  amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10 },
+  amountInput: { flex: 1, minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10 },
   amountPressable: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   amountDisplayWrap: { flex: 1 },
-  amountTextInput: { minHeight: 44, paddingVertical: 0, marginRight: 4 },
+  amountTextInput: { minHeight: 48, paddingVertical: 0, marginRight: 4 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
   inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   scannedDateNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 12 },
@@ -2246,10 +2246,10 @@ const styles = StyleSheet.create({
   fxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fxRowLabel: { marginBottom: 0, minWidth: 96 },
   fxChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
-  fxInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, minHeight: 40 },
+  fxInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, minHeight: 48 },
   inlineWarningText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   compactPicker: {
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 12,
@@ -2261,7 +2261,7 @@ const styles = StyleSheet.create({
   inlineDateActions: { flexDirection: 'row' },
   miniAction: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 14,
     alignItems: 'center',
@@ -2276,8 +2276,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   detailsModeToggle: { flexDirection: 'row', width: '100%', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
-  compactDetailsToggle: { minHeight: 44 },
-  detailsModeBtn: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  compactDetailsToggle: { minHeight: 48 },
+  detailsModeBtn: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   compactDetailsBtn: { paddingHorizontal: 10 },
   detailsModeText: { fontSize: 13, fontWeight: '700' },
   noteInputCompact: { minHeight: 88, paddingTop: 12 },
@@ -2311,9 +2311,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 2,
@@ -2329,7 +2329,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    minHeight: 44,
+    minHeight: 48,
   },
   rawOcrHeaderLeft: {
     flexDirection: 'row',
@@ -2362,7 +2362,7 @@ const styles = StyleSheet.create({
   templateChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 12,

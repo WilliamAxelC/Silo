@@ -12,6 +12,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (cb: () => void) => {
     focusCallback = cb;
   },
+  useNavigation: () => ({ navigate: jest.fn() }),
 }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');

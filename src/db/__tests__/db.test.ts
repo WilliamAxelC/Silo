@@ -142,7 +142,7 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(18);
+      expect(versionRow?.user_version).toBe(19);
 
       const templatesTable = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
@@ -165,7 +165,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(18);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(19);
       const tbl = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
       );
@@ -208,7 +208,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(18);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(19);
       const row = testDb.getFirstSync<{ image_uri: string; thumbnail_uri: string | null }>(
         'SELECT image_uri, thumbnail_uri FROM receipt_queue;'
       );

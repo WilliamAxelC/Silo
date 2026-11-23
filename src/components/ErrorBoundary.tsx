@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Appearance } from 'react-nati
 import { lightTheme, darkTheme } from '../theme/colors';
 import { scaleFontSize } from '../theme/typography';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { recordError } from '../services/errorLog';
 
 interface Props {
   children: ReactNode;
@@ -25,6 +26,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
+    recordError(error, 'render');
   }
 
   public render() {
@@ -90,7 +92,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },

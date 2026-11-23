@@ -37,9 +37,11 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
+      <TouchableOpacity style={styles.overlay} activeOpacity={1}
+          accessible={false} onPress={onClose}>
         <TouchableOpacity
           activeOpacity={1}
+          accessible={false}
           testID="account-picker-sheet"
           style={[
             styles.sheet,
@@ -112,6 +114,6 @@ const styles = StyleSheet.create({
   name: { flex: 1, fontSize: 15, fontWeight: '600' },
   balance: { fontSize: 13, fontWeight: '600' },
   empty: { fontSize: 13, textAlign: 'center', paddingVertical: 12 },
-  manage: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44, marginTop: 4 },
+  manage: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 48, marginTop: 4 },
   manageText: { fontSize: 14, fontWeight: '700' },
 });

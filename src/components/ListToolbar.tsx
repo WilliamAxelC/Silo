@@ -227,6 +227,7 @@ export function ActiveFilterChips({
           key={c.key}
           style={[styles.activeChip, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
           onPress={() => onChange({ ...filters, ...c.clear })}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Remove filter ${c.label}`}
         >
@@ -244,13 +245,13 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   spacer: { flex: 1 },
   toggleWrap: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, padding: 3, gap: 2 },
-  toggleBtn: { width: 40, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  iconBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  toggleBtn: { width: 46, height: 42, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 48, height: 48, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   filterBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    height: 44,
+    height: 48,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    height: 44,
+    height: 48,
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 10,

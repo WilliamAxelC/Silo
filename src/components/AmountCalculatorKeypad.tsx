@@ -345,8 +345,10 @@ export const AmountCalculatorModal: React.FC<AmountCalculatorModalProps> = ({
 }) => {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} style={styles.sheetWrap}>
+      <TouchableOpacity style={styles.overlay} activeOpacity={1}
+          accessible={false} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1}
+          accessible={false} onPress={(e) => e.stopPropagation()} style={styles.sheetWrap}>
           {visible ? (
             <AmountCalculatorKeypad
               {...rest}

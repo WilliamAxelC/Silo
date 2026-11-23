@@ -33,6 +33,9 @@ export type RootStackParamList = {
   AccountDetail: { walletId: number };
   Activity: undefined;
   Recurring: undefined;
+  Report: { kind?: 'bug' | 'feature' } | undefined;
+  Privacy: undefined;
+  Goals: undefined;
   Settings: undefined;
   SystemLogs: undefined;
 };

@@ -135,9 +135,11 @@ export function FilterSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose} accessibilityLabel="Close filters">
+      <TouchableOpacity style={styles.overlay} activeOpacity={1}
+          accessible={false} onPress={onClose}>
         <TouchableOpacity
           activeOpacity={1}
+          accessible={false}
           onPress={(e) => e.stopPropagation()}
           testID="filter-sheet"
           style={[
@@ -280,7 +282,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 18,
     paddingHorizontal: 12,
-    minHeight: 36,
+    minHeight: 44,
     maxWidth: '100%',
   },
   chipText: { fontWeight: '600' },

@@ -14,6 +14,7 @@ import { computeBudgetStatus, type BudgetPlan, type BudgetStatus } from '../feat
 import type { BudgetPlanInput } from '../features/budgets/plans';
 import { getCachedRate, refreshDailyRates } from '../services/fx/rates';
 import { BudgetPlanEditor } from '../components/BudgetPlanEditor';
+import { GoalsSummaryCard } from '../components/GoalsSummaryCard';
 
 const getProgressTone = (percentage: number, theme: ReturnType<typeof useAppTheme>) => {
   if (percentage > 100) return theme.expense;
@@ -281,6 +282,7 @@ export const BudgetScreen = () => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
       >
+        <GoalsSummaryCard />
         {active.length === 0 && finished.length === 0 ? (
           <View style={[styles.emptyStateCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={[styles.emptyIconWrap, { backgroundColor: theme.background, borderColor: theme.border }]}>
@@ -343,7 +345,7 @@ const styles = StyleSheet.create({
   emptyIconWrap: { width: 50, height: 50, borderRadius: 16, borderWidth: 1, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   emptyTitle: { fontWeight: '700', marginBottom: 4 },
   emptySubtitle: { textAlign: 'center', lineHeight: 18 },
-  emptyCta: { marginTop: 14, borderRadius: 999, paddingHorizontal: 18, minHeight: 44, justifyContent: 'center' },
+  emptyCta: { marginTop: 14, borderRadius: 999, paddingHorizontal: 18, minHeight: 48, justifyContent: 'center' },
   budgetCard: { borderWidth: 1, borderRadius: 20, padding: 14, marginBottom: 10, gap: 2 },
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   cardHeadingBlock: { flex: 1, marginRight: 10 },

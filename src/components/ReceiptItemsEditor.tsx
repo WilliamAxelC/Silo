@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 14,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
   },
   inlineAddButtonText: {
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
   },
   receiptNameInput: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
@@ -260,7 +260,7 @@ const styles = StyleSheet.create({
   },
   receiptPriceBox: {
     width: 132,
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 10,
     flexDirection: 'row',
@@ -279,14 +279,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   receiptRemoveBtn: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   receiptNoteInput: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,

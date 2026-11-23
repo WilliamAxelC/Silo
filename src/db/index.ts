@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-const DB_SCHEMA_VERSION = 18;
+const DB_SCHEMA_VERSION = 19;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -515,6 +515,26 @@ function migrateToVersion18(sqliteDb: typeof expoDb = expoDb) {
   `);
 }
 
+/**
+ * Savings goals (features/goals): a target amount, optional target date, and progress taken from an
+ * account's balance or entered by hand.
+ */
+function migrateToVersion19(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.execSync(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      target_amount REAL NOT NULL,
+      target_date INTEGER,
+      source TEXT NOT NULL DEFAULT 'manual',
+      wallet_id INTEGER REFERENCES wallets(id) ON DELETE SET NULL,
+      saved_amount REAL NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+  `);
+}
+
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -967,6 +987,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 18) {
     migrateToVersion18(sqliteDb);
+  }
+
+  if (currentVersion < 19) {
+    migrateToVersion19(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

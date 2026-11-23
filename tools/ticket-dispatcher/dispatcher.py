@@ -41,6 +41,8 @@ TEST_BRANCH = os.environ.get("SILO_TEST_BRANCH", "test")
 PROFILES = [p for p in os.environ.get("SILO_AGY_PROFILES", "agy5 agy4 agy3 agy2 agy").split() if p]
 MODELS = os.environ.get("SILO_AGY_MODELS", "gemini-4-hydrogen-high gemini-3.8-flash-high gemini-3.8-flash-medium").split()
 AGENT_TIMEOUT = int(os.environ.get("SILO_AGENT_TIMEOUT", str(45 * 60)))
+FOLLOW_UPS = 3
+WAITING_RE = __import__("re").compile(r"\b(in the background|waiting (for|on)|will (check|report|update)|once (it|they|the tests?) (finish|complete))", __import__("re").I)
 GIT_AUTHOR = ("WilliamAxelC", "williamaxelcuangdinata@gmail.com")
 
 
@@ -198,6 +200,8 @@ def build_prompt(t: dict) -> str:
         "- For a bug: add a jest test whose name starts with 'regression:' that fails on the old code and passes now.",
         "- For a feature: add tests for the new behaviour.",
         "- Run `npx tsc --noEmit` and `npx jest` and make both pass. Do not delete or weaken existing tests.",
+        "- Run every command in the foreground and wait for it to finish. Never background a command and never end",
+        "  your turn while something is still running: nobody will wake you up afterwards.",
         "- Do not touch android/ build config, app.json versions, secrets, or git remotes. Never push.",
         f"- Commit your work on this branch with a message starting 'fix(ticket #{t['n']}):' or 'feat(ticket #{t['n']}):'.",
         "- Finish with a short receipt (under 150 words): root cause, what changed, tests added, test results.",
@@ -269,11 +273,22 @@ def run_acp(n: int, profile: str, cwd: pathlib.Path, prompt: str) -> tuple[bool,
             if res and "error" not in res:
                 event(n, "agent", f"{profile} using {model}")
                 break
-        res = read_until(send("session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": prompt}]}))
-        if res is None:
-            return False, "agent timed out or exited" + ("" if not chunks else f": {''.join(chunks)[-600:]}")
-        if "error" in res:
-            return False, f"agent error: {json.dumps(res['error'])[:400]}"
+        text = prompt
+        for turn in range(1 + FOLLOW_UPS):
+            chunks.clear()
+            res = read_until(send("session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": text}]}))
+            if res is None:
+                return False, "agent timed out or exited" + ("" if not chunks else f": {''.join(chunks)[-600:]}")
+            if "error" in res:
+                return False, f"agent error: {json.dumps(res['error'])[:400]}"
+            reply = "".join(chunks).strip()
+            # Agents sometimes end the turn "waiting" for a background command; nothing would wake them.
+            if turn < FOLLOW_UPS and WAITING_RE.search(reply):
+                event(n, "agent", f"Agent paused while waiting ({reply[:120]}); asking it to continue")
+                text = ("Continue. Run any checks you were waiting on now, in the foreground, wait for them to finish, "
+                        "fix any failures, commit, and then give your final receipt.")
+                continue
+            return True, reply
         return True, "".join(chunks).strip()
     finally:
         try:
@@ -286,10 +301,20 @@ def verify(cwd: pathlib.Path, n: int, kind: str) -> tuple[bool, str]:
     checks = []
     tsc = subprocess.run(["npx", "tsc", "--noEmit"], cwd=cwd, capture_output=True, text=True, timeout=900)
     checks.append(("typecheck", tsc.returncode == 0, (tsc.stdout + tsc.stderr)[-800:]))
-    jest = subprocess.run(["npx", "jest", "--silent"], cwd=cwd, capture_output=True, text=True, timeout=1800)
-    tail = (jest.stdout + jest.stderr)
-    summary = next((l for l in tail.splitlines() if l.startswith("Tests:")), "Tests: ?")
-    checks.append(("jest", jest.returncode == 0, summary if jest.returncode == 0 else tail[-1200:]))
+    def run_jest() -> tuple[bool, str]:
+        res = subprocess.run(["npx", "jest", "--silent"], cwd=cwd, capture_output=True, text=True, timeout=1800)
+        out = res.stdout + res.stderr
+        tests_line = next((l for l in out.splitlines() if l.startswith("Tests:")), "Tests: ?")
+        failed = sorted({l.split()[1] for l in out.splitlines() if l.startswith("FAIL ")})
+        return res.returncode == 0, tests_line + (f" | failing: {', '.join(failed)[:300]}" if failed else "")
+
+    ok_jest, jest_summary = run_jest()
+    if not ok_jest:
+        # One retry: timing-sensitive tests can fail under load (e.g. a leftover agent test run).
+        log_local(n, f"[verify] jest failed once ({jest_summary}); retrying")
+        ok_jest, retry_summary = run_jest()
+        jest_summary = retry_summary + ("" if ok_jest else "") + (" (passed on retry)" if ok_jest else "")
+    checks.append(("jest", ok_jest, jest_summary))
     if kind == "bug":
         diff = git("diff", f"{TEST_BRANCH}...HEAD", cwd=cwd, check=False)
         checks.append(("regression test", "regression:" in diff, "a 'regression:' test was added" if "regression:" in diff else "no 'regression:' test in the diff"))
@@ -312,6 +337,14 @@ def ensure_branches() -> pathlib.Path:
 
 
 def link_node_modules(wt: pathlib.Path) -> None:
+    """Shares the main checkout's node_modules. The symlink is a file, which `node_modules/` in .gitignore
+    does not match, so it is excluded explicitly or `git add -A` would commit it."""
+    exclude = pathlib.Path(git("rev-parse", "--git-common-dir", cwd=REPO))
+    exclude = (exclude if exclude.is_absolute() else REPO / exclude) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    if "/node_modules" not in (exclude.read_text() if exclude.exists() else "").splitlines():
+        with exclude.open("a") as fh:
+            fh.write("/node_modules\n")
     nm = wt / "node_modules"
     if not nm.exists():
         nm.symlink_to(REPO / "node_modules")

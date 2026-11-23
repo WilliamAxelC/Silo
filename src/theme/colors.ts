@@ -1,18 +1,18 @@
 export const lightTheme = {
   background: '#f8f9fa',
   surface: '#ffffff',
-  primary: '#0ea5e9', // Blue
+  primary: '#0369a1', // Blue (sky-700: 5.9:1 on white, WCAG AA for text and white-on-blue)
   onPrimary: '#ffffff',
   primaryMuted: '#e0f2fe',
   text: '#1f2937',    // Dark Gray
   textMuted: '#6b7280',
   border: '#e5e7eb',
   borderLight: '#f3f4f6',
-  expense: '#ef4444', // Red
+  expense: '#c81e1e', // Red (5.7:1 on white)
   expenseMuted: '#fee2e2',
-  income: '#10b981',  // Green
+  income: '#047857',  // Green (emerald-700: 5.5:1 on white)
   incomeMuted: '#d1fae5',
-  warning: '#f59e0b', // Amber
+  warning: '#b45309', // Amber (amber-700: 5.0:1 on white)
   warningMuted: '#fef3c7',
 };
 
@@ -20,7 +20,7 @@ export const darkTheme = {
   background: '#121212',
   surface: '#1e1e1e',
   primary: '#38bdf8', // Lighter Blue for contrast
-  onPrimary: '#ffffff',
+  onPrimary: '#0b1220', // Dark text on light blue / red / green buttons (6.8:1 or more)
   primaryMuted: '#082f49',
   text: '#f9fafb',    // Off-White
   textMuted: '#b5bcc7',

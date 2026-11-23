@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -66,6 +66,19 @@ import {
   isVisionProjectorInstalled,
 } from '../services/ai/modelLifecycle';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
+import {
+  AUTO_BACKUP_KEEP,
+  isAutoBackupEnabled,
+  listAutoBackups,
+  runAutoBackupIfDue,
+  setAutoBackupEnabled,
+  type AutoBackup,
+} from '../services/autoBackup';
+import { eraseAllData } from '../services/eraseData';
+import { clearErrorLog } from '../services/errorLog';
+import { useUpdateStore } from '../services/updates';
+import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
+import { useGoalsStore } from '../features/goals/goals';
 import appConfig from '../../app.json';
 
 const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -157,6 +170,11 @@ export const SettingsScreen = () => {
     ? `about ${formatMb(activeModel.visionProjector.sizeBytes)}`
     : 'about 200 MB';
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [autoBackups, setAutoBackups] = useState<AutoBackup[]>([]);
+  const [autoBackupOn, setAutoBackupOn] = useState(true);
+  const [eraseVisible, setEraseVisible] = useState(false);
+  const [eraseText, setEraseText] = useState('');
+  const [isErasing, setIsErasing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [categoryDraft, setCategoryDraft] = useState('');
   const [categoryType, setCategoryType] = useState<CategoryType>('expense');
@@ -562,6 +580,7 @@ export const SettingsScreen = () => {
     setIsBackingUp(true);
     try {
       const { transactions } = await restoreBackupFile(uri);
+      useGoalsStore.getState().load();
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
       store.invalidateData?.();
@@ -596,6 +615,74 @@ export const SettingsScreen = () => {
       Alert.alert('Restore failed', `${getErrorMessage(error, 'Could not read the backup.')} Your current data was not changed.`);
     } finally {
       setIsBackingUp(false);
+    }
+  };
+
+  const refreshAutoBackups = useCallback(async () => {
+    setAutoBackupOn(isAutoBackupEnabled());
+    setAutoBackups(await listAutoBackups());
+  }, []);
+
+  useEffect(() => {
+    void refreshAutoBackups();
+  }, [refreshAutoBackups]);
+
+  const handleToggleAutoBackup = async (enabled: boolean) => {
+    setAutoBackupEnabled(enabled);
+    setAutoBackupOn(enabled);
+    if (enabled) await runAutoBackupIfDue();
+    await refreshAutoBackups();
+  };
+
+  const handleBackUpNow = async () => {
+    setIsBackingUp(true);
+    try {
+      await runAutoBackupIfDue(new Date(), { force: true });
+      await refreshAutoBackups();
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleAutoBackupPress = (backup: AutoBackup) => {
+    Alert.alert(`Backup from ${backup.date}`, 'Restore replaces all data on this phone with this backup.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Share', onPress: () => void handleShareBackupFile(backup.uri) },
+      {
+        text: 'Restore',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert('Replace all data?', `Restore the backup from ${backup.date}? Current data will be replaced.`, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Restore', style: 'destructive', onPress: () => void runRestore(backup.uri) },
+          ]),
+      },
+    ]);
+  };
+
+  const handleEraseAll = async () => {
+    if (eraseText.trim().toUpperCase() !== 'ERASE' || isErasing) return;
+    setIsErasing(true);
+    try {
+      await eraseAllData();
+      clearErrorLog();
+      useGoalsStore.getState().load();
+      await useSettingsStore.getState().loadSettings();
+      const store = useTransactionStore.getState();
+      store.invalidateData?.();
+      await store.initDB();
+      await Promise.all([store.fetchTransactions(), store.fetchCategories()]);
+      await store.fetchBudgets();
+      await useReceiptQueueStore.getState().load();
+      useUpdateStore.getState().hydrate();
+      setEraseVisible(false);
+      setEraseText('');
+      await refreshAutoBackups();
+      navigation.navigate('MainTabs', { screen: 'Cashflow' });
+    } catch (error) {
+      Alert.alert('Erase failed', getErrorMessage(error, 'Some data could not be erased. Please try again.'));
+    } finally {
+      setIsErasing(false);
     }
   };
 
@@ -1915,7 +2002,7 @@ export const SettingsScreen = () => {
                         {
                           flex: 0,
                           paddingHorizontal: 16,
-                          minHeight: 44,
+                          minHeight: 48,
                           backgroundColor: theme.expenseMuted,
                           borderWidth: 1,
                           borderColor: theme.expense,
@@ -2197,6 +2284,70 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="time-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Automatic Backups</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  A backup a day on this phone, last {AUTO_BACKUP_KEEP} kept. Tap one to restore or share it.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={autoBackupOn}
+              onValueChange={(v) => void handleToggleAutoBackup(v)}
+              trackColor={{ false: theme.border, true: theme.primary }}
+              thumbColor={getSwitchThumbColor(autoBackupOn)}
+              accessibilityLabel="Automatic backups"
+            />
+          </View>
+          {autoBackups.map((backup) => (
+            <TouchableOpacity
+              key={backup.uri}
+              style={styles.autoBackupRow}
+              onPress={() => handleAutoBackupPress(backup)}
+              accessibilityRole="button"
+              accessibilityLabel={`Automatic backup from ${backup.date}`}
+            >
+              <Text style={[styles.rowSubText, { color: theme.text }, captionScale]}>{backup.date}</Text>
+              <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                {backup.sizeBytes > 0 ? `${Math.max(1, Math.round(backup.sizeBytes / 1024))} KB` : ''}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={styles.autoBackupRow}
+            onPress={() => void handleBackUpNow()}
+            disabled={isBackingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Make an automatic backup now"
+          >
+            <Text style={[styles.rowSubText, { color: theme.primary, fontWeight: '700' }, captionScale]}>Back up now</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setEraseVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Erase all data"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="trash-outline" size={18} color={theme.expense} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.expense }, textScale]}>Erase All Data</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Remove everything Silo keeps on this phone and start fresh
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
           <TouchableOpacity
             style={styles.row}
             onPress={() => navigation.navigate('SystemLogs')}
@@ -2239,10 +2390,12 @@ export const SettingsScreen = () => {
         <TouchableOpacity
           style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
           activeOpacity={1}
+          accessible={false}
           onPress={() => setMonthStartModalVisible(false)}
         >
           <TouchableOpacity
             activeOpacity={1}
+          accessible={false}
             onPress={(event) => event.stopPropagation()}
             style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
           >
@@ -2322,10 +2475,12 @@ export const SettingsScreen = () => {
           <TouchableOpacity
             style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
             activeOpacity={1}
+          accessible={false}
             onPress={closeModal}
           >
             <TouchableOpacity
               activeOpacity={1}
+          accessible={false}
               onPress={(event) => event.stopPropagation()}
               style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
             >
@@ -2378,6 +2533,69 @@ export const SettingsScreen = () => {
           onClose={() => setPendingCurrency(null)}
         />
       ) : null}
+
+      <Modal visible={eraseVisible} transparent animationType="fade" onRequestClose={() => setEraseVisible(false)}>
+        <KeyboardAvoidingView style={styles.eraseOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.eraseCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="erase-dialog">
+            <Text style={[styles.rowText, { color: theme.text, fontSize: theme.scaleFont(17), fontWeight: '800' }]}>
+              Erase all data?
+            </Text>
+            <Text style={[styles.rowSubText, { color: theme.text, marginTop: 8 }, captionScale]}>
+              This permanently removes your transactions, accounts, budgets, goals, receipt photos, automatic backups,
+              settings and saved API keys from this phone. The downloaded AI model is kept. It can't be undone.
+            </Text>
+            <TouchableOpacity
+              onPress={() => void handleShareBackupFile()}
+              accessibilityRole="button"
+              accessibilityLabel="Share a backup first"
+              style={styles.eraseLink}
+            >
+              <Text style={[styles.rowSubText, { color: theme.primary, fontWeight: '700' }, captionScale]}>Share a backup first</Text>
+            </TouchableOpacity>
+            <Text style={[styles.rowSubText, { color: theme.textMuted, marginTop: 6 }, captionScale]}>Type ERASE to confirm</Text>
+            <TextInput
+              value={eraseText}
+              onChangeText={setEraseText}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder="ERASE"
+              placeholderTextColor={theme.textMuted}
+              accessibilityLabel="Type ERASE to confirm"
+              style={[styles.eraseInput, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]}
+            />
+            <View style={styles.eraseButtons}>
+              <TouchableOpacity
+                style={[styles.eraseBtn, { borderColor: theme.border }]}
+                onPress={() => {
+                  setEraseVisible(false);
+                  setEraseText('');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel erase"
+              >
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.eraseBtn,
+                  { backgroundColor: theme.expense, borderColor: theme.expense, opacity: eraseText.trim().toUpperCase() === 'ERASE' ? 1 : 0.45 },
+                ]}
+                onPress={() => void handleEraseAll()}
+                disabled={eraseText.trim().toUpperCase() !== 'ERASE' || isErasing}
+                accessibilityRole="button"
+                accessibilityLabel="Erase everything"
+                accessibilityState={{ disabled: eraseText.trim().toUpperCase() !== 'ERASE' }}
+              >
+                {isErasing ? (
+                  <ActivityIndicator color={theme.onPrimary} />
+                ) : (
+                  <Text style={[styles.rowText, { color: theme.onPrimary, fontWeight: '800' }, textScale]}>Erase</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -2395,7 +2613,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   headerTitle: { flex: 1, fontWeight: '700' },
-  backButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  backButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 28 },
   sectionTitle: {
     fontWeight: '800',
@@ -2413,6 +2631,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  autoBackupRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48, paddingLeft: 46, paddingRight: 14 },
+  eraseOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  eraseCard: { borderWidth: 1, borderRadius: 18, padding: 18 },
+  eraseLink: { minHeight: 48, justifyContent: 'center' },
+  eraseInput: { borderWidth: 1, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, marginTop: 8, fontSize: 16, letterSpacing: 2 },
+  eraseButtons: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  eraseBtn: { flex: 1, minHeight: 48, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   rowWithSecondary: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -2458,7 +2683,7 @@ const styles = StyleSheet.create({
   segmentedRow: { flexDirection: 'row', gap: 6 },
   segmentBtn: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
@@ -2473,7 +2698,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
   },
   optionChipText: { fontWeight: '700', fontSize: 12 },
@@ -2520,7 +2745,7 @@ const styles = StyleSheet.create({
   modelActionsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   modelActionButton: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2530,7 +2755,7 @@ const styles = StyleSheet.create({
   modelActionText: { fontSize: 13, fontWeight: '800' },
   modelSecondaryActionButton: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
@@ -2540,18 +2765,18 @@ const styles = StyleSheet.create({
   },
   modelSecondaryActionText: { fontSize: 13, fontWeight: '800' },
   inputLabel: { fontSize: 12, fontWeight: '700', marginTop: 10, marginBottom: 4 },
-  formInput: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 14 },
+  formInput: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 14 },
   apiKeyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 12,
     paddingLeft: 12,
     paddingRight: 4,
   },
-  apiKeyInput: { flex: 1, minHeight: 44, fontSize: 14 },
-  apiKeyEyeBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  apiKeyInput: { flex: 1, minHeight: 48, fontSize: 14 },
+  apiKeyEyeBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   externalApiFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2567,7 +2792,7 @@ const styles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
     borderRadius: 12,
-    minHeight: 44,
+    minHeight: 48,
     paddingHorizontal: 14,
   },
   testConnectionText: { fontWeight: '700' },
@@ -2582,7 +2807,7 @@ const styles = StyleSheet.create({
   },
   categoryEyebrow: { fontWeight: '800', letterSpacing: 0.6, fontSize: 11, marginBottom: 2 },
   categoryHeading: { fontWeight: '700', fontSize: 15 },
-  roundAddBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  roundAddBtn: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   categoryPillRow: {
     minHeight: 48,
     borderWidth: 1,
@@ -2597,18 +2822,18 @@ const styles = StyleSheet.create({
   categoryPillText: { fontWeight: '600', fontSize: 14 },
   badgeText: { fontSize: 10, fontWeight: '700' },
   categoryActions: { flexDirection: 'row', alignItems: 'center' },
-  iconActionBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconActionBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
   modalCard: { borderWidth: 1, borderRadius: 20, padding: 18 },
   modalTitle: { fontWeight: '800', marginBottom: 2 },
   dayModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   dayModalHint: { marginTop: 2 },
-  modalCloseBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  modalCloseBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   dayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-start' },
   dayGridBtn: {
     width: '17.5%',
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 48,
+    minHeight: 48,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
@@ -2618,8 +2843,8 @@ const styles = StyleSheet.create({
   modalSubtitle: { fontWeight: '700', marginBottom: 14 },
   modalInput: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
   modalActions: { flexDirection: 'row', marginTop: 16, gap: 8 },
-  modalSecondaryBtn: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  modalPrimaryBtn: { flex: 1.2, minHeight: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modalSecondaryBtn: { flex: 1, minHeight: 48, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modalPrimaryBtn: { flex: 1.2, minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modalSecondaryText: { fontWeight: '700' },
   modalPrimaryText: { fontWeight: '800' },
   aboutCard: {

@@ -20,9 +20,11 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
       <TouchableOpacity
         style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 20)]}
         activeOpacity={1}
+          accessible={false}
         onPress={onClose}
       >
-        <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+        <TouchableOpacity activeOpacity={1}
+          accessible={false} style={[styles.modalContent, { backgroundColor: theme.surface }]}>
           <Text style={[styles.modalTitle, { color: theme.text, fontSize: theme.scaleFont(16) }]}>
             {scanMode ? 'Add receipts' : 'Select a Source'}
           </Text>
@@ -38,8 +40,8 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
               accessibilityRole="button"
               accessibilityLabel="Select from gallery"
             >
-              <Ionicons name="images" size={34} color="#fff" />
-              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14) }]}>Gallery</Text>
+              <Ionicons name="images" size={34} color={theme.onPrimary} />
+              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14), color: theme.onPrimary }]}>Gallery</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.modalBtn, { backgroundColor: theme.primary }]}
@@ -47,8 +49,8 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
               accessibilityRole="button"
               accessibilityLabel="Take photo with camera"
             >
-              <Ionicons name={scanMode ? 'scan' : 'camera'} size={34} color="#fff" />
-              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14) }]}>
+              <Ionicons name={scanMode ? 'scan' : 'camera'} size={34} color={theme.onPrimary} />
+              <Text style={[styles.modalBtnText, { fontSize: theme.scaleFont(14), color: theme.onPrimary }]}>
                 {scanMode ? 'Scan' : 'Camera'}
               </Text>
             </TouchableOpacity>
@@ -75,6 +77,6 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   modalBtn: { flex: 1, minHeight: 108, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalBtnText: { marginTop: 8, color: '#fff', fontWeight: '700' },
-  cancelBtn: { marginTop: 14, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
+  cancelBtn: { marginTop: 14, alignItems: 'center', justifyContent: 'center', minHeight: 48 },
   cancelBtnText: { fontSize: 14, fontWeight: '700' },
 });

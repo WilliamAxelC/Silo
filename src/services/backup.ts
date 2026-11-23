@@ -26,17 +26,23 @@ export function isLikelyBackupFile(fileName?: string | null): boolean {
 }
 
 // Restored in this order so foreign keys always point at rows that already exist.
-const RESTORE_TABLES = [
+export const RESTORE_TABLES = [
   'wallets',
   'categories',
   'app_settings',
   'budgets',
+  'budget_plans',
+  'tags',
   'transactions',
   'transaction_items',
+  'transaction_tags',
   'shared_splits',
   'recurring_rules',
   'transaction_templates',
+  'goals',
 ] as const;
+// Every user-data table must be listed above (regression 2026-11-23: tags, tag links and budget plans
+// were silently dropped on restore). activity_log is history, not data, and is left out on purpose.
 // receipt_queue is left alone: queued photos live on the old device.
 
 /**

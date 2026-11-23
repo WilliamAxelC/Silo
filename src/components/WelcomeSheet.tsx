@@ -33,6 +33,7 @@ import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { getActiveModelConfig } from '../services/ai/config';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { useAIStore } from '../store/useAIStore';
+import { useGoalsStore } from '../features/goals/goals';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -180,6 +181,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
     setIsBusy(true);
     try {
       const { transactions } = await restoreBackupFile(uri);
+      useGoalsStore.getState().load();
       await useSettingsStore.getState().loadSettings();
       const txStore = useTransactionStore.getState();
       txStore.invalidateData?.();
@@ -482,8 +484,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   skipBtn: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 48,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
@@ -502,7 +504,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   chip: {
-    minHeight: 44,
+    minHeight: 48,
     minWidth: 64,
     borderWidth: 1,
     borderRadius: 999,
@@ -527,7 +529,7 @@ const styles = StyleSheet.create({
   },
   balanceInput: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 48,
     fontWeight: '700',
   },
   helperText: {
@@ -550,7 +552,7 @@ const styles = StyleSheet.create({
   },
   restoreBtn: {
     marginTop: 10,
-    minHeight: 46,
+    minHeight: 48,
     borderRadius: 14,
     borderWidth: 1,
     flexDirection: 'row',

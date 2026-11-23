@@ -367,7 +367,7 @@ export const RecurringScreen = () => {
                           <Text
                             style={[
                               styles.typeBtnText,
-                              { color: active ? '#fff' : theme.textMuted, fontSize: theme.scaleFont(13) },
+                              { color: active ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
                             ]}
                           >
                             {t === 'income' ? 'Income' : 'Expense'}
@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
     minHeight: 56,
     gap: 6,
   },
-  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontSize: 18, fontWeight: '700' },
   addBtn: {
     flexDirection: 'row',
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     gap: 4,
     borderRadius: 999,
     paddingHorizontal: 14,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
   },
   addBtnText: { fontSize: 13, fontWeight: '700' },
@@ -588,19 +588,19 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowSub: { fontSize: 12, marginTop: 2 },
   amount: { fontSize: 14, fontWeight: '700' },
-  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
   sheetTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
   label: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
-  typeBtn: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  typeBtn: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   typeBtnText: { fontWeight: '700' },
-  input: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },
+  input: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },
   amountRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   currencyBadge: {
     minWidth: 48,
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 12,
     alignItems: 'center',
@@ -615,13 +615,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 14,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
   },
   chipText: { fontSize: 13, fontWeight: '600' },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 20, gap: 10 },
-  secondaryBtn: { minHeight: 44, paddingHorizontal: 14, justifyContent: 'center' },
+  secondaryBtn: { minHeight: 48, paddingHorizontal: 14, justifyContent: 'center' },
   secondaryText: { fontSize: 14, fontWeight: '700' },
-  primaryBtn: { minHeight: 44, borderRadius: 12, paddingHorizontal: 22, justifyContent: 'center' },
+  primaryBtn: { minHeight: 48, borderRadius: 12, paddingHorizontal: 22, justifyContent: 'center' },
   primaryText: { fontSize: 14, fontWeight: '700' },
 });

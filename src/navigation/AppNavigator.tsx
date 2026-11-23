@@ -41,7 +41,11 @@ import { ActivityScreen } from '../screens/ActivityScreen';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
 import { useUpdateStore } from '../services/updates';
+import { runAutoBackupIfDue } from '../services/autoBackup';
 import { RecurringScreen } from '../screens/RecurringScreen';
+import { ReportScreen } from '../screens/ReportScreen';
+import { PrivacyScreen } from '../screens/PrivacyScreen';
+import { GoalsScreen } from '../screens/GoalsScreen';
 
 /** How long after Silo goes to the background the AI model is released. */
 const BACKGROUND_MODEL_UNLOAD_MS = 10_000;
@@ -63,6 +67,9 @@ export const APP_LINKING = {
       AccountDetail: 'accounts/:walletId',
       Activity: 'activity',
       Recurring: 'recurring',
+      Report: 'report',
+      Privacy: 'privacy',
+      Goals: 'goals',
     },
   },
   async getInitialURL() {
@@ -208,6 +215,8 @@ export const AppNavigator = () => {
         // New-version notice: reads a small static file from the download page at most once a day.
         useUpdateStore.getState().hydrate();
         void useUpdateStore.getState().check();
+        // Today's automatic backup, a few seconds after startup so it never slows the first screen.
+        setTimeout(() => void runAutoBackupIfDue(), 5000);
       });
     useReceiptQueueStore.getState().load();
     const removeShareListener = addShareListener(() => void handleSharedReceipts());
@@ -276,6 +285,9 @@ export const AppNavigator = () => {
           <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
           <Stack.Screen name="Activity" component={ActivityScreen} />
           <Stack.Screen name="Recurring" component={RecurringScreen} />
+          <Stack.Screen name="Report" component={ReportScreen} />
+          <Stack.Screen name="Privacy" component={PrivacyScreen} />
+          <Stack.Screen name="Goals" component={GoalsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

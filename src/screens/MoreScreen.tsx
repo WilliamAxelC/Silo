@@ -153,6 +153,21 @@ export const MoreScreen = () => {
 
           <TouchableOpacity
             style={styles.menuRow}
+            onPress={() => navigation.navigate('Goals')}
+            accessibilityRole="button"
+            accessibilityLabel="Savings goals"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="flag-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Savings goals</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
             onPress={() => navigation.navigate('Recurring')}
             accessibilityRole="button"
             accessibilityLabel="Recurring"
@@ -294,6 +309,51 @@ export const MoreScreen = () => {
 
           <TouchableOpacity
             style={styles.menuRow}
+            onPress={() => navigation.navigate('Report', { kind: 'bug' })}
+            accessibilityRole="button"
+            accessibilityLabel="Report a bug"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="bug-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Report a bug</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('Report', { kind: 'feature' })}
+            accessibilityRole="button"
+            accessibilityLabel="Request a feature"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="bulb-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Request a feature</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('Privacy')}
+            accessibilityRole="button"
+            accessibilityLabel="Privacy"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Privacy: what leaves your phone</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
             onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
             accessibilityRole="link"
             accessibilityLabel="Open the Silo download page"
@@ -332,8 +392,8 @@ const styles = StyleSheet.create({
   aiTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
   aiDesc: { fontSize: 12 },
   aiInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  input: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
-  chatButton: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  input: { flex: 1, minHeight: 48, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
+  chatButton: { width: 48, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6, marginLeft: 4 },
   devCard: { borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: 'hidden' },
   devButton: { flexDirection: 'row', alignItems: 'center', minHeight: 50, paddingHorizontal: 14, paddingVertical: 10 },

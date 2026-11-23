@@ -159,7 +159,7 @@ export const AccountDetailScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 8, borderBottomWidth: 1, gap: 4 },
-  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontWeight: '800' },
   summary: { margin: 16, borderWidth: 1, borderRadius: 20, padding: 16, gap: 4 },
   summaryLabel: { fontWeight: '600' },
