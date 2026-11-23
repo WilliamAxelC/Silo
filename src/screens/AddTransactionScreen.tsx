@@ -82,6 +82,7 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { useAppTheme } from '../theme/useAppTheme';
+import { consumeTrustedSharedImage } from '../services/ocr/normalizeImage';
 
 import { ReceiptItemsEditor } from '../components/ReceiptItemsEditor';
 import { CategorySelectorModal } from '../components/CategorySelectorModal';
@@ -804,6 +805,8 @@ export const AddTransactionScreen = () => {
   useEffect(() => {
     if (!sharedImageUri || handledSharedImageRef.current === sharedImageUri) return;
     handledSharedImageRef.current = sharedImageUri;
+    // Only photos from the share sheet; a silo:// link cannot make Silo read an arbitrary file.
+    if (!consumeTrustedSharedImage(sharedImageUri)) return;
     void processScanReceipt(sharedImageUri, undefined, { fromGallery: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedImageUri]);

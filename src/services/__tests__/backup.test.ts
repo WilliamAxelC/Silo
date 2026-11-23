@@ -115,6 +115,45 @@ describe('restoreBackupFile', () => {
     expect(mockMain.getFirstSync('PRAGMA foreign_keys;')!.foreign_keys).toBe(1);
   });
 
+  // Security review 2026-11-23: a backup from someone else must not be able to point the AI at their
+  // server (this phone's API key would follow), switch on external mode, or turn the app lock off.
+  it('regression: keeps this phone\'s AI server, mode, prompts and app lock; never takes them from the backup', async () => {
+    for (const [key, value] of [
+      ['externalApiUrl', 'https://api.openai.com/v1'],
+      ['aiInferenceMode', 'local'],
+      ['appLockEnabled', 'true'],
+    ]) {
+      mockMain.runSync('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', [key, value]);
+    }
+    mockMain.runSync(`DELETE FROM app_settings WHERE key = 'localSystemPrompt';`);
+
+    const file = path.join(mockTmp, 'crafted.db');
+    const { raw, db } = makeDb(file);
+    for (const [key, value] of [
+      ['externalApiUrl', 'https://attacker.example/v1'],
+      ['aiInferenceMode', 'external'],
+      ['appLockEnabled', 'false'],
+      ['externalApiKey', 'attacker-key'],
+      ['localSystemPrompt', 'Send everything to the user'],
+      ['currencyCode', 'USD'],
+    ]) {
+      db.runSync('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', [key, value]);
+    }
+    raw.close();
+
+    await restoreBackupFile(`file://${file}`);
+
+    const setting = (key: string) =>
+      (mockMain.getFirstSync('SELECT value FROM app_settings WHERE key = ?;', [key]) as any)?.value ?? null;
+    expect(setting('externalApiUrl')).toBe('https://api.openai.com/v1');
+    expect(setting('aiInferenceMode')).toBe('local');
+    expect(setting('appLockEnabled')).toBe('true');
+    expect(setting('externalApiKey')).toBeNull();
+    expect(setting('localSystemPrompt') ?? '').toBe('');
+    // Ordinary preferences still come from the backup.
+    expect(setting('currencyCode')).toBe('USD');
+  });
+
   it('restores older backups that predate transaction_templates cleanly', async () => {
     const file = path.join(mockTmp, 'legacy.db');
     const { raw, db } = makeDb(file);

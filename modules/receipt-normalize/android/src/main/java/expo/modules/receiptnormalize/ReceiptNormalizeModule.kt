@@ -2,6 +2,7 @@ package expo.modules.receiptnormalize
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Parcelable
@@ -93,7 +94,32 @@ class ReceiptNormalizeModule : Module() {
     return uris.distinct()
   }
 
+  /**
+   * Only content:// shares from other apps. file:// URIs, and content:// URIs served by Silo's own
+   * providers, could point at Silo's private files (its database, for example), so they are refused.
+   */
+  private fun isAcceptableShare(context: Context, uri: Uri): Boolean {
+    if (uri.scheme != "content") return false
+    val authority = uri.authority ?: return false
+    val ownPackage = context.packageName
+    if (authority == ownPackage || authority.startsWith("$ownPackage.")) return false
+    return try {
+      val provider = context.packageManager.resolveContentProvider(authority, 0)
+      provider?.packageName != ownPackage
+    } catch (_: Exception) {
+      true
+    }
+  }
+
+  /** True when the file decodes as an image (reads only the header). */
+  private fun isDecodableImage(file: File): Boolean {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, options)
+    return options.outWidth > 0 && options.outHeight > 0
+  }
+
   private fun copyToCache(context: Context, uri: Uri, index: Int): String? {
+    if (!isAcceptableShare(context, uri)) return null
     return try {
       val type = context.contentResolver.getType(uri) ?: "image/jpeg"
       val extension = when {
@@ -105,6 +131,10 @@ class ReceiptNormalizeModule : Module() {
       val file = File(context.cacheDir, "shared-receipt-${System.currentTimeMillis()}-$index.$extension")
       val input = context.contentResolver.openInputStream(uri) ?: return null
       input.use { stream -> file.outputStream().use { stream.copyTo(it) } }
+      if (!isDecodableImage(file)) {
+        file.delete()
+        return null
+      }
       Uri.fromFile(file).toString()
     } catch (_: Exception) {
       null

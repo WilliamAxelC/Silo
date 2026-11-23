@@ -22,6 +22,7 @@ const mockRouteParams: {
   reviewBatchIndex?: number;
   reviewBatchTotal?: number;
   initialDate?: number;
+  sharedImageUri?: string;
 } = {};
 
 let mockNavState: any = undefined;
@@ -80,6 +81,7 @@ describe('AddTransactionScreen', () => {
     delete mockRouteParams.reviewBatchIndex;
     delete mockRouteParams.reviewBatchTotal;
     delete mockRouteParams.initialDate;
+    delete mockRouteParams.sharedImageUri;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
     ReactTestRenderer.act(() => {
@@ -115,6 +117,18 @@ describe('AddTransactionScreen', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  // Security review 2026-11-23: a silo:// link sets route params, so it could ask Add Transaction to
+  // scan any file (e.g. Silo's own database). Only photos from the share sheet are scanned.
+  it('regression: ignores a sharedImageUri that did not come from the share sheet', async () => {
+    mockRouteParams.sharedImageUri = 'file:///data/user/0/com.LCSdev.silo/files/SQLite/silo.db';
+    let renderer: any;
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(analyzeReceiptImage).not.toHaveBeenCalled();
+    ReactTestRenderer.act(() => renderer.unmount());
   });
 
   // Regression (reported 2026-11-23): tapping Amount did nothing on Android unless Merchant was focused

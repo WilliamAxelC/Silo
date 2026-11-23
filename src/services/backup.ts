@@ -39,6 +39,26 @@ const RESTORE_TABLES = [
 ] as const;
 // receipt_queue is left alone: queued photos live on the old device.
 
+/**
+ * Settings that belong to this phone and are never taken from a backup file. A backup could come from
+ * someone else: restoring its AI server address / mode would send this phone's API key (kept in secure
+ * storage, not in the backup) and finance facts to that server, and its app-lock flag could switch the
+ * lock off. Legacy key/header rows would be moved into secure storage on next launch.
+ */
+export const DEVICE_ONLY_SETTING_KEYS = [
+  'aiInferenceMode',
+  'externalApiProvider',
+  'externalApiUrl',
+  'externalApiModel',
+  'externalApiKey',
+  'externalApiCustomHeaders',
+  'externalSystemPrompt',
+  'localSystemPrompt',
+  'appLockEnabled',
+  'activeModelId',
+  'aiWifiOnlyDownload',
+] as const;
+
 function plainPath(uri: string): string {
   return decodeURI(uri.replace(/^file:\/\//, ''));
 }
@@ -103,7 +123,12 @@ export async function restoreBackupFile(sourceUri: string): Promise<{ transactio
     }
 
     expoDb.execSync('PRAGMA foreign_keys = OFF;');
+    const keyPlaceholders = DEVICE_ONLY_SETTING_KEYS.map(() => '?').join(', ');
     expoDb.withTransactionSync(() => {
+      const deviceSettings = expoDb.getAllSync<{ key: string; value: string }>(
+        `SELECT key, value FROM main.app_settings WHERE key IN (${keyPlaceholders});`,
+        [...DEVICE_ONLY_SETTING_KEYS],
+      );
       for (const table of [...RESTORE_TABLES].reverse()) {
         expoDb.execSync(`DELETE FROM main.${table};`);
       }
@@ -117,6 +142,11 @@ export async function restoreBackupFile(sourceUri: string): Promise<{ transactio
         if (columns.length === 0) continue;
         const list = columns.map((c) => `"${c}"`).join(', ');
         expoDb.execSync(`INSERT INTO main.${table} (${list}) SELECT ${list} FROM backup.${table};`);
+      }
+      // Put this phone's own AI, API and app-lock settings back over whatever the backup carried.
+      expoDb.runSync(`DELETE FROM main.app_settings WHERE key IN (${keyPlaceholders});`, [...DEVICE_ONLY_SETTING_KEYS]);
+      for (const row of deviceSettings) {
+        expoDb.runSync('INSERT INTO main.app_settings (key, value) VALUES (?, ?);', [row.key, row.value]);
       }
       const brokenLinks = expoDb.getAllSync('PRAGMA main.foreign_key_check;');
       if (brokenLinks.length > 0) {

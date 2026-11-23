@@ -49,10 +49,25 @@ export function stopBackgroundWork(): void {
 }
 
 /** Images shared to Silo from another app (each share is returned once), as file:// URIs. */
+/**
+ * Photos that really came through Android's share sheet (copied into Silo's cache by the native module).
+ * A silo:// link can set any route param, so Add Transaction only scans a sharedImageUri listed here.
+ */
+const trustedSharedImages = new Set<string>();
+
+/** True once for a photo handed out by takeSharedImages; anything else (e.g. from a deep link) is refused. */
+export function consumeTrustedSharedImage(uri: string | null | undefined): boolean {
+  if (!uri || !trustedSharedImages.has(uri)) return false;
+  trustedSharedImages.delete(uri);
+  return true;
+}
+
 export async function takeSharedImages(): Promise<string[]> {
   try {
     const uris = await native?.takeSharedImages?.();
-    return Array.isArray(uris) ? uris.filter((uri) => typeof uri === 'string' && uri.length > 0) : [];
+    const list = Array.isArray(uris) ? uris.filter((uri) => typeof uri === 'string' && uri.length > 0) : [];
+    list.forEach((uri) => trustedSharedImages.add(uri));
+    return list;
   } catch (error) {
     console.warn('Could not read shared images:', error);
     return [];
