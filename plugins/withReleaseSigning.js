@@ -36,7 +36,9 @@ function applyReleaseSigning(gradle) {
   if (!releaseType.test(out)) throw new Error('withReleaseSigning: buildTypes.release signingConfig not found');
   out = out.replace(
     releaseType,
-    `$1signingConfig (System.getenv('SILO_RELEASE_SIGNING') && new File(System.getenv('SILO_RELEASE_SIGNING')).isFile()) ? signingConfigs.release : signingConfigs.debug`,
+    // Assignment, not `signingConfig (cond) ? a : b`: Groovy parses that as signingConfig(cond) and the build
+    // fails with "Boolean cannot be cast to SigningConfig".
+    `$1signingConfig = (System.getenv('SILO_RELEASE_SIGNING') && new File(System.getenv('SILO_RELEASE_SIGNING')).isFile()) ? signingConfigs.release : signingConfigs.debug`,
   );
   return out;
 }

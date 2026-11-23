@@ -29,7 +29,8 @@ describe('withReleaseSigning', () => {
     expect(out).toContain("System.getenv('SILO_RELEASE_SIGNING')");
     expect(out).toMatch(/release \{\s*\/\/ |release \{\s*def siloSigning/);
     const releaseType = out.slice(out.indexOf('buildTypes'));
-    expect(releaseType).toMatch(/release \{\s*signingConfig \(System\.getenv\('SILO_RELEASE_SIGNING'\)[^\n]*\? signingConfigs\.release : signingConfigs\.debug/);
+    // Must be an assignment: `signingConfig (cond) ? a : b` parses as signingConfig(cond) in Groovy (build failed).
+    expect(releaseType).toMatch(/release \{\s*signingConfig = \(System\.getenv\('SILO_RELEASE_SIGNING'\)[^\n]*\? signingConfigs\.release : signingConfigs\.debug/);
     expect(releaseType).toMatch(/debug \{\s*signingConfig signingConfigs\.debug/);
     expect(out).not.toMatch(/storePassword '(?!android')/); // no secrets written into the file
   });
