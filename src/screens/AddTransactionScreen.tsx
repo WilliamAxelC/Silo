@@ -1538,20 +1538,28 @@ export const AddTransactionScreen = () => {
                   accessibilityRole="button"
                   accessibilityLabel="Edit amount"
                 >
-                  <TextInput
-                    style={[
-                      styles.amountTextInput,
-                      styles.compactAmountInput,
-                      { color: theme.text, fontSize: theme.scaleFont(14) },
-                    ]}
-                    placeholderTextColor={theme.textMuted}
-                    value={amount}
-                    onChangeText={handleAmountChange}
-                    keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
-                    showSoftInputOnFocus={false}
-                    pointerEvents="none"
-                    placeholder="0"
-                  />
+                  {/*
+                    Display only: the calculator keypad edits the amount. On Android a TextInput ignores
+                    its own pointerEvents prop, so the wrapper View blocks touches and editable={false}
+                    keeps it from taking focus. Otherwise the tap focused the hidden input and never
+                    reached onPress (bug: tapping Amount did nothing unless Merchant was focused first).
+                  */}
+                  <View testID="amount-display" pointerEvents="none" style={styles.amountDisplayWrap}>
+                    <TextInput
+                      style={[
+                        styles.amountTextInput,
+                        styles.compactAmountInput,
+                        { color: theme.text, fontSize: theme.scaleFont(14) },
+                      ]}
+                      placeholderTextColor={theme.textMuted}
+                      value={amount}
+                      onChangeText={handleAmountChange}
+                      editable={false}
+                      focusable={false}
+                      showSoftInputOnFocus={false}
+                      placeholder="0"
+                    />
+                  </View>
                   <Ionicons name="calculator-outline" size={16} color={theme.textMuted} />
                 </TouchableOpacity>
               </View>
@@ -2226,7 +2234,8 @@ const styles = StyleSheet.create({
   currencyText: { fontSize: 12, fontWeight: '700' },
   amountInput: { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10 },
   amountPressable: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  amountTextInput: { flex: 1, minHeight: 44, paddingVertical: 0, marginRight: 4 },
+  amountDisplayWrap: { flex: 1 },
+  amountTextInput: { minHeight: 44, paddingVertical: 0, marginRight: 4 },
   compactAmountInput: { fontSize: 14, fontWeight: '600' },
   inlineErrorText: { fontSize: 11, marginTop: 4, fontWeight: '600' },
   scannedDateNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 12 },

@@ -117,6 +117,49 @@ describe('AddTransactionScreen', () => {
     jest.restoreAllMocks();
   });
 
+  // Regression (reported 2026-11-23): tapping Amount did nothing on Android unless Merchant was focused
+  // first, and then the system number keyboard appeared instead of the calculator. The hidden TextInput
+  // inside the "Edit amount" button took the touch because Android ignores pointerEvents on TextInput.
+  it('regression: tapping Amount opens the calculator, and no text box inside a tappable control can take the touch', () => {
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+
+    // Any TextInput nested in a pressable must be non-editable and sit under a View with
+    // pointerEvents="none", or Android routes the tap to the input instead of the button.
+    const pressables = renderer.root.findAll(
+      (n: any) => typeof n.type !== 'string' && typeof n.props?.onPress === 'function'
+    );
+    const hasBlockingAncestor = (node: any, stop: any) => {
+      for (let p = node.parent; p && p !== stop; p = p.parent) {
+        if (p.props?.pointerEvents === 'none') return true;
+      }
+      return false;
+    };
+    let nestedInputs = 0;
+    for (const pressable of pressables) {
+      for (const input of pressable.findAllByType(TextInput)) {
+        nestedInputs += 1;
+        expect(input.props.editable).toBe(false);
+        expect(input.props.pointerEvents).toBeUndefined();
+        expect(hasBlockingAncestor(input, pressable)).toBe(true);
+      }
+    }
+    expect(nestedInputs).toBeGreaterThan(0);
+
+    // With nothing focused, one tap on Amount opens the calculator keypad.
+    const calculator = () =>
+      renderer.root.findAll((n: any) => n.props && 'initialValue' in n.props && 'onDone' in n.props)[0];
+    expect(calculator().props.visible).toBe(false);
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Edit amount' }).props.onPress();
+    });
+    expect(calculator().props.visible).toBe(true);
+
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
   it('rejects zero and non-numeric amounts with an inline error message', async () => {
     let renderer: any;
     ReactTestRenderer.act(() => {
