@@ -86,6 +86,11 @@ def init_db() -> None:
               kind TEXT NOT NULL,
               text TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS messages (
+              n INTEGER NOT NULL,
+              message_id TEXT NOT NULL,
+              PRIMARY KEY (n, message_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_tickets_client ON tickets(client_hash, created_at);
             CREATE INDEX IF NOT EXISTS idx_events_n ON events(n);
             """
@@ -97,6 +102,14 @@ init_db()
 
 def now() -> int:
     return int(time.time())
+
+
+def remember_message(n: int, message_id: str | None) -> None:
+    """Every Discord message posted for a ticket, so deleting the ticket deletes them too."""
+    if not message_id:
+        return
+    with closing(db()) as conn, conn:
+        conn.execute("INSERT OR IGNORE INTO messages (n, message_id) VALUES (?, ?)", (n, str(message_id)))
 
 
 def add_event(conn: sqlite3.Connection, n: int, kind: str, text: str) -> None:
@@ -144,10 +157,10 @@ def post_to_silo(task: str, summary: str, options: list[str], allow_reply: bool,
     })
 
 
-def attach_screenshot(message_id: str, image: bytes, ext: str, n: int) -> None:
+def attach_screenshot(message_id: str, image: bytes, ext: str, n: int) -> str:
     """Uploads the screenshot as a Discord reply to the ticket message (bot token stays on the server)."""
     if not (DISCORD_BOT_TOKEN and CHANNEL_ID):
-        return
+        return ""
     boundary = uuid.uuid4().hex
     payload = json.dumps({
         "content": f"Screenshot for ticket #{n}",
@@ -165,7 +178,8 @@ def attach_screenshot(message_id: str, image: bytes, ext: str, n: int) -> None:
         headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": f"multipart/form-data; boundary={boundary}",
                  "User-Agent": "DiscordBot (https://cuang.dev, 1.0)"},
     )
-    urllib.request.urlopen(req, timeout=30).read()
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return str(json.loads(resp.read().decode() or "{}").get("id") or "")
 
 
 VERSION_RE = re.compile(r"^\d+(\.\d+){0,3}$")
@@ -279,9 +293,10 @@ async def create_ticket(request: Request):
         with closing(db()) as conn, conn:
             conn.execute("UPDATE tickets SET ping_id = ?, message_id = ? WHERE n = ?", (res.get("id"), res.get("messageId"), n))
             add_event(conn, n, "posted", f"Posted to #silo (ping {res.get('id')})")
+        remember_message(n, res.get("messageId"))
         if shot:
             try:
-                attach_screenshot(res.get("messageId") or "", shot[0], shot[1], n)
+                remember_message(n, attach_screenshot(res.get("messageId") or "", shot[0], shot[1], n))
             except Exception as exc:  # noqa: BLE001
                 with closing(db()) as conn, conn:
                     add_event(conn, n, "error", f"Screenshot upload failed: {exc}")
@@ -352,7 +367,84 @@ async def ticket_post(n: int, request: Request, authorization: str | None = Head
                        bool(body.get("allowReply")), status=str(body.get("status") or "info"))
     with closing(db()) as conn, conn:
         add_event(conn, n, "posted", f"{body.get('task')}: ping {res.get('id')}")
+    remember_message(n, res.get("messageId"))
     return {"ok": True, "id": res.get("id"), "messageId": res.get("messageId")}
+
+
+# ---------------------------------------------------------------- retention
+
+RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "365"))
+CLOSED = ("rejected", "merged_to_test", "released", "closed")
+
+
+def delete_discord_message(message_id: str) -> bool:
+    if not (DISCORD_BOT_TOKEN and CHANNEL_ID):
+        return False
+    req = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages/{message_id}", method="DELETE",
+        headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "User-Agent": "DiscordBot (https://cuang.dev, 1.0)"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=15).read()
+        return True
+    except urllib.error.HTTPError as exc:
+        return exc.code == 404  # already gone
+
+
+def delete_ticket(n: int) -> dict:
+    """Removes a ticket everywhere: its Discord messages (incl. screenshot), events and the ticket row."""
+    with closing(db()) as conn:
+        ids = [r[0] for r in conn.execute("SELECT message_id FROM messages WHERE n = ?", (n,)).fetchall()]
+        legacy = conn.execute("SELECT message_id FROM tickets WHERE n = ?", (n,)).fetchone()
+    if legacy and legacy[0] and legacy[0] not in ids:
+        ids.append(legacy[0])
+    failed = [m for m in ids if not delete_discord_message(m)]
+    if failed:
+        return {"ok": False, "n": n, "failed_messages": failed}
+    with closing(db()) as conn, conn:
+        conn.execute("DELETE FROM messages WHERE n = ?", (n,))
+        conn.execute("DELETE FROM events WHERE n = ?", (n,))
+        conn.execute("DELETE FROM tickets WHERE n = ?", (n,))
+    return {"ok": True, "n": n, "deleted_messages": len(ids)}
+
+
+def purge_expired(now_ts: int | None = None) -> list[int]:
+    """Privacy policy: closed reports are deleted within 12 months."""
+    cutoff = (now_ts or now()) - RETENTION_DAYS * 86400
+    with closing(db()) as conn:
+        rows = conn.execute(
+            f"SELECT n FROM tickets WHERE status IN ({','.join('?' * len(CLOSED))}) AND updated_at < ?", (*CLOSED, cutoff)
+        ).fetchall()
+    done = []
+    for (n,) in rows:
+        if delete_ticket(n).get("ok"):
+            done.append(n)
+    return done
+
+
+def _retention_loop() -> None:
+    while True:
+        try:
+            purge_expired()
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(24 * 3600)
+
+
+@app.on_event("startup")
+def _start_retention() -> None:
+    if os.environ.get("DISABLE_RETENTION_LOOP") != "1":
+        threading.Thread(target=_retention_loop, daemon=True).start()
+
+
+@app.delete("/internal/tickets/{n}")
+def remove_ticket(n: int, authorization: str | None = Header(None)):
+    """For deletion requests ("please delete report #12")."""
+    require_admin(authorization)
+    result = delete_ticket(n)
+    if not result.get("ok"):
+        raise HTTPException(502, f"could not delete Discord messages: {result.get('failed_messages')}")
+    return result
 
 
 @app.get("/internal/wait/{ping_id}")
