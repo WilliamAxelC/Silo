@@ -8,7 +8,6 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -21,6 +20,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButton';
 import { FilterSheet } from '../components/FilterSheet';
 import { selectShowUpdateBanner, useUpdateStore } from '../services/updates';
+import { UpdateSheet } from '../components/UpdateSheet';
 import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
 import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
@@ -173,6 +173,7 @@ export const CashflowScreen = () => {
   const showUpdateBanner = useUpdateStore(selectShowUpdateBanner);
   const latestVersion = useUpdateStore((s) => s.latest);
   const dismissUpdate = useUpdateStore((s) => s.dismiss);
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
@@ -715,13 +716,13 @@ export const CashflowScreen = () => {
         >
           <TouchableOpacity
             style={styles.updateBannerBody}
-            onPress={() => void Linking.openURL(latestVersion.url)}
-            accessibilityRole="link"
-            accessibilityLabel={`Silo ${latestVersion.version} is available. Open the download page`}
+            onPress={() => setUpdateSheetOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Silo ${latestVersion.version} is available. Update`}
           >
             <Ionicons name="arrow-up-circle-outline" size={18} color={theme.primary} style={styles.errorBannerIcon} />
             <Text style={[styles.errorBannerText, { color: theme.primary, fontSize: theme.scaleFont(12) }]} numberOfLines={1}>
-              Silo {latestVersion.version} is available · Download
+              Silo {latestVersion.version} is available · Update
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -995,6 +996,7 @@ export const CashflowScreen = () => {
       />
 
       <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding} />
+      {updateSheetOpen ? <UpdateSheet manifest={latestVersion} onClose={() => setUpdateSheetOpen(false)} /> : null}
     </SafeAreaView>
   );
 };

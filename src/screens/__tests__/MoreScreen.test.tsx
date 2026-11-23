@@ -121,7 +121,7 @@ describe('MoreScreen (F-24, F-25, F-32, NIT-02)', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
-  it('shows the app version and an available update with a Download button, and Check now forces a check', () => {
+  it('shows the app version and an available update with an Update button, and Check now forces a check', () => {
     const mockCheck = jest.fn(async () => undefined);
     useUpdateStore.setState({
       installed: { version: '1.3.1', versionCode: 8 },
@@ -141,7 +141,7 @@ describe('MoreScreen (F-24, F-25, F-32, NIT-02)', () => {
     };
     expect(text('app-version')).toBe('1.3.1 (build 8)');
     expect(text('update-status')).toBe('Silo 1.4.0 is available');
-    expect(renderer.root.findByProps({ accessibilityLabel: 'Download Silo 1.4.0' })).toBeTruthy();
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Update to Silo 1.4.0' })).toBeTruthy();
     ReactTestRenderer.act(() => renderer.root.findByProps({ accessibilityLabel: 'Check for updates' }).props.onPress());
     expect(mockCheck).toHaveBeenCalledWith({ force: true });
     ReactTestRenderer.act(() => renderer.unmount());

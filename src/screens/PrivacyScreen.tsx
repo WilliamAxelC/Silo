@@ -18,9 +18,9 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
   },
   {
     icon: 'arrow-up-circle-outline',
-    title: 'Update check',
-    what: 'A download of a small version file from cuang.dev. Nothing about you is sent.',
-    when: 'At most once a day; turn it off in More, App info.',
+    title: 'Updates',
+    what: 'A small version file from cuang.dev, and the new Silo app file when you tap Update. Nothing about you is sent.',
+    when: 'The check runs at most once a day (turn it off in More, App info); the download only when you tap Update.',
   },
   {
     icon: 'sparkles-outline',

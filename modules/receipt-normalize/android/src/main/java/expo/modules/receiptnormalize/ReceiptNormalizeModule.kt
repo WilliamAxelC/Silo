@@ -6,7 +6,10 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Parcelable
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import java.io.File
+import java.security.MessageDigest
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -45,6 +48,63 @@ class ReceiptNormalizeModule : Module() {
       ReceiptNormalizer.normalize(context, Uri.parse(uri)).toString()
     }
 
+    // ---- In-app updates (sideloaded APK) ----------------------------------------------------------
+
+    // SHA-256 of a downloaded file, hex. Runs off the JS thread (a 40 MB APK takes well under a second).
+    AsyncFunction("sha256File") { uri: String ->
+      val file = fileFromUri(uri) ?: throw IllegalArgumentException("not a local file")
+      val digest = MessageDigest.getInstance("SHA-256")
+      file.inputStream().use { input ->
+        val buffer = ByteArray(1 shl 16)
+        while (true) {
+          val read = input.read(buffer)
+          if (read <= 0) break
+          digest.update(buffer, 0, read)
+        }
+      }
+      digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    // Whether Android lets Silo open the package installer ("Install unknown apps" for Silo).
+    Function("canInstallPackages") {
+      val context = appContext.reactContext ?: return@Function false
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.packageManager.canRequestPackageInstalls() else true
+    }
+
+    Function("openInstallPermissionSettings") {
+      val context = appContext.reactContext ?: return@Function false
+      val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+      else Intent(Settings.ACTION_SECURITY_SETTINGS)
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+      true
+    }
+
+    // Reads the APK's package name and version without installing it.
+    Function("inspectApk") { uri: String ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      val file = fileFromUri(uri) ?: return@Function null
+      @Suppress("DEPRECATION")
+      val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return@Function null
+      val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
+      mapOf("packageName" to info.packageName, "versionCode" to code.toDouble(), "versionName" to (info.versionName ?: ""))
+    }
+
+    // Hands a verified APK in Silo's cache to Android's package installer (the user confirms there).
+    Function("installApk") { uri: String ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      val file = fileFromUri(uri) ?: throw IllegalArgumentException("not a local file")
+      val cacheRoot = context.cacheDir.canonicalPath
+      if (!file.canonicalPath.startsWith(cacheRoot)) throw IllegalArgumentException("APK must be in Silo's cache")
+      val contentUri = FileProvider.getUriForFile(context, "${context.packageName}.FileSystemFileProvider", file)
+      val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(contentUri, "application/vnd.android.package-archive")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+      true
+    }
+
     // Starts or updates the "Reading receipts" foreground service (keeps processing alive in the background).
     Function("startBackgroundWork") { text: String ->
       val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
@@ -67,6 +127,12 @@ class ReceiptNormalizeModule : Module() {
       }
       true
     }
+  }
+
+  private fun fileFromUri(uri: String): File? {
+    val parsed = Uri.parse(uri)
+    val path = if (parsed.scheme == "file") parsed.path else if (parsed.scheme == null) uri else null
+    return path?.let { File(it) }?.takeIf { it.isFile }
   }
 
   private fun isImageShare(intent: Intent): Boolean =

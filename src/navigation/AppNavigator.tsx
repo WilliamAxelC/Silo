@@ -42,6 +42,7 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { materializeDueRecurring } from '../services/recurring';
 import { useUpdateStore } from '../services/updates';
 import { runAutoBackupIfDue } from '../services/autoBackup';
+import { cleanUpInstalledUpdates } from '../services/appUpdate';
 import { RecurringScreen } from '../screens/RecurringScreen';
 import { ReportScreen } from '../screens/ReportScreen';
 import { PrivacyScreen } from '../screens/PrivacyScreen';
@@ -217,6 +218,7 @@ export const AppNavigator = () => {
         void useUpdateStore.getState().check();
         // Today's automatic backup, a few seconds after startup so it never slows the first screen.
         setTimeout(() => void runAutoBackupIfDue(), 5000);
+        void cleanUpInstalledUpdates();
       });
     useReceiptQueueStore.getState().load();
     const removeShareListener = addShareListener(() => void handleSharedReceipts());

@@ -3,8 +3,11 @@ import { create } from 'zustand';
 
 import { expoDb } from '../db/index';
 
-/** Published next to the APK on the download page; see the release notes in the memory file. */
+/** Published next to the APK on the download page. The test channel reads version-test.json. */
 export const UPDATE_MANIFEST_URL = 'https://cuang.dev/projects/silo/version.json';
+export const TEST_MANIFEST_URL = 'https://cuang.dev/projects/silo/version-test.json';
+export type UpdateChannel = 'stable' | 'test';
+const CHANNEL_KEY = 'updateChannel';
 export const DOWNLOAD_PAGE_URL = 'https://cuang.dev/projects/silo/';
 
 const CACHE_KEY = 'updateCheck';
@@ -18,11 +21,21 @@ export interface AppVersion {
   versionCode: number;
 }
 
+export interface UpdateApk {
+  /** https://cuang.dev/... .apk */
+  url: string;
+  /** Lower-case hex SHA-256 of the APK; the download is refused unless it matches. */
+  sha256: string;
+  sizeBytes: number;
+}
+
 export interface UpdateManifest extends AppVersion {
   /** Page to open for the update. */
   url: string;
   date?: string;
   notes?: string[];
+  /** Present when the update can be installed from inside the app (1.3.3+). */
+  apk?: UpdateApk;
 }
 
 export interface UpdateCache {
@@ -52,7 +65,28 @@ export function parseManifest(body: unknown): UpdateManifest | null {
     ? raw.notes.filter((n): n is string => typeof n === 'string' && n.trim().length > 0).map((n) => n.trim().slice(0, 160)).slice(0, 6)
     : undefined;
   const date = typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : undefined;
-  return { version, versionCode, url: safeUrl, date, notes };
+  return { version, versionCode, url: safeUrl, date, notes, apk: parseApk(raw.apk) };
+}
+
+/** The installable APK, only from the download site and only with a well-formed checksum. */
+export function parseApk(value: unknown): UpdateApk | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+  const sha256 = typeof raw.sha256 === 'string' ? raw.sha256.trim().toLowerCase() : '';
+  const sizeBytes = Number(raw.sizeBytes);
+  if (!url.startsWith(ALLOWED_LINK_PREFIX) || !/\.apk$/i.test(url) || /[\s?#]/.test(url)) return undefined;
+  if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > 300 * 1024 * 1024) return undefined;
+  return { url, sha256, sizeBytes };
+}
+
+export function getUpdateChannel(): UpdateChannel {
+  return readSetting(CHANNEL_KEY) === 'test' ? 'test' : 'stable';
+}
+
+export function manifestUrlFor(channel: UpdateChannel): string {
+  return channel === 'test' ? TEST_MANIFEST_URL : UPDATE_MANIFEST_URL;
 }
 
 export function isNewer(latest: AppVersion | null | undefined, installed: AppVersion): boolean {
@@ -94,14 +128,14 @@ const sameLocalDay = (a: number, b: number) => new Date(a).toDateString() === ne
  * a plain GET of a static file. Never throws; resolves the cached result when offline.
  */
 export async function fetchLatestVersion(
-  options: { force?: boolean; now?: number; fetchImpl?: FetchLike } = {},
+  options: { force?: boolean; now?: number; fetchImpl?: FetchLike; channel?: UpdateChannel } = {},
 ): Promise<UpdateCache | null> {
   const now = options.now ?? Date.now();
   const cached = readUpdateCache();
   if (!options.force && cached && sameLocalDay(cached.checkedAt, now)) return cached;
   const fetchImpl: FetchLike = options.fetchImpl ?? ((url) => fetch(url, { cache: 'no-store' } as RequestInit));
   try {
-    const response = await fetchImpl(UPDATE_MANIFEST_URL);
+    const response = await fetchImpl(manifestUrlFor(options.channel ?? getUpdateChannel()));
     if (!response.ok) return cached;
     const latest = parseManifest(await response.json());
     if (!latest) return cached;
@@ -121,12 +155,15 @@ interface UpdateState {
   /** Automatic daily checks (the manual button always works). */
   enabled: boolean;
   dismissedVersionCode: number;
+  channel: UpdateChannel;
   /** Last manual check failed to reach the site. */
   lastCheckFailed: boolean;
   hydrate: () => void;
   check: (options?: { force?: boolean; fetchImpl?: FetchLike; now?: number }) => Promise<void>;
   setEnabled: (enabled: boolean) => void;
   dismiss: () => void;
+  /** Test channel: early builds from the test branch (version-test.json). Re-checks right away. */
+  setChannel: (channel: UpdateChannel) => Promise<void>;
 }
 
 export const useUpdateStore = create<UpdateState>((set, get) => ({
@@ -136,6 +173,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   checking: false,
   enabled: true,
   dismissedVersionCode: 0,
+  channel: 'stable',
   lastCheckFailed: false,
   hydrate: () => {
     const cache = readUpdateCache();
@@ -144,6 +182,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
       checkedAt: cache?.checkedAt ?? null,
       enabled: readSetting(ENABLED_KEY) !== 'false',
       dismissedVersionCode: Number(readSetting(DISMISSED_KEY) ?? 0) || 0,
+      channel: getUpdateChannel(),
     });
   },
   check: async (options = {}) => {
@@ -162,6 +201,12 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   setEnabled: (enabled) => {
     writeSetting(ENABLED_KEY, enabled ? 'true' : 'false');
     set({ enabled });
+  },
+  setChannel: async (channel) => {
+    writeSetting(CHANNEL_KEY, channel);
+    writeSetting(CACHE_KEY, '');
+    set({ channel, latest: null, checkedAt: null });
+    await get().check({ force: true });
   },
   dismiss: () => {
     const code = get().latest?.versionCode ?? 0;

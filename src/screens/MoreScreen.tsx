@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Linking, Switch, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -9,6 +9,7 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { DOWNLOAD_PAGE_URL, isNewer, useUpdateStore } from '../services/updates';
+import { UpdateSheet } from '../components/UpdateSheet';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
 import { DB_SCHEMA_VERSION } from '../db/index';
 
@@ -28,6 +29,31 @@ export const MoreScreen = () => {
   const lastCheckFailed = useUpdateStore((s) => s.lastCheckFailed);
   const checkForUpdates = useUpdateStore((s) => s.check);
   const setAutoCheck = useUpdateStore((s) => s.setEnabled);
+  const channel = useUpdateStore((s) => s.channel);
+  const setChannel = useUpdateStore((s) => s.setChannel);
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
+  const versionTaps = useRef<{ count: number; at: number }>({ count: 0, at: 0 });
+
+  /** Seven quick taps on Version switch to (or from) the test channel: early builds from the test branch. */
+  const onVersionTap = () => {
+    const now = Date.now();
+    const t = versionTaps.current;
+    t.count = now - t.at < 1500 ? t.count + 1 : 1;
+    t.at = now;
+    if (t.count < 7) return;
+    t.count = 0;
+    const toTest = channel !== 'test';
+    Alert.alert(
+      toTest ? 'Get test builds?' : 'Back to regular updates?',
+      toTest
+        ? 'Test builds have the newest fixes before everyone else, and may have bugs. Your data stays on this phone either way.'
+        : 'Silo will offer only regular releases again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: toTest ? 'Get test builds' : 'Regular updates', onPress: () => void setChannel(toTest ? 'test' : 'stable') },
+      ]
+    );
+  };
   const updateAvailable = isNewer(latest, installed);
   const updateStatus = checking
     ? 'Checking…'
@@ -228,15 +254,21 @@ export const MoreScreen = () => {
 
         <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>App info</Text>
         <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="app-info">
-          <View style={styles.menuRow}>
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={onVersionTap}
+            activeOpacity={0.9}
+            accessibilityRole="text"
+            accessibilityLabel={`Version ${installed.version}, build ${installed.versionCode}${channel === 'test' ? ', test channel' : ''}`}
+          >
             <View style={styles.settingRowLeft}>
               <Ionicons name="information-circle-outline" size={20} color={theme.primary} />
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Version</Text>
             </View>
             <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="app-version">
-              {installed.version} (build {installed.versionCode})
+              {installed.version} (build {installed.versionCode}){channel === 'test' ? ' · test' : ''}
             </Text>
-          </View>
+          </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
@@ -275,11 +307,11 @@ export const MoreScreen = () => {
               {updateAvailable && latest ? (
                 <TouchableOpacity
                   style={[styles.infoBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}
-                  onPress={() => void Linking.openURL(latest.url)}
+                  onPress={() => setUpdateSheetOpen(true)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Download Silo ${latest.version}`}
+                  accessibilityLabel={`Update to Silo ${latest.version}`}
                 >
-                  <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Download</Text>
+                  <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Update</Text>
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
@@ -378,6 +410,8 @@ export const MoreScreen = () => {
             <Ionicons name="open-outline" size={18} color={theme.textMuted} />
           </TouchableOpacity>
         </View>
+
+        {updateSheetOpen ? <UpdateSheet manifest={latest} onClose={() => setUpdateSheetOpen(false)} /> : null}
 
         <View style={styles.footerWrap}>
           <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by CDev</Text>

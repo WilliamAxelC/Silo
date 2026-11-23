@@ -16,4 +16,6 @@ android {
 
 dependencies {
   implementation "androidx.exifinterface:exifinterface:1.3.7"
+  // FileProvider for handing the downloaded update APK to the package installer.
+  implementation "androidx.core:core:1.13.1"
 }
