@@ -21,7 +21,7 @@ import {
   recordError,
   redactErrorText,
 } from '../errorLog';
-import { buildTicketPayload, getSentTickets, submitTicket, validateTicket } from '../tickets';
+import { buildTicketPayload, deviceSummary, getSentTickets, submitTicket, validateTicket } from '../tickets';
 import { goalProgress, monthsUntil, validateGoal, type Goal } from '../../features/goals/goals';
 
 describe('error log', () => {
@@ -69,6 +69,16 @@ describe('tickets: exactly what leaves the phone', () => {
     expect(payload).toMatchObject({ appVersion: '1.3.2', versionCode: 9 });
     const full = buildTicketPayload({ ...base, errorLog: 'x', screenshotBase64: 'AAAA' });
     expect(full).toMatchObject({ errorLog: 'x', screenshot: 'AAAA' });
+  });
+
+  // Seen on the 1.3.2 emulator: "Android Android SDK built for x86_64".
+  it('regression: does not repeat the brand when the model name already starts with it', () => {
+    expect(deviceSummary({ Brand: 'Android', Model: 'Android SDK built for x86_64', Release: '11' })).toEqual({
+      device: 'Android SDK built for x86_64',
+      osVersion: '11',
+    });
+    expect(deviceSummary({ Brand: 'Xiaomi', Model: 'Xiaomi 13', Release: '14' }).device).toBe('Xiaomi 13');
+    expect(deviceSummary({ Brand: 'samsung', Model: 'SM-S911B', Release: '14' }).device).toBe('samsung SM-S911B');
   });
 
   it('validates before sending', () => {

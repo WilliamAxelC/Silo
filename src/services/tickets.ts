@@ -27,13 +27,12 @@ export interface SentTicket {
   sentAt: number;
 }
 
-export function deviceSummary(): { device: string; osVersion: string } {
-  const c: any = (Platform as any).constants ?? {};
-  const device = [c.Manufacturer && c.Manufacturer !== c.Brand ? c.Brand : c.Brand ?? c.Manufacturer, c.Model]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  return { device: device.slice(0, 80) || Platform.OS, osVersion: String(c.Release ?? Platform.Version ?? '').slice(0, 20) };
+/** "samsung SM-S911B", "Xiaomi 13" (not "Xiaomi Xiaomi 13"), and the Android release. */
+export function deviceSummary(constants: any = (Platform as any).constants ?? {}): { device: string; osVersion: string } {
+  const brand = String(constants.Brand ?? constants.Manufacturer ?? '').trim();
+  const model = String(constants.Model ?? '').trim();
+  const device = brand && !model.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand} ${model}`.trim() : model || brand;
+  return { device: device.slice(0, 80) || Platform.OS, osVersion: String(constants.Release ?? Platform.Version ?? '').slice(0, 20) };
 }
 
 export function validateTicket(input: TicketInput): string | null {
