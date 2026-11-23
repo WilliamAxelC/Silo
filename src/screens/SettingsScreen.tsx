@@ -2547,7 +2547,8 @@ export const SettingsScreen = () => {
             </Text>
             <Text style={[styles.rowSubText, { color: theme.text, marginTop: 8 }, captionScale]}>
               This permanently removes your transactions, accounts, budgets, goals, receipt photos, automatic backups,
-              settings and saved API keys from this phone. The downloaded AI model is kept. It can't be undone.
+              settings and saved API keys from this phone, and disconnects Google Drive (files in your Drive stay). The downloaded AI
+              model is kept. It can't be undone.
             </Text>
             <TouchableOpacity
               onPress={() => void handleShareBackupFile()}

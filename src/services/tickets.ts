@@ -6,6 +6,8 @@ import { getInstalledVersion } from './updates';
 /** Relay on the download site; it posts reports to the developer's Discord. No secrets in the app. */
 export const TICKETS_URL = 'https://cuang.dev/projects/silo/api/tickets';
 const SENT_KEY = 'sentTickets';
+/** Which consent text the user saw above Send (UU PDP Art. 22: consent must be recorded). */
+export const REPORT_CONSENT_VERSION = 'report-form-2026-11-23';
 const MAX_SENT = 30;
 
 export type TicketKind = 'bug' | 'feature';
@@ -53,6 +55,7 @@ export function buildTicketPayload(input: TicketInput): Record<string, unknown> 
     versionCode: installed.versionCode,
     device,
     osVersion,
+    consent: REPORT_CONSENT_VERSION,
   };
   if (input.errorLog?.trim()) payload.errorLog = input.errorLog.trim().slice(-20000);
   if (input.screenshotBase64) payload.screenshot = input.screenshotBase64;

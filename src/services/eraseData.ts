@@ -11,6 +11,22 @@ const SECURE_KEYS = ['externalApiKey', 'externalApiCustomHeaders'];
 const FTS_SHADOW = /_(data|idx|docsize|config|content)$/;
 
 /**
+ * Everything in Silo's cache: receipt thumbnails, photos fetched back from Drive, shared photos, update
+ * downloads, CSV and backup exports. All of it is disposable and may hold personal data.
+ */
+async function clearCacheFolder(): Promise<void> {
+  const cache = FileSystem.cacheDirectory;
+  if (!cache) return;
+  let names: string[] = [];
+  try {
+    names = await FileSystem.readDirectoryAsync(cache);
+  } catch {
+    return;
+  }
+  await Promise.all(names.map((name) => FileSystem.deleteAsync(`${cache}${name}`, { idempotent: true }).catch(() => undefined)));
+}
+
+/**
  * Wipes everything Silo stores about the user on this phone: all records, settings, receipt photos,
  * automatic backups, the error log and saved API credentials. The app then behaves like a fresh install
  * (welcome sheet included). The downloaded AI model is kept.
@@ -52,6 +68,7 @@ export async function eraseAllData(): Promise<void> {
   await disconnectDrive().catch(() => undefined);
 
   const docs = FileSystem.documentDirectory ?? '';
+  await clearCacheFolder();
   await Promise.all([
     FileSystem.deleteAsync(`${docs}receipts/`, { idempotent: true }).catch(() => undefined),
     deleteAllAutoBackups(),

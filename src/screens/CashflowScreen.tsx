@@ -21,6 +21,7 @@ import { BackToCurrentPeriodButton } from '../components/BackToCurrentPeriodButt
 import { FilterSheet } from '../components/FilterSheet';
 import { selectShowUpdateBanner, useUpdateStore } from '../services/updates';
 import { useAppUpdateStore } from '../services/appUpdate';
+import { useTermsStore } from '../services/terms';
 import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
 import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
 import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
@@ -174,6 +175,8 @@ export const CashflowScreen = () => {
   const latestVersion = useUpdateStore((s) => s.latest);
   const dismissUpdate = useUpdateStore((s) => s.dismiss);
   const openUpdateSheet = useAppUpdateStore((s) => s.openSheet);
+  // The welcome sheet waits until the Terms are accepted (TermsGate shows first).
+  const termsAccepted = useTermsStore((s) => Boolean(s.accepted));
   const setStoredCashflowDateMs = useTransactionStore((s) => s.setSelectedCashflowDateMs);
 
   const [viewMode, setViewMode] = useState<CashflowViewMode>('list');
@@ -995,7 +998,7 @@ export const CashflowScreen = () => {
         locale={locale}
       />
 
-      <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding} />
+      <WelcomeSheet visible={isSettingsLoaded && !hasCompletedOnboarding && termsAccepted} />
     </SafeAreaView>
   );
 };

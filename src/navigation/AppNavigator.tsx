@@ -44,6 +44,7 @@ import { useUpdateStore } from '../services/updates';
 import { runAutoBackupIfDue } from '../services/autoBackup';
 import { cleanUpInstalledUpdates, resumePendingUpdate } from '../services/appUpdate';
 import { UpdateSheet } from '../components/UpdateSheet';
+import { TermsGate } from '../components/TermsGate';
 import { runDriveSyncIfDue } from '../services/drive/driveSync';
 import { RecurringScreen } from '../screens/RecurringScreen';
 import { ReportScreen } from '../screens/ReportScreen';
@@ -296,6 +297,7 @@ export const AppNavigator = () => {
         </Stack.Navigator>
       </NavigationContainer>
       <UpdateSheet />
+      <TermsGate />
     </View>
   );
 };

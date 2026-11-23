@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -17,6 +17,7 @@ import {
 } from '../services/drive/driveSync';
 import type { DriveFile } from '../services/drive/driveApi';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
+import { PRIVACY_POLICY_URL } from '../screens/PrivacyScreen';
 
 const OFFLOAD_OPTIONS = [0, 3, 6, 12];
 
@@ -54,10 +55,22 @@ export function DriveSyncSection({ onRestoreFile, locale }: { onRestoreFile: (ur
       <TouchableOpacity
         style={styles.row}
         onPress={() =>
-          void run('connect', async () => {
-            const email = await connectDrive();
-            if (email) await backupToDrive();
-          })
+          Alert.alert(
+            'Connect Google Drive?',
+            "Silo will create a Silo folder in your Google Drive and upload a backup of all your Silo data now and then once a day. If you turn it on, older receipt photos move there too. Silo can only see files it creates there. The files are yours: the developer can't see them.",
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Privacy Policy', onPress: () => void Linking.openURL(PRIVACY_POLICY_URL) },
+              {
+                text: 'Continue',
+                onPress: () =>
+                  void run('connect', async () => {
+                    const email = await connectDrive();
+                    if (email) await backupToDrive();
+                  }),
+              },
+            ]
+          )
         }
         disabled={busy !== null}
         accessibilityRole="button"
@@ -89,10 +102,14 @@ export function DriveSyncSection({ onRestoreFile, locale }: { onRestoreFile: (ur
         <TouchableOpacity
           style={styles.smallBtn}
           onPress={() =>
-            Alert.alert('Disconnect Google Drive?', 'Silo stops syncing. Files already in your Drive stay there.', [
+            Alert.alert(
+              'Disconnect Google Drive?',
+              'Silo stops syncing. Files already in your Drive stay there. Receipt photos you moved to Drive show only as a small preview until you connect the same account again.',
+              [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Disconnect', style: 'destructive', onPress: () => void run('disconnect', disconnectDrive) },
-            ])
+              ]
+            )
           }
           accessibilityRole="button"
           accessibilityLabel="Disconnect Google Drive"

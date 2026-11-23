@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
@@ -20,39 +20,42 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
     icon: 'arrow-up-circle-outline',
     title: 'Updates',
     what: 'A small version file from cuang.dev, and the new Silo app file when you tap Update. Nothing about you is sent.',
-    when: 'The check runs at most once a day (turn it off in More, App info); the download only when you tap Update.',
+    when: 'The check runs at most once a day (turn off "Tell me about new versions" in More, App info); the download only when you tap Update.',
   },
   {
     icon: 'sparkles-outline',
     title: 'AI model download',
     what: 'The on-device AI model files from Hugging Face.',
-    when: 'Only when you tap Download. After that the AI runs on your phone.',
+    when: 'Only when you tap Download Model. After that the AI runs on your phone.',
   },
   {
     icon: 'cloud-outline',
     title: 'External AI (optional)',
     what: 'Your question and the finance facts needed to answer it, to the AI service you configure.',
-    when: 'Only if you switch AI to External in Settings. Off by default.',
+    when: 'Only if you switch AI to External in Settings, AI & Receipt Scanning. Off by default.',
   },
   {
     icon: 'logo-google',
     title: 'Google Drive (optional)',
     what: 'Your backups, and receipt photos you choose to move, go to a Silo folder in your own Google Drive. Silo can only see files it created there.',
-    when: 'Only after you connect Drive in Settings, Data. Disconnect any time.',
+    when: 'Only after you connect Drive in Settings, Data & System. Disconnect any time.',
   },
   {
     icon: 'bug-outline',
     title: 'Bug reports and feature requests',
-    what: 'Your text, Silo version, phone model and Android version; the error log or a screenshot only if you add them.',
+    what: "Your text, Silo version, phone model and Android version; the error log or a screenshot only if you add them. They go to the developer's server and private Discord.",
     when: 'Only when you press Send on a report.',
   },
 ];
 
 const STAYS = [
-  'All your transactions, accounts, budgets, goals and receipt photos',
+  'Your transactions, accounts, budgets, goals and receipt photos (unless you connect Google Drive or use External AI)',
   'Receipt reading (OCR) and the on-device AI chat',
-  'Backups: saved on your phone, or in your own Google Drive if you connect it',
+  'Nothing is ever sent to the developer except a report you choose to send',
 ];
+
+export { PRIVACY_URL as PRIVACY_POLICY_URL, TERMS_URL } from '../services/terms';
+import { PRIVACY_URL as PRIVACY_POLICY_URL, TERMS_URL } from '../services/terms';
 
 export const PrivacyScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -73,8 +76,8 @@ export const PrivacyScreen = () => {
       </View>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: getBottomInsetPadding(insets.bottom, 24) }]}>
         <Text style={[body, styles.lead]}>
-          Silo has no account and no cloud. Your money data lives only on this phone. These are the only times Silo uses the
-          internet:
+          No account, and nothing is sent to the developer. Your money data stays on this phone unless you turn on Google
+          Drive or External AI. These are the only times Silo uses the internet:
         </Text>
 
         {NETWORK_USES.map((use) => (
@@ -101,8 +104,25 @@ export const PrivacyScreen = () => {
         ))}
 
         <Text style={[muted, styles.footer]}>
-          To remove everything Silo keeps on this phone, use Settings, Data, Erase all data.
+          To remove everything Silo keeps on this phone, use Settings, Data & System, Erase All Data.
         </Text>
+        <View style={styles.links}>
+          {[
+            ['Privacy Policy', PRIVACY_POLICY_URL],
+            ['Terms of Service', TERMS_URL],
+          ].map(([label, url]) => (
+            <TouchableOpacity
+              key={url}
+              style={[styles.linkBtn, { borderColor: theme.border }]}
+              onPress={() => void Linking.openURL(url)}
+              accessibilityRole="link"
+              accessibilityLabel={`Open the ${label}`}
+            >
+              <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(14) }}>{label}</Text>
+              <Ionicons name="open-outline" size={16} color={theme.primary} />
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -123,4 +143,6 @@ const styles = StyleSheet.create({
   stayRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   stayText: { flex: 1 },
   footer: { marginTop: 16 },
+  links: { flexDirection: 'row', gap: 10, marginTop: 14, flexWrap: 'wrap' },
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
 });

@@ -405,9 +405,30 @@ def work_on(t: dict) -> None:
         lock.release()
 
 
+LOG_RETENTION_DAYS = 365
+
+
+def purge_old_logs(now_ts: float | None = None) -> int:
+    """Privacy policy: report data is deleted 12 months after its last activity, logs included."""
+    cutoff = (now_ts or time.time()) - LOG_RETENTION_DAYS * 86400
+    removed = 0
+    for path in LOGS.glob("ticket-*"):
+        if path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def run() -> None:
     log_local(None, "dispatcher started")
+    last_purge = 0.0
     while True:
+        if time.time() - last_purge > 86400:
+            last_purge = time.time()
+            try:
+                purge_old_logs()
+            except Exception as exc:  # noqa: BLE001
+                log_local(None, f"log purge error: {exc}")
         try:
             poll_decisions()
             queued = relay("GET", "/internal/tickets?status=queued")["tickets"]

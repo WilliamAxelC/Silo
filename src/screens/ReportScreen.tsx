@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -25,6 +26,7 @@ import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { formatErrorLog, getErrorLog } from '../services/errorLog';
 import { getInstalledVersion } from '../services/updates';
 import { deviceSummary, getSentTickets, submitTicket, validateTicket, type TicketKind } from '../services/tickets';
+import { PRIVACY_POLICY_URL } from './PrivacyScreen';
 
 const MAX_SCREENSHOT_BYTES = 1.8 * 1024 * 1024;
 
@@ -230,7 +232,11 @@ export const ReportScreen = () => {
             Sent to the developer: your title and text, Silo {installed.version} (build {installed.versionCode}), {device}, Android{' '}
             {osVersion}
             {attachLog ? ', the error log' : ''}
-            {screenshot ? ', the screenshot' : ''}. Never your transactions or amounts.
+            {screenshot ? ', the screenshot' : ''}. Sending is voluntary. It goes to the developer's server and private Discord (stored in the USA). Your transactions
+            and amounts are never added automatically.{' '}
+            <Text style={{ color: theme.primary, fontWeight: '700' }} onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} accessibilityRole="link">
+              Privacy Policy
+            </Text>
           </Text>
 
           {error ? (

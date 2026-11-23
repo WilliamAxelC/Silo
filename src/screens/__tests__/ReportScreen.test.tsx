@@ -42,7 +42,7 @@ describe('ReportScreen', () => {
       r = ReactTestRenderer.create(<ReportScreen />);
     });
     const disclosure = () => textOf(r.root.findByProps({ testID: 'report-disclosure' }));
-    expect(disclosure()).toContain('Never your transactions or amounts');
+    expect(disclosure()).toContain('never added automatically');
     expect(disclosure()).not.toContain('error log');
 
     ReactTestRenderer.act(() => {

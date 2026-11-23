@@ -77,6 +77,7 @@ def init_db() -> None:
               status TEXT NOT NULL DEFAULT 'awaiting_decision',
               ping_id TEXT, message_id TEXT,
               decision TEXT, instructions TEXT, branch TEXT, result TEXT,
+              consent TEXT,
               updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS events (
@@ -98,6 +99,16 @@ def init_db() -> None:
 
 
 init_db()
+
+
+def migrate_db() -> None:
+    with closing(db()) as conn, conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(tickets)")}
+        if "consent" not in cols:
+            conn.execute("ALTER TABLE tickets ADD COLUMN consent TEXT")
+
+
+migrate_db()
 
 
 def now() -> int:
@@ -266,6 +277,8 @@ async def create_ticket(request: Request):
     device = clean_text(body.get("device"), 80, "device")
     os_version = clean_text(body.get("osVersion"), 20, "osVersion")
     error_log = clean_text(body.get("errorLog"), 20000, "errorLog")
+    # The consent text version the app showed above Send (older apps send none).
+    consent = clean_text(body.get("consent"), 60, "consent") or None
     shot = decode_screenshot(body.get("screenshot"))
 
     ch = client_hash(request)
@@ -278,9 +291,9 @@ async def create_ticket(request: Request):
             return JSONResponse({"ok": False, "error": "Too many reports right now. Please try again later."}, status_code=429)
         cur = conn.execute(
             """INSERT INTO tickets (created_at, kind, title, description, app_version, version_code, device, os_version,
-                 error_log, has_screenshot, client_hash, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 error_log, has_screenshot, client_hash, consent, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (t, kind, title, description, app_version, version_code, device, os_version, error_log or None,
-             1 if shot else 0, ch, t),
+             1 if shot else 0, ch, consent, t),
         )
         n = cur.lastrowid
         add_event(conn, n, "received", f"{kind}: {title}")
@@ -374,7 +387,6 @@ async def ticket_post(n: int, request: Request, authorization: str | None = Head
 # ---------------------------------------------------------------- retention
 
 RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "365"))
-CLOSED = ("rejected", "merged_to_test", "released", "closed")
 
 
 def delete_discord_message(message_id: str) -> bool:
@@ -409,12 +421,10 @@ def delete_ticket(n: int) -> dict:
 
 
 def purge_expired(now_ts: int | None = None) -> list[int]:
-    """Privacy policy: closed reports are deleted within 12 months."""
+    """Privacy policy: every report is deleted 12 months after its last activity, whatever its status."""
     cutoff = (now_ts or now()) - RETENTION_DAYS * 86400
     with closing(db()) as conn:
-        rows = conn.execute(
-            f"SELECT n FROM tickets WHERE status IN ({','.join('?' * len(CLOSED))}) AND updated_at < ?", (*CLOSED, cutoff)
-        ).fetchall()
+        rows = conn.execute("SELECT n FROM tickets WHERE updated_at < ?", (cutoff,)).fetchall()
     done = []
     for (n,) in rows:
         if delete_ticket(n).get("ok"):

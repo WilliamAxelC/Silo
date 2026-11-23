@@ -65,7 +65,8 @@ describe('tickets: exactly what leaves the phone', () => {
 
   it('sends text, app version and device only, unless the user adds the log or a screenshot', () => {
     const payload = buildTicketPayload(base);
-    expect(Object.keys(payload).sort()).toEqual(['appVersion', 'description', 'device', 'kind', 'osVersion', 'title', 'versionCode']);
+    expect(Object.keys(payload).sort()).toEqual(['appVersion', 'consent', 'description', 'device', 'kind', 'osVersion', 'title', 'versionCode']);
+    expect(payload.consent).toMatch(/^report-form-/); // which consent text the user saw (recorded per report)
     expect(payload).toMatchObject({ appVersion: '1.3.2', versionCode: 9 });
     const full = buildTicketPayload({ ...base, errorLog: 'x', screenshotBase64: 'AAAA' });
     expect(full).toMatchObject({ errorLog: 'x', screenshot: 'AAAA' });
