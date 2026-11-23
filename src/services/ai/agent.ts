@@ -726,6 +726,29 @@ const STOP_WORDS = new Set([
   've',
   'll',
   're',
+  // Conversational filler: never a merchant or item to search for (reported 2026-11-23).
+  'hi',
+  'hello',
+  'hey',
+  'doing',
+  'going',
+  'analyse',
+  'analyze',
+  'analysis',
+  'help',
+  'thanks',
+  'thank',
+  'ok',
+  'okay',
+  'advice',
+  'tips',
+  'health',
+  'look',
+  'looking',
+  'well',
+  'good',
+  'bad',
+  'situation',
 ]);
 
 function escapeRegex(value: string): string {
@@ -1774,12 +1797,12 @@ export function buildRetrievedContext(
     !parsed.wantsRecent &&
     /\b(spend|spent|spending|expense|expenses|pengeluaran|dihabiskan|dikeluarkan)\b/i.test(userPrompt);
 
-  const includeSummary =
+  let includeSummary =
     !hasSpecificIntent ||
     parsed.asksIncomeVsSpending ||
     asksExplicitOverview ||
     asksUnscopedSpending;
-  const includeTopCategories =
+  let includeTopCategories =
     parsed.asksTopCategories ||
     parsed.asksIncomeVsSpending ||
     asksExplicitOverview ||
@@ -2070,6 +2093,26 @@ export function buildRetrievedContext(
         score: 940,
       });
     }
+  }
+
+  // A vague question ("how am I doing?") can leave only a stray word to search for. When it matches
+  // nothing, also give the period overview, so the model never sees just a "no matches" line and
+  // invents a reason it cannot reach the data (reported 2026-11-23: "unable to access ... network error").
+  const keywordOnlyIntent =
+    hasKeywordIntent &&
+    !parsed.asksBalance &&
+    !parsed.asksBudget &&
+    !hasCategoryIntent &&
+    !parsed.asksBiggest &&
+    !parsed.wantsRecent &&
+    !parsed.asksIncomeVsSpending &&
+    !parsed.asksTopCategories;
+  // A clear money question ("what did I buy at X?") keeps its compact "no matches" answer.
+  const namesMoneyAction =
+    /\b(spend|spent|spending|buy|bought|pay|paid|cost|costs|earn|earned|receive|received|beli|bayar|belanja|habis)\b/i.test(userPrompt);
+  if (keywordOnlyIntent && !namesMoneyAction && keywordItems.every((item) => item.id === 'kw-none')) {
+    includeSummary = true;
+    includeTopCategories = true;
   }
 
   // Emit Period header only when period-scoped facts need it (skip redundant Period line for
@@ -2416,7 +2459,9 @@ const MAX_LOCAL_HISTORY_TURN_CHARS = 180;
 const MAX_LOCAL_SUMMARY_CHARS = 220;
 const MAX_LOCAL_USER_PROMPT_CHARS = 450;
 const DEFAULT_LOCAL_SYSTEM_PROMPT =
-  'You are Silo AI, a concise offline personal finance assistant. Reply in 2-4 short sentences or brief bullets; never invent balances or transactions.';
+  'You are Silo AI, a concise offline personal finance assistant. Reply in 2-4 short sentences or brief bullets; never invent balances or transactions. ' +
+  "You cannot see the user's records in this mode: if asked about their own spending, balances or budgets, tell them to switch to Grounded mode. " +
+  'Silo runs entirely on this phone, so never mention internet, network or server problems.';
 const DEFAULT_GROUNDED_SYSTEM_PROMPT =
   "You are Silo AI. Below are the user's real Silo finance records. Answer ONLY from these facts in 1-3 short sentences (or a brief list if asked). " +
   "Quote amounts exactly as written; never recalculate. Reply in the user's language. If the data does not cover the question, say so clearly.";
@@ -2531,6 +2576,22 @@ function fitMessagesWithinCharBudget(
     ...keptHistory,
     { role: 'user', content: safeUser },
   ];
+}
+
+const FALSE_CONNECTIVITY_CLAIM =
+  /\b(?:network|internet|connection|connectivity|server|online)\b[^.!?\n]{0,60}\b(?:error|issue|problem|unavailable|down|failure|failed|timed?\s*out)\b|\bcheck (?:your )?(?:internet|network|connection)\b|\bunable to (?:access|retrieve|reach|connect to) (?:your |the )?(?:financial |finance )?(?:data|records|information|database|account)\b/i;
+
+/**
+ * The on-device model sometimes excuses itself with a made-up network error (reported 2026-11-23:
+ * "I am unable to access your financial data due to a network error"). Silo reads records locally and
+ * real failures surface as errors, so any reply blaming connectivity is false: replace it with an
+ * honest pointer to what does work.
+ */
+export function replaceFalseConnectivityClaim(text: string, mode: LocalAiMode): string {
+  if (!FALSE_CONNECTIVITY_CLAIM.test(text)) return text;
+  return mode === 'chat'
+    ? "Chat mode can't see your Silo records. Switch to Grounded to ask about your spending, balances or budgets."
+    : "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"";
 }
 
 function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], customSystemPrompt: string) {

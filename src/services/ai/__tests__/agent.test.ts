@@ -12,6 +12,7 @@ import {
   parseGroundedQuery,
   analyzeReceiptImage,
   groundModelItems,
+  replaceFalseConnectivityClaim,
   RECEIPT_SCAN_CANCELLED,
   type RetrievedContextItem,
   type GroundedSqliteDb,
@@ -1170,6 +1171,53 @@ describe('AI Agent & Context Engine', () => {
       const planText = planRows.map((r) => r.detail).join('\n');
       expect(planText).toContain('idx_transactions_date');
       expect(planText).not.toMatch(/USE TEMP B-TREE FOR ORDER BY/i);
+    });
+
+    // Regression (reported 2026-11-23): vague questions left a stray word ("doing", "analyse") as the
+    // only search term. The model got just 'Matching "doing": No matching transactions found.' and
+    // replied "I am unable to access your financial data due to a network error".
+    it.each(['How am I doing?', 'Can you analyse my finances?', 'hi', 'Hello, help me please'])(
+      'regression: "%s" gets real totals, never only a no-matches line',
+      (prompt) => {
+        const facts = joinFacts(buildRetrievedContext(prompt, { db: testDb, now: NOW }));
+        expect(facts).toMatch(/^Summary: Spent Rp/m);
+        expect(facts).toMatch(/Top categories/);
+        expect(facts).not.toMatch(/^Matching "(?:doing|analyse|hi|hello|help)"/m);
+      },
+    );
+  });
+
+  describe('replaceFalseConnectivityClaim (regression 2026-11-23)', () => {
+    const reported =
+      'I am unable to access your financial data due to a network error. Please check your internet connection or try again later.';
+
+    it('replaces the made-up network excuse with an honest, mode-specific answer', () => {
+      expect(replaceFalseConnectivityClaim(reported, 'rag')).toMatch(/^I couldn't find records in Silo/);
+      expect(replaceFalseConnectivityClaim(reported, 'chat')).toMatch(/Switch to Grounded/);
+      for (const variant of [
+        'Sorry, there was a server issue retrieving your records.',
+        "I'm unable to retrieve your data right now.",
+        'Please check your network and try again.',
+      ]) {
+        expect(replaceFalseConnectivityClaim(variant, 'rag')).not.toBe(variant);
+      }
+    });
+
+    it('leaves real answers alone, including ones about an internet bill', () => {
+      for (const ok of [
+        'You spent Rp 13.000 at Lawson this month.',
+        'Your Internet category: Rp 350.000 spent (1 txn).',
+        'Biggest expense: IndiHome internet Rp 400.000 on 3 Nov.',
+      ]) {
+        expect(replaceFalseConnectivityClaim(ok, 'rag')).toBe(ok);
+      }
+    });
+
+    it('tells the model in Chat mode that Silo is offline and cannot see records there', () => {
+      (useSettingsStore.getState as jest.Mock).mockReturnValue({ localSystemPrompt: '' });
+      const chat = buildLocalMessagesForMode('How much did I spend?', 'chat', useAIStore.getState());
+      expect(chat[0].content).toMatch(/never mention internet, network or server problems/);
+      expect(chat[0].content).toMatch(/switch to Grounded mode/);
     });
   });
 

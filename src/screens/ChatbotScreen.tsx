@@ -22,7 +22,7 @@ import { NavigationProps, ChatbotScreenRouteProp } from '../navigation/types';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore, type Message } from '../store/useAIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
-import type { LocalAiMode } from '../services/ai/agent';
+import { replaceFalseConnectivityClaim, type LocalAiMode } from '../services/ai/agent';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../services/ai/generationService';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
@@ -571,7 +571,7 @@ export const ChatbotScreen = () => {
       });
       const durationMs = Date.now() - startedAt;
       updateChatMessage(assistantMessageId, {
-        text: responseText,
+        text: replaceFalseConnectivityClaim(responseText, aiMode as LocalAiMode),
         status: 'complete',
         createdAt: new Date(startedAt).toISOString(),
       });
