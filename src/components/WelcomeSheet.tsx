@@ -30,11 +30,35 @@ import {
 } from '../services/backup';
 import { syncDailyReminder } from '../services/notifications';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
+import { getActiveModelConfig } from '../services/ai/config';
+import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
+import { useAIStore } from '../store/useAIStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 
 const WELCOME_CURRENCY_OPTIONS = ['IDR', 'USD', 'EUR', 'GBP', 'SGD', 'JPY'] as const;
+
+/**
+ * Whether first launch should offer the on-device AI model: the phone can run it and it is not already
+ * installed or on its way.
+ */
+export function shouldOfferModelSetup(): boolean {
+  try {
+    const ai = useAIStore.getState();
+    if (useSettingsStore.getState().aiInferenceMode === 'external') return false;
+    const availability = ai.refreshRuntimeAvailability?.();
+    if (availability && !availability.available) return false;
+    return ai.provisioning.status === 'not-installed' || ai.provisioning.status === 'failed';
+  } catch {
+    return false;
+  }
+}
+
+function formatGigabytes(bytes: number | undefined | null): string | null {
+  if (!bytes || bytes <= 0) return null;
+  return `${(bytes / 1e9).toFixed(1)} GB`;
+}
 
 interface WelcomeSheetProps {
   visible: boolean;
@@ -54,6 +78,48 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
   const [startingBalance, setStartingBalance] = useState('');
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  /** 'model' is the second step: offer the on-device AI model download. */
+  const [step, setStep] = useState<'basics' | 'model'>('basics');
+  const wifiOnly = useSettingsStore((s) => s.aiWifiOnlyDownload);
+
+  /** Ends onboarding, or moves to the AI model step when this phone can use it. */
+  const finishBasics = async () => {
+    if (shouldOfferModelSetup()) {
+      setStep('model');
+      return;
+    }
+    await setHasCompletedOnboarding(true);
+  };
+
+  const handleModelLater = async () => {
+    if (isBusy) return;
+    setIsBusy(true);
+    try {
+      await setHasCompletedOnboarding(true);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleModelDownload = async () => {
+    if (isBusy) return;
+    setIsBusy(true);
+    try {
+      await setHasCompletedOnboarding(true);
+      // Runs in the background; progress shows in Settings > AI and on the chat screen.
+      const manager = getModelLifecycleManager();
+      void (async () => {
+        try {
+          await manager.ensureInitialized?.();
+          await manager.retryProvisioning();
+        } catch (error) {
+          Alert.alert('AI setup', getErrorMessage(error, 'Could not start the model download.'));
+        }
+      })();
+    } finally {
+      setIsBusy(false);
+    }
+  };
 
   const defaultWallet = wallets.find((w) => w.isActive) ?? wallets[0] ?? null;
 
@@ -81,7 +147,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
     if (isBusy) return;
     setIsBusy(true);
     try {
-      await setHasCompletedOnboarding(true);
+      await finishBasics();
     } finally {
       setIsBusy(false);
     }
@@ -102,7 +168,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
       if (defaultWallet && numericBalance > 0) {
         updateWallet(defaultWallet.id, { initialBalance: numericBalance });
       }
-      await setHasCompletedOnboarding(true);
+      await finishBasics();
     } catch (error) {
       Alert.alert('Setup Failed', getErrorMessage(error, 'Could not save your setup choices.'));
     } finally {
@@ -126,7 +192,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
       } catch {
         // Non-blocking notification sync after restore
       }
-      await useSettingsStore.getState().setHasCompletedOnboarding(true);
+      await finishBasics();
       Alert.alert('Backup restored', `${transactions} transaction${transactions === 1 ? '' : 's'} restored.`);
     } catch (error) {
       Alert.alert('Restore failed', getErrorMessage(error, 'Could not read the backup file.'));
@@ -166,7 +232,12 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => void handleSkip()}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => void (step === 'model' ? handleModelLater() : handleSkip())}
+    >
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -182,6 +253,66 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
             },
           ]}
         >
+          {step === 'model' ? (
+            <ScrollView bounces={false} showsVerticalScrollIndicator={false} testID="welcome-model-step">
+              <View style={styles.headerRow}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.primaryMuted }]}>
+                  <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
+                </View>
+                <View style={styles.headerCopy}>
+                  <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(20) }]}>
+                    Set up the AI assistant
+                  </Text>
+                  <Text style={[styles.subtitle, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
+                    Step 2 of 2
+                  </Text>
+                </View>
+              </View>
+
+              {[
+                { icon: 'receipt-outline' as const, text: 'Reads receipts more accurately: merchant, items and totals.' },
+                { icon: 'chatbubbles-outline' as const, text: 'Answers questions about your spending, budgets and accounts.' },
+                { icon: 'lock-closed-outline' as const, text: 'Runs on your phone. Your data never leaves it.' },
+              ].map((row) => (
+                <View key={row.icon} style={styles.featureRow}>
+                  <Ionicons name={row.icon} size={18} color={theme.primary} />
+                  <Text style={[styles.featureText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>{row.text}</Text>
+                </View>
+              ))}
+
+              <Text style={[styles.helperText, { color: theme.textMuted, fontSize: theme.scaleFont(12), marginTop: 10 }]}>
+                {`One-time download${formatGigabytes(getActiveModelConfig().sizeBytes) ? ` of about ${formatGigabytes(getActiveModelConfig().sizeBytes)}` : ''}. ${
+                  wifiOnly ? 'It waits for Wi-Fi.' : 'Wi-Fi recommended.'
+                } You can keep using Silo while it downloads.`}
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: theme.primary, opacity: isBusy ? 0.7 : 1 }]}
+                onPress={() => void handleModelDownload()}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel="Download the AI model"
+              >
+                <Text style={[styles.primaryBtnText, { color: theme.onPrimary, fontSize: theme.scaleFont(15) }]}>
+                  Download now
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.restoreBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={() => void handleModelLater()}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel="Set up the AI model later"
+              >
+                <Text style={[styles.restoreBtnText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                  Maybe later
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.helperText, { color: theme.textMuted, fontSize: theme.scaleFont(12), textAlign: 'center' }]}>
+                You can download it anytime in Settings, AI.
+              </Text>
+            </ScrollView>
+          ) : (
           <ScrollView bounces={false} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={styles.headerRow}>
               <View style={[styles.badgeIcon, { backgroundColor: theme.primaryMuted }]}>
@@ -304,6 +435,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
               </Text>
             </TouchableOpacity>
           </ScrollView>
+          )}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -311,6 +443,8 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
 };
 
 const styles = StyleSheet.create({
+  featureRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 12 },
+  featureText: { flex: 1, lineHeight: 20 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.52)',

@@ -7,6 +7,24 @@ import { BACKUP_PICKER_MIME_TYPES } from '../../services/backup';
 import * as backupService from '../../services/backup';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useAIStore } from '../../store/useAIStore';
+
+const mockRetryProvisioning = jest.fn(async () => undefined);
+jest.mock('../../services/ai/modelLifecycle', () => ({
+  getModelLifecycleManager: () => ({
+    ensureInitialized: jest.fn(async () => undefined),
+    retryProvisioning: mockRetryProvisioning,
+  }),
+}));
+
+/** Puts the AI store in a state where the model step is (or is not) offered. */
+function setModelState(status: 'ready' | 'not-installed', available = true) {
+  const state = useAIStore.getState();
+  useAIStore.setState({
+    provisioning: { ...state.provisioning, status },
+    refreshRuntimeAvailability: () => ({ available, message: available ? '' : 'Not supported' }) as any,
+  } as any);
+}
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -39,6 +57,8 @@ describe('WelcomeSheet first-launch onboarding (F-14)', () => {
       fetchCategories: mockFetchCategories,
       fetchBudgets: mockFetchBudgets,
     } as any);
+    // Existing basics tests: the model is already on the phone, so setup ends after step 1.
+    setModelState('ready');
   });
 
   afterEach(() => {
@@ -225,5 +245,53 @@ describe('WelcomeSheet first-launch onboarding (F-14)', () => {
     restoreSpy.mockRestore();
     loadSettingsSpy.mockRestore();
     ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  describe('AI model step (requested 2026-11-23)', () => {
+    const renderAndFinishBasics = async (via: 'complete' | 'skip') => {
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<WelcomeSheet visible />);
+      });
+      await ReactTestRenderer.act(async () => {
+        await renderer.root
+          .findByProps({ accessibilityLabel: via === 'complete' ? 'Complete welcome setup' : 'Skip welcome setup' })
+          .props.onPress();
+      });
+      return renderer;
+    };
+
+    it('offers the model download after the basics on first launch, and starts it on Download now', async () => {
+      setModelState('not-installed');
+      const renderer = await renderAndFinishBasics('complete');
+      expect(renderer.root.findByProps({ testID: 'welcome-model-step' })).toBeTruthy();
+      expect(mockSetHasCompletedOnboarding).not.toHaveBeenCalled();
+
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Download the AI model' }).props.onPress();
+      });
+      expect(mockSetHasCompletedOnboarding).toHaveBeenCalledWith(true);
+      expect(mockRetryProvisioning).toHaveBeenCalled();
+      ReactTestRenderer.act(() => renderer.unmount());
+    });
+
+    it('also offers it after Skip, and Maybe later finishes without downloading', async () => {
+      setModelState('not-installed');
+      const renderer = await renderAndFinishBasics('skip');
+      await ReactTestRenderer.act(async () => {
+        await renderer.root.findByProps({ accessibilityLabel: 'Set up the AI model later' }).props.onPress();
+      });
+      expect(mockSetHasCompletedOnboarding).toHaveBeenCalledWith(true);
+      expect(mockRetryProvisioning).not.toHaveBeenCalled();
+      ReactTestRenderer.act(() => renderer.unmount());
+    });
+
+    it('skips the step on phones that cannot run the model', async () => {
+      setModelState('not-installed', false);
+      const renderer = await renderAndFinishBasics('complete');
+      expect(renderer.root.findAllByProps({ testID: 'welcome-model-step' })).toHaveLength(0);
+      expect(mockSetHasCompletedOnboarding).toHaveBeenCalledWith(true);
+      ReactTestRenderer.act(() => renderer.unmount());
+    });
   });
 });

@@ -3,6 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 import { CashflowScreen } from '../CashflowScreen';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useAIStore } from '../../store/useAIStore';
 import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../../features/transactions/constants';
 
@@ -433,6 +434,8 @@ describe('CashflowScreen', () => {
   });
 
   it('shows the first-launch WelcomeSheet once settings finish loading when onboarding is incomplete, and hides once completed (F-14)', async () => {
+    // Model already installed, so the welcome sheet ends after its first step.
+    useAIStore.setState({ provisioning: { ...useAIStore.getState().provisioning, status: 'ready' } } as any);
     useSettingsStore.setState({
       isLoaded: true,
       hasCompletedOnboarding: false,
