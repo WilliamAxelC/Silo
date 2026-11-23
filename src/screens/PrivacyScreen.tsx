@@ -31,7 +31,7 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
   {
     icon: 'cloud-outline',
     title: 'External AI (optional)',
-    what: 'Your question and the finance facts needed to answer it, to the AI service you configure.',
+    what: 'Your question, earlier chat messages and the finance facts needed to answer it, and receipt text (and the receipt photo in AI vision mode) when reading receipts, to the AI service you configure. If the on-device model is not ready, Silo uses that service instead.',
     when: 'Only if you switch AI to External in Settings, AI & Receipt Scanning. Off by default.',
   },
   {

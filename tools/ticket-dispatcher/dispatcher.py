@@ -63,11 +63,16 @@ TOKEN = ENV.get("RELAY_ADMIN_TOKEN", "")
 
 
 def log_local(n: int | None, text: str) -> None:
+    """Ticket details go only to ticket-<n>.log (deleted with the ticket after 12 months). The shared
+    dispatcher.log gets just the ticket number and event kind, never report content."""
     LOGS.mkdir(parents=True, exist_ok=True)
-    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n"
-    (LOGS / ("dispatcher.log" if n is None else f"ticket-{n}.log")).open("a").write(line)
-    if n is not None:
-        (LOGS / "dispatcher.log").open("a").write(f"#{n} {line}")
+    stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    if n is None:
+        (LOGS / "dispatcher.log").open("a").write(f"{stamp} {text}\n")
+        return
+    (LOGS / f"ticket-{n}.log").open("a").write(f"{stamp} {text}\n")
+    kind = text.split("]", 1)[0].lstrip("[") if text.startswith("[") else "event"
+    (LOGS / "dispatcher.log").open("a").write(f"{stamp} #{n} {kind}\n")
 
 
 def relay(method: str, path: str, payload: dict | None = None, timeout: int = 40) -> dict:

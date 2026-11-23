@@ -57,7 +57,7 @@ export function DriveSyncSection({ onRestoreFile, locale }: { onRestoreFile: (ur
         onPress={() =>
           Alert.alert(
             'Connect Google Drive?',
-            "Silo will create a Silo folder in your Google Drive and upload a backup of all your Silo data now and then once a day. If you turn it on, older receipt photos move there too. Silo can only see files it creates there. The files are yours: the developer can't see them.",
+            "Silo will create a Silo folder in your Google Drive and upload a backup of your Silo records (not photos) now and then once a day. If you turn it on, older receipt photos move there too. Silo can only see files it creates there. The files are yours: the developer can't see them.",
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Privacy Policy', onPress: () => void Linking.openURL(PRIVACY_POLICY_URL) },
