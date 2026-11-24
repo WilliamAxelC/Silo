@@ -1,25 +1,28 @@
 # Silo handoff
 
 ## Last updated
-2026-11-24 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (also `test`). `prod` = `v1.3.4` @ `0f7ba8c`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (also `test`). `prod` = `v1.3.5` @ `3093849`.
 
 ## Current state
-- **Live:** 1.3.4 (versionCode 11) at https://cuang.dev/projects/silo/, signed with Silo's private key.
-  Split Bill, Chat mode answering from the user's records, an AI accuracy notice, and a larger Reports toggle.
-  1.3.3 phones update in the app (`version.json` has the apk url + sha256 + size). Phones on 1.3.2 or older need the
+- **Live:** 1.3.5 (versionCode 12) at https://cuang.dev/projects/silo/, signed with Silo's private key.
+  1.3.5: the split page shows the result with Mark paid / share per person, the setup folds away, and Cashflow
+  shows a split badge (amber pending, green all paid). 1.3.4 added Split Bill, Chat with records, the AI notice.
+  1.3.3+ phones update in the app (`version.json` has the apk url + sha256 + size). Phones on 1.3.2 or older need the
   one-time back up / uninstall / install / restore (download page `#upgrade`).
 - **Live web pages:** Privacy Policy and Terms (EN + ID, the ID versions prevail) under /projects/silo/privacy/ and /terms/.
   Privacy updated 2026-11-24 for Split Bill. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 864 jest tests pass; `npx tsc --noEmit` is clean. Emulator upgrade 1.3.3 to 1.3.4 verified (DB 20 to 21, data kept).
+- 868 jest tests pass; `npx tsc --noEmit` is clean. Emulator: 1.3.4 to 1.3.5 upgrade, split page, Mark paid and badge verified.
 
 ## In progress
 - Nothing unreleased.
 
 ## Next steps
-- Watch the first real in-app update on the user's phone (1.3.3 to 1.3.4) and the first real Split Bill use.
+- Watch real in-app updates on the user's phone (to 1.3.5) and real Split Bill use.
+- Receipt reading: build a private eval set from the user's own receipts (bench/data, gitignored) and measure ML Kit on a
+  real phone; the rule-based fallback is ~74% on totals (benchmark), ceiling ~89%.
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
 
 ## Waiting on the user
