@@ -1,30 +1,25 @@
 # Silo handoff
 
 ## Last updated
-2026-11-24 by Claude Code (Opus 5.5). Branch `feat/multi-currency` @ `0f7ba8c` (also `test`). `prod` = `v1.3.3` @ `ac5b4ea`.
+2026-11-24 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (also `test`). `prod` = `v1.3.4` @ `0f7ba8c`.
 
 ## Current state
-- **Live:** 1.3.3 (versionCode 10) at https://cuang.dev/projects/silo/, the first build signed with Silo's private key.
-  Users on 1.3.2 or older must back up, uninstall, install and restore once (the download page explains it).
-  1.3.3 and later update in the app from `version.json` (`apk` url + sha256 + size).
+- **Live:** 1.3.4 (versionCode 11) at https://cuang.dev/projects/silo/, signed with Silo's private key.
+  Split Bill, Chat mode answering from the user's records, an AI accuracy notice, and a larger Reports toggle.
+  1.3.3 phones update in the app (`version.json` has the apk url + sha256 + size). Phones on 1.3.2 or older need the
+  one-time back up / uninstall / install / restore (download page `#upgrade`).
 - **Live web pages:** Privacy Policy and Terms (EN + ID, the ID versions prevail) under /projects/silo/privacy/ and /terms/.
-  Contact: william@cuang.dev. Source: `docs/legal/` (see its README before changing them).
+  Privacy updated 2026-11-24 for Split Bill. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
-  auto-merges passing fixes into `test`.
-- 864 jest tests pass; `npx tsc --noEmit` is clean.
+  auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
+- 864 jest tests pass; `npx tsc --noEmit` is clean. Emulator upgrade 1.3.3 to 1.3.4 verified (DB 20 to 21, data kept).
 
 ## In progress
-- **1.3.4 release** (Split Bill, Chat mode uses your records, AI accuracy notice, Reports toggle). Commit `0f7ba8c`
-  is being built on ai-renderer (`~/silo-build/build_134.log`). Remaining steps:
-  1. Check the APK: signer SHA-1 `ddca7c...32e1`, versionCode 11, READ_CONTACTS present, WRITE_CONTACTS absent.
-  2. Emulator: install over 1.3.3 (DB 20 to 21, data kept) and open Split Bills.
-  3. Publish the APK, `index-134.html` (prepared in the session scratchpad; otherwise edit the live index.html),
-     `version.json` with the new apk sha/size, and the updated `docs/legal/privacy*.html` to /privacy/ and /privacy/id/.
-  4. Tag `v1.3.4`, move `prod`, update CHANGELOG (already written for 1.3.4).
+- Nothing unreleased.
 
 ## Next steps
-- Watch the first real in-app update (the user's phone, 1.3.3 to 1.3.4).
+- Watch the first real in-app update on the user's phone (1.3.3 to 1.3.4) and the first real Split Bill use.
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
 
 ## Waiting on the user
