@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>Silo | Kebijakan Privasi</title>
+  <meta name="description" content="Kebijakan Privasi Silo, aplikasi pencatat keuangan offline untuk Android dari CDev. Data apa yang tetap di ponsel, kapan Silo terhubung ke internet, cara data Google Drive digunakan, dan hak Anda.">
+  <link rel="alternate" hreflang="id" href="https://cuang.dev/projects/silo/privacy/id/">
+  <link rel="alternate" hreflang="en" href="https://cuang.dev/projects/silo/privacy/">
+  <link rel="icon" href="../../icon-192.png?v=silo2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16; --card: #111827; --border: #1f2937; --text: #f9fafb; --muted: #9ca3af;
+      --primary: #0ea5e9; --primary-ink: #ffffff; --green: #10b981; --amber: #f59e0b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f8fafc; --card: #ffffff; --border: #e5e7eb; --text: #111827; --muted: #4b5563; --primary: #0369a1; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+    header img { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+    .tagline { color: var(--muted); font-size: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+    .download { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--primary); color: var(--primary-ink);
+      font-weight: 700; font-size: 16px; padding: 14px 22px; border-radius: 999px; text-decoration: none; }
+    .btn:hover { filter: brightness(1.08); }
+    .meta { color: var(--muted); font-size: 13px; }
+    .meta code, .sha { font-family: 'Fira Code', monospace; font-size: 12px; word-break: break-all; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    li strong { font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .feature { border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .feature h3 { font-size: 15px; margin-bottom: 4px; }
+    .feature p { color: var(--muted); font-size: 14px; }
+    .note { border-left: 3px solid var(--amber); padding-left: 12px; color: var(--muted); font-size: 14px; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 32px; }
+    a { color: var(--primary); }
+
+    /* Legal page additions */
+    header a.icon { flex-shrink: 0; line-height: 0; }
+    .back { font-size: 14px; font-weight: 600; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+    .lang { margin: -12px 0 24px; }
+    h3 { font-size: 15px; margin: 18px 0 6px; }
+    .card p { margin-bottom: 10px; }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .card ul, .card ol { margin-bottom: 10px; }
+    code { font-family: 'Fira Code', monospace; font-size: 13px; overflow-wrap: anywhere; }
+    .toc ol { columns: 2 220px; column-gap: 24px; }
+    .toc li { margin-bottom: 4px; break-inside: avoid; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; }
+    .statement { border-left: 3px solid var(--primary); padding-left: 12px; font-weight: 500; }
+    section { scroll-margin-top: 16px; }
+    @media (max-width: 480px) { h1 { font-size: 28px; } header img { width: 56px; height: 56px; border-radius: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="icon" href="../../"><img src="../../icon-192.png?v=silo2" alt="Ikon aplikasi Silo"></a>
+    <div>
+      <a class="back" href="../../">Silo</a>
+      <h1>Kebijakan Privasi</h1>
+      <p class="meta">Terakhir diperbarui: 23 November 2026</p>
+    </div>
+  </header>
+  <p class="note lang">Versi bahasa Indonesia ini yang berlaku; versi bahasa Inggris adalah terjemahan. <a href="../" hreflang="en" lang="en">Read in English</a></p>
+
+  <section class="card" id="summary">
+    <h2>Ringkasnya</h2>
+    <ul>
+      <li>Silo menyimpan catatan keuangan Anda di ponsel Anda. Catatan itu tidak dikirim ke kami, dan kami tidak punya salinannya.</li>
+      <li>Silo tidak memakai akun, tidak menampilkan iklan, tidak memakai ID iklan, dan kami tidak menjalankan analitik atau pelacakan sendiri.</li>
+      <li>Beberapa komponen Google di dalam Silo dapat mengirim data diagnostik teknis ke Google. Komponen itu tidak mengirim struk atau catatan Anda. Lihat <a href="#online-google">bagian 4d</a>.</li>
+      <li>Silo hanya terhubung ke internet untuk keperluan di <a href="#online">bagian 4</a>. Fitur yang mengirim informasi tentang keuangan Anda bersifat opsional dan mati sampai Anda menyalakannya.</li>
+      <li>Satu-satunya data pribadi yang kami terima adalah isi laporan bug atau permintaan fitur yang Anda pilih untuk dikirim, serta email yang Anda kirim kepada kami.</li>
+    </ul>
+  </section>
+
+  <nav class="card toc" aria-label="Daftar isi">
+    <h2>Daftar isi</h2>
+    <ol>
+      <li><a href="#who">Siapa kami</a></li>
+      <li><a href="#on-phone">Data yang tetap di ponsel Anda</a></li>
+      <li><a href="#on-device">Proses yang berjalan di ponsel Anda</a></li>
+      <li><a href="#online">Kapan Silo terhubung ke internet</a></li>
+      <li><a href="#google-drive">Google Drive dan data Google Anda</a></li>
+      <li><a href="#external-ai">Layanan AI eksternal</a></li>
+      <li><a href="#reports">Laporan bug dan permintaan fitur</a></li>
+      <li><a href="#permissions">Izin ponsel</a></li>
+      <li><a href="#not-do">Hal yang tidak kami lakukan</a></li>
+      <li><a href="#legal-basis">Dasar pemrosesan data</a></li>
+      <li><a href="#third-parties">Siapa yang menerima data</a></li>
+      <li><a href="#transfers">Data di luar Indonesia</a></li>
+      <li><a href="#retention">Berapa lama data disimpan</a></li>
+      <li><a href="#security">Keamanan</a></li>
+      <li><a href="#delete">Menghapus data Anda</a></li>
+      <li><a href="#rights">Hak Anda</a></li>
+      <li><a href="#children">Anak-anak</a></li>
+      <li><a href="#breach">Jika terjadi kebocoran data</a></li>
+      <li><a href="#changes">Perubahan kebijakan ini</a></li>
+      <li><a href="#contact">Kontak</a></li>
+    </ol>
+  </nav>
+
+  <section class="card" id="who">
+    <h2>1. Siapa kami</h2>
+    <p>Silo dibuat oleh CDev ("kami"), seorang pengembang perorangan. "Anda" berarti orang yang menggunakan Silo.</p>
+    <p>Kebijakan ini berlaku untuk aplikasi Silo di Android (nama paket <code>com.LCSdev.silo</code>) dan halaman unduhannya di <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+    <p>Untuk laporan bug dan email yang kami terima, kami adalah Pengendali Data Pribadi. Data yang tetap di ponsel Anda berada dalam kendali Anda. Kami tidak dapat melihatnya.</p>
+    <p>Kontak untuk pertanyaan dan permintaan terkait privasi: <a href="mailto:william@cuang.dev">william@cuang.dev</a>.</p>
+  </section>
+
+  <section class="card" id="on-phone">
+    <h2>2. Data yang tetap di ponsel Anda</h2>
+    <p>Silo menyimpan data berikut di penyimpanan aplikasi pribadinya di ponsel Anda. Aplikasi lain tidak dapat membaca penyimpanan ini. Tidak ada data ini yang dikirim ke kami.</p>
+    <ul>
+      <li>Transaksi, akun dan dompet, saldo, anggaran, target tabungan, kategori, tag, aturan transaksi berulang, dan templat.</li>
+      <li>Foto struk, teks yang dibaca dari struk, dan foto yang Anda bagikan ke Silo dari aplikasi lain.</li>
+      <li>Pengaturan Anda.</li>
+      <li>Log aktivitas: riwayat perubahan yang Anda buat. Log ini menyimpan paling lama 90 hari dan paling banyak 2.000 entri.</li>
+      <li>Log error: 50 error terakhir. Angka panjang di dalamnya disamarkan.</li>
+      <li>Cadangan otomatis: satu per hari. Tujuh cadangan terakhir disimpan di ponsel.</li>
+      <li>Jika Anda memakainya: alamat email akun Google yang Anda hubungkan (<a href="#google-drive">bagian 5</a>) dan kunci API layanan AI eksternal (<a href="#external-ai">bagian 6</a>).</li>
+      <li>File sementara di cache Silo, misalnya gambar pratinjau, foto yang diambil dari Google Drive, unduhan pembaruan, dan file ekspor.</li>
+    </ul>
+    <p>Percakapan Anda dengan asisten AI hanya disimpan di memori. Percakapan itu hilang saat Silo ditutup.</p>
+    <p>Fitur cadangan cloud Android untuk data aplikasi dimatikan di Silo, jadi Android tidak menyalin data Silo ke cadangan Google. Kami tidak punya salinan data Anda di server.</p>
+  </section>
+
+  <section class="card" id="on-device">
+    <h2>3. Proses yang berjalan di ponsel Anda</h2>
+    <ul>
+      <li><strong>Membaca struk.</strong> Silo membaca struk dengan pengenalan teks Google ML Kit yang berjalan di perangkat. Untuk memindai, Silo dapat memakai pemindai dokumen Google, yang berjalan melalui layanan Google Play. Foto struk dan teksnya diproses di ponsel, kecuali Anda memasang layanan AI eksternal (<a href="#external-ai">bagian 6</a>).</li>
+      <li><strong>Asisten AI.</strong> Asisten AI bawaan adalah model yang Anda unduh sekali lewat <strong>Download Model</strong>. Setelah itu model berjalan di ponsel Anda, kecuali Anda memasang layanan AI eksternal.</li>
+      <li><strong>Kunci aplikasi.</strong> Kunci aplikasi opsional memakai sidik jari, wajah, atau kunci layar ponsel Anda sendiri. Android yang memeriksanya, lalu hanya memberi tahu Silo "ya" atau "tidak". Silo tidak pernah menerima data biometrik Anda.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="online">
+    <h2>4. Kapan Silo terhubung ke internet</h2>
+    <p>Hanya pada saat-saat berikut Silo terhubung ke internet. Setiap permintaan web memperlihatkan alamat IP Anda dan informasi dasar perangkat (disebut "user agent") kepada server yang menjawabnya. Selain itu, daftar ini menjelaskan apa saja yang dikirim. Di Silo, menu <strong>More, Privacy</strong> juga menampilkan kapan Silo terhubung ke internet.</p>
+
+    <h3 id="online-rates">a. Kurs mata uang</h3>
+    <p>Jika Anda memakai lebih dari satu mata uang, Silo mengambil kurs dari layanan publik currency-api, yang disajikan melalui jsDelivr dan <code>currency-api.pages.dev</code>. Silo meminta paling banyak sekali sehari, dan hanya saat fitur multi-mata uang membutuhkannya. Silo hanya mengirim kode mata uang utama Anda, misalnya "IDR".</p>
+
+    <h3 id="online-updates">b. Pemeriksaan dan pemasangan pembaruan</h3>
+    <p>Paling banyak sekali sehari, Silo mengunduh file versi kecil dari cuang.dev untuk melihat apakah ada versi baru. Anda dapat mematikannya lewat <strong>Tell me about new versions</strong> di <strong>More, App info</strong>.</p>
+    <p>Saat Anda mengetuk <strong>Update</strong>, Silo mengunduh file aplikasi baru (APK) dari cuang.dev. Silo mencocokkannya dengan checksum, nama paket, dan versi yang dipublikasikan. Android hanya memasangnya jika file itu ditandatangani dengan kunci yang sama dengan Silo yang sudah terpasang. Tidak ada informasi tentang Anda yang dikirim selain yang terlihat dari setiap permintaan web.</p>
+
+    <h3 id="online-model">c. Unduhan model AI</h3>
+    <p>Saat Anda mengetuk <strong>Download Model</strong>, Silo mengunduh file model dari Hugging Face. Tidak ada informasi tentang keuangan Anda yang dikirim.</p>
+
+    <h3 id="online-google">d. Komponen Google</h3>
+    <p>Silo memakai Google ML Kit untuk membaca struk, serta layanan Google Play untuk pemindai dokumen dan Login dengan Google. Menurut Google, komponen ini dapat mengirim data diagnostik teknis ke Google: model perangkat, versi Android, versi aplikasi, metrik kinerja, kode error, dan pengenal untuk setiap pemasangan. Google memakainya untuk diagnostik dan analitik penggunaan. Komponen ini tidak mengirim foto atau teks struk Anda. Lihat <a href="https://developers.google.com/ml-kit/android-data-disclosure">pengungkapan data ML Kit</a> dan <a href="https://policies.google.com/privacy?hl=id">Kebijakan Privasi Google</a>.</p>
+
+    <h3 id="online-site">e. cuang.dev dan Cloudflare</h3>
+    <p>cuang.dev, termasuk pemeriksaan pembaruan, unduhan, dan layanan laporan, disajikan melalui Cloudflare. Cloudflare memproses alamat IP pengunjung untuk menyajikan dan melindungi situs. <a href="https://www.cloudflare.com/privacypolicy/">Kebijakan privasi Cloudflare</a> berlaku. Server kami sendiri tidak menyimpan log akses atau log error untuk halaman Silo, pemeriksaan pembaruan, unduhan, maupun layanan laporan.</p>
+
+    <h3 id="online-optional">f. Fitur opsional</h3>
+    <ul>
+      <li>Google Drive, hanya jika Anda menghubungkannya: <a href="#google-drive">bagian 5</a>.</li>
+      <li>AI eksternal, hanya jika Anda memasangnya: <a href="#external-ai">bagian 6</a>.</li>
+      <li>Laporan bug dan permintaan fitur, hanya saat Anda menekan <strong>Send</strong>: <a href="#reports">bagian 7</a>.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="google-drive">
+    <h2>5. Google Drive dan data Google Anda</h2>
+    <p>Pencadangan ke Google Drive bersifat opsional. Jika Anda tidak pernah menghubungkannya, Silo tidak mengakses akun Google Anda. Sebelum Anda menghubungkannya, Silo menampilkan penjelasan di aplikasi beserta tautan ke kebijakan ini.</p>
+
+    <h3 id="drive-access">Apa yang diakses Silo</h3>
+    <ul>
+      <li><strong>Izin.</strong> "Cakupan" (scope) adalah izin yang diminta aplikasi kepada Google. Silo meminta cakupan login dasar Google (<code>openid</code>, <code>email</code>, dan <code>profile</code>) serta satu cakupan Drive, <code>https://www.googleapis.com/auth/drive.file</code>. Cakupan ini hanya mengizinkan Silo melihat, mengubah, membuat, dan menghapus file Google Drive tertentu yang Anda gunakan dengan Silo. Silo hanya dapat mengakses file yang dibuatnya sendiri. Silo tidak dapat melihat isi lain di Drive Anda.</li>
+      <li><strong>Alamat email Anda.</strong> Silo menyimpan alamat email akun yang masuk untuk menunjukkan akun mana yang terhubung. Email ini disimpan di ponsel Anda, sehingga juga ikut masuk ke cadangan Silo Anda. Silo membuang nama dan foto profil Anda.</li>
+      <li><strong>Token login.</strong> Token ditangani oleh layanan Google Play. Silo tidak menyimpannya.</li>
+    </ul>
+
+    <h3 id="drive-use">Cara Silo menggunakannya</h3>
+    <ul>
+      <li>Silo membuat folder bernama "Silo" di Drive Anda, berisi folder "Backups" dan "Receipts".</li>
+      <li>Saat Anda menghubungkan Drive, Silo langsung mengunggah cadangan pertama. Setelah itu Silo mengunggah satu cadangan per hari selama <strong>Daily backup to Drive</strong> menyala. Cadangan ini adalah database Silo: catatan, pengaturan, log aktivitas, dan log error Anda. Foto tidak termasuk. Silo menyimpan 30 cadangan terbaru dan menghapus cadangan lama yang dibuatnya.</li>
+      <li>Saat Anda memilih cadangan dari Drive untuk dipulihkan, Silo mengunduhnya dan mengganti catatan di ponsel Anda dengan isi cadangan itu.</li>
+      <li>Hanya jika Anda menyalakannya, Silo memindahkan foto struk ke folder "Receipts" saat tanggal transaksinya sudah lewat 3, 6, atau 12 bulan (sesuai pilihan Anda). Pratinjau kecil tetap ada di ponsel. Saat Anda membuka struk itu, Silo mengunduh foto lengkapnya dari Drive Anda.</li>
+    </ul>
+
+    <h3 id="drive-storage">Tempat penyimpanannya</h3>
+    <p>File disimpan di Google Drive Anda sendiri, di bawah akun Google Anda. File itu tidak dikirim ke kami, dan Silo tidak memberi kami akses ke Drive Anda.</p>
+
+    <h3 id="drive-sharing">Batasan penggunaan data Google Anda</h3>
+    <ul>
+      <li>Silo tidak mengirim data Google Anda ke kami. Data itu hanya keluar dari ponsel dan Drive Anda jika Anda sendiri yang mengirimnya, misalnya ke layanan AI eksternal yang Anda pasang, atau dalam tangkapan layar yang Anda lampirkan ke laporan bug.</li>
+      <li>Data Google Anda, termasuk alamat email, tidak pernah dijual, tidak pernah dipakai untuk iklan, dan tidak pernah dipakai untuk melatih model AI atau machine learning.</li>
+    </ul>
+
+    <h3 id="drive-revoke">Cara memutuskan sambungan</h3>
+    <ul>
+      <li>Di Silo, buka <strong>Settings, Data &amp; System</strong> lalu putuskan sambungan Google Drive. Silo mencabut aksesnya dan melupakan akun tersebut. <strong>Erase All Data</strong> juga memutuskan sambungan Google Drive.</li>
+      <li>Anda juga dapat mencabut akses Silo di Akun Google Anda: <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+      <li>File yang sudah ada di Drive tetap di sana setelah Anda memutuskan sambungan, menghapus data, atau mencopot Silo. Untuk foto struk yang sudah dipindah ke Drive, Silo hanya menampilkan pratinjaunya sampai Anda menghubungkan akun yang sama lagi. Anda dapat menghapus file itu di Google Drive kapan saja.</li>
+    </ul>
+
+    <h3 id="limited-use">Penggunaan Terbatas (Limited Use)</h3>
+    <p class="statement">Penggunaan dan pengalihan informasi yang diterima Silo dari Google API ke aplikasi lain akan mematuhi <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, termasuk <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">persyaratan Limited Use</a>.</p>
+  </section>
+
+  <section class="card" id="external-ai">
+    <h2>6. Layanan AI eksternal</h2>
+    <p>Fitur ini opsional dan mati secara bawaan. Anda dapat memasang layanan AI eksternal, misalnya OpenAI atau penyedia lain yang kompatibel dengan OpenAI pilihan Anda, dengan kunci API Anda sendiri.</p>
+    <ul>
+      <li><strong>Apa yang dikirim.</strong> Saat Anda bertanya kepada asisten, Silo mengirim pertanyaan Anda, pesan sebelumnya dalam percakapan, dan fakta keuangan yang diperlukan untuk menjawab, misalnya total, jumlah per kategori, dan nama toko. Saat Silo memakai layanan ini untuk membaca struk, Silo mengirim teks struk, dan dalam mode AI vision juga foto struknya.</li>
+      <li><strong>Kapan dipakai.</strong> Saat Anda memilihnya. Selain itu, jika model di perangkat belum siap dan layanan eksternal sudah dipasang, Silo memakai layanan eksternal untuk tugas-tugas tersebut.</li>
+      <li><strong>Siapa yang menerima.</strong> Penyedia yang Anda pilih, yang mungkin berada di luar Indonesia. Data tidak melewati kami. Ketentuan dan kebijakan privasi penyedia itu yang berlaku, misalnya <a href="https://openai.com/policies/privacy-policy">Kebijakan Privasi OpenAI</a>.</li>
+      <li><strong>Kunci API Anda.</strong> Silo menyimpannya di penyimpanan aman Android di ponsel Anda dan hanya mengirimnya ke penyedia tersebut.</li>
+      <li><strong>Cara berhenti.</strong> Di <strong>Settings, AI &amp; Receipt Scanning</strong>, kembalikan AI ke mode di perangkat dan hapus kunci API. Data yang sudah terkirim disimpan sesuai aturan penyedia itu.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="reports">
+    <h2>7. Laporan bug dan permintaan fitur</h2>
+    <p>Anda dapat memakai <strong>Report a bug</strong> atau <strong>Request a feature</strong> di menu <strong>More</strong>. Mengirim laporan bersifat sukarela. Jika Anda tidak pernah mengirimnya, Anda tetap dapat memakai semua fitur Silo. Tidak ada yang dikirim sampai Anda menekan <strong>Send</strong>. Di atas tombol Send, formulir menampilkan apa yang akan dikirim, ke mana dikirim, dan tautan ke kebijakan ini. Jika Anda berusia di bawah 18 tahun, mintalah orang tua atau wali untuk mengirim laporan untuk Anda.</p>
+
+    <h3 id="reports-contents">Isi laporan</h3>
+    <ul>
+      <li>Judul dan deskripsi yang Anda ketik.</li>
+      <li>Versi dan nomor build Silo.</li>
+      <li>Merek dan model ponsel Anda, serta versi Android-nya.</li>
+      <li>Hanya jika Anda memilihnya: log error (angka panjang disamarkan) dan tangkapan layar yang Anda pilih. Aplikasi akan mengingatkan bahwa tangkapan layar bisa memperlihatkan saldo atau nama.</li>
+      <li>Catatan versi formulir yang Anda setujui.</li>
+    </ul>
+    <p>Laporan tidak pernah otomatis menyertakan transaksi atau nominal Anda. Mohon jangan mengetik data pribadi yang tidak ingin kami lihat ke dalam laporan.</p>
+
+    <h3 id="reports-path">Ke mana laporan dikirim</h3>
+    <p>Laporan dikirim melalui Cloudflare ke server kami di cuang.dev. Server kami menyimpan catatan laporan dan meneruskannya ke server Discord pribadi kami. Discord adalah layanan pihak ketiga di Amerika Serikat, dan Discord menyimpan laporan tersebut. <a href="https://discord.com/privacy">Kebijakan privasi Discord</a> berlaku.</p>
+    <p>Untuk mencegah penyalahgunaan, server kami mengubah alamat IP Anda menjadi hash: kode acak yang dibuat dari alamat IP Anda dan tidak dapat dikembalikan menjadi alamat IP. Proses ini memakai nilai rahasia acak. Hash disimpan bersama laporan dan hanya dipakai untuk membatasi jumlah laporan yang bisa dikirim. Kami tidak menyimpan alamat IP Anda itu sendiri.</p>
+
+    <h3 id="reports-use">Cara kami menggunakannya</h3>
+    <p>Kami memakai laporan untuk memperbaiki bug dan menimbang permintaan fitur. Jika kami memutuskan untuk memperbaiki suatu masalah, judul, deskripsi, dan log error laporan itu diproses oleh model AI Gemini milik Google melalui Google Antigravity, sebuah alat tempat agen AI membantu menulis kode. Google berada di luar Indonesia. Kami tidak memakai laporan untuk iklan dan tidak menjualnya.</p>
+
+    <h3 id="reports-keep">Berapa lama kami menyimpannya</h3>
+    <p>Setiap laporan dihapus 12 bulan setelah aktivitas terakhirnya, apa pun statusnya. Ini termasuk pesan Discord dan tangkapan layarnya, catatan di server kami, hash IP, serta log pemrosesan di server kami.</p>
+    <p>Anda dapat meminta kami menghapus laporan Anda lebih cepat. Kirim email ke <a href="mailto:william@cuang.dev">william@cuang.dev</a> dan sebutkan nomor laporan Anda. Sesuai ketentuan hukum Indonesia, kami menanggapi paling lambat 3 x 24 jam (72 jam), dan kami memberi tahu Anda setelah laporan dihapus.</p>
+    <p>Jika sebuah laporan menghasilkan perubahan kode Silo, deskripsi singkat perubahan itu menjadi bagian dari riwayat kode sumber Silo, yang kami simpan. Deskripsi itu mungkin mengulang judul laporan.</p>
+  </section>
+
+  <section class="card" id="permissions">
+    <h2>8. Izin ponsel</h2>
+    <p>Silo meminta izin berikut kepada Android:</p>
+    <ul>
+      <li><strong>Internet:</strong> untuk keperluan di <a href="#online">bagian 4</a>.</li>
+      <li><strong>Kamera:</strong> untuk memindai struk, termasuk dengan pemindai dokumen Google.</li>
+      <li><strong>Foto:</strong> hanya foto yang Anda pilih atau bagikan ke Silo.</li>
+      <li><strong>Notifikasi:</strong> untuk pengingat harian opsional. Pengingat dibuat di ponsel Anda.</li>
+      <li><strong>Berjalan setelah ponsel dinyalakan ulang:</strong> agar pengingat tetap terjadwal.</li>
+      <li><strong>Layanan latar depan (foreground service):</strong> agar Silo tetap bisa membaca struk saat berjalan di latar belakang.</li>
+      <li><strong>Memasang pembaruan</strong> (<code>REQUEST_INSTALL_PACKAGES</code>): hanya untuk memasang pembaruan Silo sendiri yang sudah diverifikasi.</li>
+      <li><strong>Biometrik:</strong> melalui kunci ponsel Anda sendiri, untuk kunci aplikasi opsional. Silo hanya menerima "ya" atau "tidak".</li>
+    </ul>
+    <p>Saat Anda menyimpan ekspor atau cadangan, atau memilih cadangan untuk dipulihkan, Android meminta Anda memilih folder atau file, dan Silo hanya mendapat akses ke yang Anda pilih.</p>
+    <p>File aplikasi Silo juga mencantumkan beberapa izin standar yang ikut terbawa dari komponen penyusunnya: getar, tampil di atas aplikasi lain, dan akses penyimpanan di versi Android lama. Silo tidak meminta izin ini kepada Anda dan tidak memakainya. File aplikasi Silo juga berisi dua pustaka Google yang tidak dipakai Silo: Firebase Messaging dan Install Referrer.</p>
+  </section>
+
+  <section class="card" id="not-do">
+    <h2>9. Hal yang tidak kami lakukan</h2>
+    <ul>
+      <li>Kami tidak menjual data pribadi.</li>
+      <li>Kami tidak menampilkan iklan, dan Silo tidak memakai ID iklan.</li>
+      <li>Kami tidak menjalankan analitik atau pelacakan sendiri, dan kami tidak membuat profil pengguna.</li>
+      <li>Kami tidak meminta Anda membuat akun.</li>
+      <li>Kami tidak memakai data Anda untuk menilai kelayakan kredit atau untuk pinjaman.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="legal-basis">
+    <h2>10. Dasar pemrosesan data</h2>
+    <p>Undang-undang pelindungan data, termasuk Undang-Undang Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi (UU PDP) dan GDPR di Uni Eropa dan Inggris, mewajibkan dasar hukum untuk setiap pemrosesan data pribadi. Berikut dasar hukum kami.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Pemrosesan</th><th scope="col">Dasar hukum</th></tr></thead>
+        <tbody>
+          <tr><td>Mengambil kurs, mengunduh model AI, mengunduh pembaruan yang Anda minta</td><td>Diperlukan untuk menyediakan fitur aplikasi yang Anda pilih</td></tr>
+          <tr><td>Pemeriksaan pembaruan harian</td><td>Kepentingan sah kami agar Silo tetap berfungsi dan aman. Anda dapat mematikannya.</td></tr>
+          <tr><td>Memakai komponen Google untuk membaca struk, memindai, dan login</td><td>Kepentingan sah kami atas fitur yang andal. Google menangani data diagnostiknya sesuai kebijakannya sendiri.</td></tr>
+          <tr><td>Menyajikan cuang.dev melalui Cloudflare</td><td>Kepentingan sah kami untuk menyajikan dan melindungi situs</td></tr>
+          <tr><td>Pencadangan, pemulihan, dan arsip foto di Google Drive</td><td>Persetujuan Anda, yang diberikan saat Anda menghubungkan Drive. Anda dapat menariknya kapan saja.</td></tr>
+          <tr><td>Layanan AI eksternal</td><td>Persetujuan Anda, yang diberikan saat Anda memasangnya. Anda dapat menariknya kapan saja.</td></tr>
+          <tr><td>Laporan bug dan permintaan fitur, termasuk perbaikan dengan bantuan AI</td><td>Persetujuan Anda, yang diberikan saat Anda menekan Send</td></tr>
+          <tr><td>Hash alamat IP untuk membatasi laporan</td><td>Kepentingan sah kami untuk melindungi layanan laporan dari penyalahgunaan</td></tr>
+          <tr><td>Menjawab email dan permintaan Anda</td><td>Diperlukan untuk menangani permintaan Anda dan memenuhi kewajiban hukum kami</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Menarik persetujuan menghentikan pemrosesan berikutnya. Penarikan itu tidak membuat pemrosesan sebelumnya menjadi melanggar hukum.</p>
+  </section>
+
+  <section class="card" id="third-parties">
+    <h2>11. Siapa yang menerima data</h2>
+    <p>Layanan berikut hanya menerima data dalam keadaan yang dijelaskan di atas. Masing-masing punya kebijakan privasi sendiri.</p>
+    <ul>
+      <li><strong>Cloudflare</strong>: menyajikan cuang.dev, termasuk pemeriksaan pembaruan, unduhan, dan laporan. <a href="https://www.cloudflare.com/privacypolicy/">Kebijakan privasi</a></li>
+      <li><strong>Google</strong>: ML Kit dan layanan Google Play (data diagnostik), Login dengan Google dan Google Drive Anda (jika Anda menghubungkannya), serta model Gemini melalui Google Antigravity (isi laporan saat kami memperbaiki masalah). <a href="https://policies.google.com/privacy?hl=id">Kebijakan privasi</a></li>
+      <li><strong>Discord</strong> (Amerika Serikat): menyimpan laporan bug dan permintaan fitur. <a href="https://discord.com/privacy">Kebijakan privasi</a></li>
+      <li><strong>Hugging Face</strong>: menyajikan unduhan model AI. <a href="https://huggingface.co/privacy">Kebijakan privasi</a></li>
+      <li><strong>jsDelivr dan currency-api</strong> (<code>currency-api.pages.dev</code>): menyajikan kurs mata uang. <a href="https://www.jsdelivr.com/terms/privacy-policy">Kebijakan privasi jsDelivr</a></li>
+      <li><strong>Penyedia AI eksternal pilihan Anda</strong>, jika ada, misalnya OpenAI. <a href="https://openai.com/policies/privacy-policy">Kebijakan privasi OpenAI</a></li>
+    </ul>
+    <p>Kami juga dapat mengungkapkan data jika diwajibkan oleh hukum. Kami hanya dapat mengungkapkan data yang kami pegang, yaitu laporan bug dan email.</p>
+  </section>
+
+  <section class="card" id="transfers">
+    <h2>12. Data di luar Indonesia</h2>
+    <p>Layanan di <a href="#third-parties">bagian 11</a> dapat menyimpan atau memproses data di luar Indonesia.</p>
+    <ul>
+      <li><strong>Laporan bug.</strong> Discord menyimpan laporan di Amerika Serikat. Discord menyatakan bahwa mereka memakai klausul kontrak standar dan EU-US Data Privacy Framework. Saat kami memperbaiki suatu masalah, Google memproses judul, deskripsi, dan log error laporan di luar Indonesia. Jika perlindungan tersebut tidak berlaku, dasar pengiriman datanya adalah persetujuan Anda di formulir laporan.</li>
+      <li><strong>Layanan yang Anda pakai sendiri.</strong> Untuk Google Drive, layanan AI eksternal, dan komponen Google, data dikirim dari ponsel Anda langsung ke layanan tersebut sesuai ketentuannya sendiri.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="retention">
+    <h2>13. Berapa lama data disimpan</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Data</th><th scope="col">Masa simpan</th></tr></thead>
+        <tbody>
+          <tr><td>Catatan, foto, dan pengaturan Anda di ponsel</td><td>Sampai Anda menghapusnya, memakai Erase All Data, atau mencopot Silo</td></tr>
+          <tr><td>Percakapan dengan asisten AI</td><td>Hanya di memori, sampai Silo ditutup</td></tr>
+          <tr><td>Log aktivitas</td><td>Paling lama 90 hari, paling banyak 2.000 entri</td></tr>
+          <tr><td>Log error</td><td>50 entri terakhir</td></tr>
+          <tr><td>Cadangan otomatis di ponsel</td><td>Tujuh cadangan terakhir</td></tr>
+          <tr><td>Cache Silo</td><td>Sampai Silo atau Android membersihkannya, atau Anda memakai Erase All Data atau mencopot Silo</td></tr>
+          <tr><td>Cadangan di Google Drive Anda</td><td>Silo menyimpan 30 cadangan terbaru dan menghapus cadangan lama yang dibuatnya. Cadangan tetap ada di Drive sampai Anda menghapusnya.</td></tr>
+          <tr><td>Foto struk yang dipindah ke Google Drive Anda</td><td>Di Drive Anda sampai Anda menghapusnya</td></tr>
+          <tr><td>Laporan bug dan permintaan fitur, beserta pesan Discord, tangkapan layar, catatan server, hash IP, dan log pemrosesannya</td><td>Dihapus 12 bulan setelah aktivitas terakhir laporan, atau lebih cepat jika Anda memintanya</td></tr>
+          <tr><td>Deskripsi singkat perubahan kode yang berasal dari laporan</td><td>Disimpan sebagai bagian dari riwayat kode sumber Silo</td></tr>
+          <tr><td>Email yang Anda kirim kepada kami</td><td>Dihapus paling lambat 12 bulan setelah permintaan Anda selesai ditangani</td></tr>
+          <tr><td>Log akses dan log error di server kami</td><td>Tidak disimpan. Cloudflare menangani datanya sesuai kebijakannya sendiri.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="security">
+    <h2>14. Keamanan</h2>
+    <ul>
+      <li>Data Anda disimpan di penyimpanan aplikasi pribadi Silo, yang tidak dapat dibaca aplikasi lain.</li>
+      <li>Anda dapat menyalakan kunci aplikasi, yang memakai kunci layar atau biometrik ponsel Anda sendiri.</li>
+      <li>Kunci API disimpan di penyimpanan aman Android.</li>
+      <li>Memulihkan cadangan tidak pernah mengimpor pengaturan server AI atau pengaturan kunci aplikasi dari ponsel lain.</li>
+      <li>Silo mencocokkan setiap pembaruan dengan checksum, nama paket, dan versi yang dipublikasikan. Android hanya memasangnya jika ditandatangani dengan kunci yang sama.</li>
+      <li>Kami tidak memegang catatan keuangan Anda, jadi catatan itu tidak dapat bocor dari pihak kami.</li>
+    </ul>
+    <p>Tidak ada sistem yang aman sepenuhnya. Kunci ponsel Anda, perbarui sistemnya, dan pasang Silo hanya dari <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+  </section>
+
+  <section class="card" id="delete">
+    <h2>15. Menghapus data Anda</h2>
+    <ul>
+      <li><strong>Erase All Data.</strong> Di <strong>Settings, Data &amp; System</strong>, <strong>Erase All Data</strong> menghapus semua catatan, foto, cadangan otomatis, pengaturan, dan kunci API yang tersimpan. Fitur ini juga membersihkan seluruh cache Silo, termasuk gambar pratinjau, foto yang diambil dari Drive, foto yang dibagikan, unduhan pembaruan, dan file ekspor, serta memutuskan sambungan Google Drive. File di Drive Anda tetap ada. Model AI yang sudah diunduh tidak dihapus, karena tidak berisi data Anda. Untuk menyimpan salinan lebih dulu, pakai <strong>Back Up All Data</strong> atau <strong>Share a backup first</strong>.</li>
+      <li><strong>Mencopot aplikasi.</strong> Mencopot Silo menghapus datanya di ponsel.</li>
+      <li><strong>Salinan milik Anda.</strong> Cadangan yang Anda bagikan atau ekspor, dan file di Google Drive Anda, berada dalam kendali Anda. Hapuslah di tempat Anda menyimpannya.</li>
+      <li><strong>Laporan bug.</strong> Kirim email ke <a href="mailto:william@cuang.dev">william@cuang.dev</a> dengan nomor laporan Anda. Kami akan memberi tahu Anda setelah laporan dihapus.</li>
+    </ul>
+    <p>Kami tidak dapat memulihkan data yang Anda hapus di ponsel, karena kami tidak pernah punya salinannya.</p>
+  </section>
+
+  <section class="card" id="rights">
+    <h2>16. Hak Anda</h2>
+    <p>Tergantung tempat tinggal Anda, undang-undang seperti UU PDP dan GDPR memberi Anda hak berikut:</p>
+    <ul>
+      <li><strong>Informasi:</strong> mengetahui siapa yang memproses data Anda, untuk apa, dan atas dasar hukum apa. Kebijakan ini adalah jawaban kami.</li>
+      <li><strong>Akses:</strong> mendapatkan salinan data Anda.</li>
+      <li><strong>Perbaikan:</strong> memperbaiki data yang salah atau tidak lengkap.</li>
+      <li><strong>Penghapusan:</strong> meminta data Anda dihapus.</li>
+      <li><strong>Menarik persetujuan:</strong> menghentikan pemrosesan yang didasarkan pada persetujuan Anda.</li>
+      <li><strong>Menunda, membatasi, atau keberatan:</strong> meminta kami menunda atau membatasi pemrosesan, atau menyatakan keberatan atas pemrosesan berdasarkan kepentingan sah kami.</li>
+      <li><strong>Portabilitas:</strong> mendapatkan data Anda dalam format yang dapat dipakai di tempat lain.</li>
+      <li><strong>Mengadu:</strong> menyampaikan pengaduan kepada otoritas pelindungan data.</li>
+    </ul>
+
+    <h3 id="rights-how">Cara menggunakannya</h3>
+    <p>Sebagian besar data Anda ada di ponsel, jadi Anda dapat menjalankan hak-hak ini sendiri di Silo: melihat dan mengubah catatan, memakai <strong>Back Up All Data</strong>, memutuskan sambungan Google Drive, menghapus kunci API, atau memakai <strong>Erase All Data</strong>.</p>
+    <p>Untuk data yang kami pegang (laporan bug dan email), kirim email ke <a href="mailto:william@cuang.dev">william@cuang.dev</a>. Sebutkan nomor laporan Anda agar kami dapat menemukannya. Kami mungkin meminta keterangan untuk memastikan permintaan itu memang dari Anda. Sesuai UU PDP, kami menindaklanjuti dalam 3 x 24 jam permintaan untuk mengakses atau memperbaiki data, menunda atau membatasi pemrosesan, atau menarik persetujuan. Kami memberi tahu Anda setelah data dihapus.</p>
+    <p>Kami tidak dapat menindaklanjuti data yang tidak kami pegang, termasuk catatan di ponsel Anda dan file di Google Drive Anda.</p>
+
+    <h3 id="rights-complain">Tempat mengadu</h3>
+    <p>Mohon hubungi kami lebih dulu agar kami dapat mencoba menyelesaikannya. Di Indonesia, Anda dapat mengadu kepada otoritas yang mengawasi pelindungan data pribadi menurut UU PDP. Selama lembaga yang diatur dalam UU PDP belum terbentuk, peran ini dijalankan oleh Kementerian Komunikasi dan Digital (Komdigi). Di Uni Eropa atau Inggris, Anda dapat mengadu kepada otoritas pelindungan data setempat.</p>
+  </section>
+
+  <section class="card" id="children">
+    <h2>17. Anak-anak</h2>
+    <p>Silo tidak ditujukan untuk anak di bawah 13 tahun. Jika Anda berusia di bawah 18 tahun, gunakan Silo dengan izin orang tua atau wali, dan minta mereka mengirimkan laporan bug untuk Anda. Silo tidak memeriksa usia. Jika Anda yakin seorang anak telah mengirim laporan berisi data pribadi, kirim email kepada kami dan kami akan menghapusnya.</p>
+  </section>
+
+  <section class="card" id="breach">
+    <h2>18. Jika terjadi kebocoran data</h2>
+    <p>Jika data pribadi yang kami pegang terungkap, kami akan memberi tahu orang yang terdampak dan lembaga yang berwenang secara tertulis paling lambat 3 x 24 jam setelah kami mengetahuinya, sesuai UU PDP. Kami akan menjelaskan data apa yang terungkap, kapan dan bagaimana kejadiannya, serta langkah yang kami ambil. Kami tidak memegang kontak sebagian besar pengguna, jadi kami juga akan memasang pemberitahuan di halaman unduhan dan di aplikasi.</p>
+  </section>
+
+  <section class="card" id="changes">
+    <h2>19. Perubahan kebijakan ini</h2>
+    <p>Kami dapat mengubah kebijakan ini. Sebelum perubahan berlaku, kami akan menampilkannya di aplikasi dan di halaman ini, serta mengubah tanggal di bagian atas. Kami tidak akan memulai penggunaan baru atas data Anda sampai Anda memilihnya di aplikasi.</p>
+  </section>
+
+  <section class="card" id="contact">
+    <h2>20. Kontak</h2>
+    <p>CDev, pengembang Silo<br>
+    Email: <a href="mailto:william@cuang.dev">william@cuang.dev</a><br>
+    Situs: <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a></p>
+    <p>Baca juga <a href="../../terms/id/">Ketentuan Layanan</a> kami.</p>
+  </section>
+
+  <footer>Silo · by CDev · <a href="../../terms/id/">Ketentuan Layanan</a> · <a href="../" hreflang="en">English</a> · <a href="../../">Halaman unduhan</a></footer>
+</main>
+</body>
+</html>

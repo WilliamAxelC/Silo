@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>Silo | Privacy Policy</title>
+  <meta name="description" content="Privacy Policy for Silo, an offline money tracker for Android by CDev. What stays on your phone, when Silo goes online, how Google Drive data is used, and your rights.">
+  <link rel="alternate" hreflang="en" href="https://cuang.dev/projects/silo/privacy/">
+  <link rel="alternate" hreflang="id" href="https://cuang.dev/projects/silo/privacy/id/">
+  <link rel="icon" href="../icon-192.png?v=silo2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16; --card: #111827; --border: #1f2937; --text: #f9fafb; --muted: #9ca3af;
+      --primary: #0ea5e9; --primary-ink: #ffffff; --green: #10b981; --amber: #f59e0b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f8fafc; --card: #ffffff; --border: #e5e7eb; --text: #111827; --muted: #4b5563; --primary: #0369a1; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+    header img { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+    .tagline { color: var(--muted); font-size: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+    .download { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--primary); color: var(--primary-ink);
+      font-weight: 700; font-size: 16px; padding: 14px 22px; border-radius: 999px; text-decoration: none; }
+    .btn:hover { filter: brightness(1.08); }
+    .meta { color: var(--muted); font-size: 13px; }
+    .meta code, .sha { font-family: 'Fira Code', monospace; font-size: 12px; word-break: break-all; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    li strong { font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .feature { border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .feature h3 { font-size: 15px; margin-bottom: 4px; }
+    .feature p { color: var(--muted); font-size: 14px; }
+    .note { border-left: 3px solid var(--amber); padding-left: 12px; color: var(--muted); font-size: 14px; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 32px; }
+    a { color: var(--primary); }
+
+    /* Legal page additions */
+    header a.icon { flex-shrink: 0; line-height: 0; }
+    .back { font-size: 14px; font-weight: 600; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+    .lang { margin: -12px 0 24px; }
+    h3 { font-size: 15px; margin: 18px 0 6px; }
+    .card p { margin-bottom: 10px; }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .card ul, .card ol { margin-bottom: 10px; }
+    code { font-family: 'Fira Code', monospace; font-size: 13px; overflow-wrap: anywhere; }
+    .toc ol { columns: 2 220px; column-gap: 24px; }
+    .toc li { margin-bottom: 4px; break-inside: avoid; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; }
+    .statement { border-left: 3px solid var(--primary); padding-left: 12px; font-weight: 500; }
+    section { scroll-margin-top: 16px; }
+    @media (max-width: 480px) { h1 { font-size: 28px; } header img { width: 56px; height: 56px; border-radius: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="icon" href="../"><img src="../icon-192.png?v=silo2" alt="Silo app icon"></a>
+    <div>
+      <a class="back" href="../">Silo</a>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Last updated: 23 November 2026</p>
+    </div>
+  </header>
+  <p class="note lang">An Indonesian version is available. If they differ, the Indonesian version applies. <a href="id/" hreflang="id" lang="id">Baca dalam bahasa Indonesia</a></p>
+
+  <section class="card" id="summary">
+    <h2>In short</h2>
+    <ul>
+      <li>Silo keeps your money records on your phone. They are not sent to us, and we have no copy.</li>
+      <li>Silo has no account, no ads, no advertising ID, and no analytics or tracking of our own.</li>
+      <li>Some Google components inside Silo may send Google technical diagnostic data. They do not send your receipts or records. See <a href="#online-google">section 4d</a>.</li>
+      <li>Silo goes online only for the reasons in <a href="#online">section 4</a>. Features that send anything about your money are optional and off until you turn them on.</li>
+      <li>The only personal data we receive is what is in a bug report or feature request you choose to send, and any email you send us.</li>
+    </ul>
+  </section>
+
+  <nav class="card toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#who">Who we are</a></li>
+      <li><a href="#on-phone">What stays on your phone</a></li>
+      <li><a href="#on-device">What runs on your phone</a></li>
+      <li><a href="#online">When Silo goes online</a></li>
+      <li><a href="#google-drive">Google Drive and your Google data</a></li>
+      <li><a href="#external-ai">External AI services</a></li>
+      <li><a href="#reports">Bug reports and feature requests</a></li>
+      <li><a href="#permissions">Phone permissions</a></li>
+      <li><a href="#not-do">What we do not do</a></li>
+      <li><a href="#legal-basis">Why we may use data</a></li>
+      <li><a href="#third-parties">Who receives data</a></li>
+      <li><a href="#transfers">Data outside Indonesia</a></li>
+      <li><a href="#retention">How long data is kept</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#delete">Deleting your data</a></li>
+      <li><a href="#rights">Your rights</a></li>
+      <li><a href="#children">Children</a></li>
+      <li><a href="#breach">If something goes wrong</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+
+  <section class="card" id="who">
+    <h2>1. Who we are</h2>
+    <p>Silo is made by CDev ("we", "us"), an individual developer. "You" means the person using Silo.</p>
+    <p>This policy covers the Silo app for Android (package name <code>com.LCSdev.silo</code>) and its download page at <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+    <p>For the bug reports and emails we receive, we are the data controller (in Indonesian law, the <em>Pengendali Data Pribadi</em>). The data that stays on your phone is under your control. We cannot see it.</p>
+    <p>Contact for privacy questions and requests: <a href="mailto:william@cuang.dev">william@cuang.dev</a>.</p>
+  </section>
+
+  <section class="card" id="on-phone">
+    <h2>2. What stays on your phone</h2>
+    <p>Silo stores the following in its private app storage on your phone. Other apps cannot read this storage. None of it is sent to us.</p>
+    <ul>
+      <li>Transactions, accounts and wallets, balances, budgets, savings goals, categories, tags, recurring rules and templates.</li>
+      <li>Receipt photos, the text read from them, and photos you share into Silo from other apps.</li>
+      <li>Your settings.</li>
+      <li>An activity log: a history of changes you made. It keeps up to 90 days and at most 2,000 entries.</li>
+      <li>An error log: the last 50 errors. Long numbers in it are masked.</li>
+      <li>Automatic backups: one a day. The last 7 are kept on the phone.</li>
+      <li>If you use them: the email address of the Google account you connected (<a href="#google-drive">section 5</a>) and the API key for an external AI service (<a href="#external-ai">section 6</a>).</li>
+      <li>Temporary files in Silo's cache, such as thumbnails, photos fetched from Google Drive, update downloads and exports.</li>
+    </ul>
+    <p>Your chat with the AI assistant is kept only in memory. It is gone when Silo closes.</p>
+    <p>Android's cloud backup of app data is turned off for Silo, so Android does not copy Silo's data to a Google backup. We have no server copy of your data.</p>
+  </section>
+
+  <section class="card" id="on-device">
+    <h2>3. What runs on your phone</h2>
+    <ul>
+      <li><strong>Receipt reading.</strong> Silo reads receipts with Google ML Kit's on-device text recognition. To scan, it can use Google's document scanner, which runs through Google Play services. Your receipt photos and their text are processed on the phone, unless you set up an external AI service (<a href="#external-ai">section 6</a>).</li>
+      <li><strong>AI assistant.</strong> The default AI assistant is a model you download once with <strong>Download Model</strong>. It then runs on your phone, unless you set up an external AI service.</li>
+      <li><strong>App lock.</strong> The optional app lock uses your phone's own fingerprint, face or screen lock. Android checks it and tells Silo only yes or no. Silo never receives your biometric data.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="online">
+    <h2>4. When Silo goes online</h2>
+    <p>These are the only times Silo connects to the internet. Any web request reveals your IP address and basic device details (the "user agent") to the server that answers it. Apart from that, this list shows what is sent. In Silo, <strong>More, Privacy</strong> also lists when Silo goes online.</p>
+
+    <h3 id="online-rates">a. Exchange rates</h3>
+    <p>If you use more than one currency, Silo fetches exchange rates from the public currency-api service, served through jsDelivr and <code>currency-api.pages.dev</code>. It asks at most once a day, and only when a multi-currency feature needs it. Silo sends only your home currency code, for example "IDR".</p>
+
+    <h3 id="online-updates">b. Update check and app updates</h3>
+    <p>At most once a day, Silo downloads a small version file from cuang.dev to see if a new version exists. You can turn this off with <strong>Tell me about new versions</strong> in <strong>More, App info</strong>.</p>
+    <p>When you tap <strong>Update</strong>, Silo downloads the new app file (APK) from cuang.dev. Silo checks it against the published checksum, package name and version. Android installs it only if it is signed with the same key as the Silo you have. Nothing about you is sent beyond what any web request reveals.</p>
+
+    <h3 id="online-model">c. AI model download</h3>
+    <p>When you tap <strong>Download Model</strong>, Silo downloads the model files from Hugging Face. Nothing about your money is sent.</p>
+
+    <h3 id="online-google">d. Google components</h3>
+    <p>Silo uses Google ML Kit for receipt reading and Google Play services for the document scanner and Google Sign-In. Google says these components may send Google technical diagnostic data: device model, Android version, app version, performance metrics, error codes and identifiers for each installation. Google uses this for diagnostics and usage analytics. They do not send your receipt photos or receipt text. See Google's <a href="https://developers.google.com/ml-kit/android-data-disclosure">ML Kit data disclosure</a> and <a href="https://policies.google.com/privacy">Privacy Policy</a>.</p>
+
+    <h3 id="online-site">e. cuang.dev and Cloudflare</h3>
+    <p>cuang.dev, including the update check, downloads and the report service, is served through Cloudflare. Cloudflare processes visitors' IP addresses to deliver and protect the site. <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's Privacy Policy</a> applies. Our own servers keep no access logs or error logs for Silo's pages, update checks, downloads or the report service.</p>
+
+    <h3 id="online-optional">f. Optional features</h3>
+    <ul>
+      <li>Google Drive, only if you connect it: <a href="#google-drive">section 5</a>.</li>
+      <li>External AI, only if you set it up: <a href="#external-ai">section 6</a>.</li>
+      <li>Bug reports and feature requests, only when you press <strong>Send</strong>: <a href="#reports">section 7</a>.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="google-drive">
+    <h2>5. Google Drive and your Google data</h2>
+    <p>Google Drive backup is optional. If you never connect it, Silo does not access your Google account. Before you connect, Silo shows an explanation in the app with a link to this policy.</p>
+
+    <h3 id="drive-access">What Silo accesses</h3>
+    <ul>
+      <li><strong>Permissions.</strong> A "scope" is a permission an app asks Google for. Silo asks for Google's basic sign-in scopes (<code>openid</code>, <code>email</code> and <code>profile</code>) and one Drive scope, <code>https://www.googleapis.com/auth/drive.file</code>. Google describes that scope as "see, edit, create and delete only the specific Google Drive files you use with this app". Silo can only access files it created. It cannot see anything else in your Drive.</li>
+      <li><strong>Your email address.</strong> Silo keeps the email address of the signed-in account to show which account is connected. It is stored on your phone, and so it is also inside your Silo backups. Silo discards your name and profile photo.</li>
+      <li><strong>Sign-in tokens.</strong> Google Play services handles them. Silo does not store them.</li>
+    </ul>
+
+    <h3 id="drive-use">How Silo uses it</h3>
+    <ul>
+      <li>Silo creates a folder named "Silo" in your Drive, with the folders "Backups" and "Receipts".</li>
+      <li>When you connect, Silo uploads a first backup right away. After that it uploads one a day while <strong>Daily backup to Drive</strong> is on. A backup is Silo's database: your records, settings, activity log and error log. It does not include photos. Silo keeps the newest 30 backups and deletes older backups that it created.</li>
+      <li>When you pick a backup from Drive to restore, Silo downloads it and replaces the records on your phone with it.</li>
+      <li>Only if you turn it on, Silo moves receipt photos to the "Receipts" folder when their transaction date is older than 3, 6 or 12 months (your choice). A small preview stays on your phone. When you open the receipt, Silo downloads the full photo from your Drive.</li>
+    </ul>
+
+    <h3 id="drive-storage">Where it is stored</h3>
+    <p>The files are stored in your own Google Drive, under your Google account. They are not sent to us, and Silo gives us no access to your Drive.</p>
+
+    <h3 id="drive-sharing">How your Google data is limited</h3>
+    <ul>
+      <li>Silo does not send your Google data to us. It leaves your phone and your Drive only when you send it yourself, for example to an external AI service you set up, or in a screenshot you attach to a bug report.</li>
+      <li>Your Google data, including your email address, is never sold, never used for advertising, and never used to train AI or machine learning models.</li>
+    </ul>
+
+    <h3 id="drive-revoke">How to disconnect</h3>
+    <ul>
+      <li>In Silo, go to <strong>Settings, Data &amp; System</strong> and disconnect Google Drive. Silo revokes its access and forgets the account. <strong>Erase All Data</strong> also disconnects Google Drive.</li>
+      <li>You can also remove Silo's access in your Google Account at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+      <li>Files already in your Drive stay there after you disconnect, erase or uninstall. For receipt photos moved to Drive, Silo then shows only the preview until you connect the same account again. You can delete the files in Google Drive at any time.</li>
+    </ul>
+
+    <h3 id="limited-use">Limited Use</h3>
+    <p class="statement">Silo's use and transfer to any other app of information received from Google APIs will adhere to <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Limited Use requirements</a>.</p>
+  </section>
+
+  <section class="card" id="external-ai">
+    <h2>6. External AI services</h2>
+    <p>This is optional and off by default. You can set up an external AI service, such as OpenAI or another OpenAI-compatible provider you choose, with your own API key.</p>
+    <ul>
+      <li><strong>What is sent.</strong> When you ask the assistant something, Silo sends your question, earlier messages in the chat, and the finance facts needed to answer it, for example totals, amounts per category and merchant names. When Silo uses the service to read a receipt, it sends the receipt's text, and in AI vision mode the receipt photo.</li>
+      <li><strong>When it is used.</strong> When you choose it. Also, if the on-device model is not ready and an external service is set up, Silo uses the external service for these tasks.</li>
+      <li><strong>Who receives it.</strong> The provider you chose, which may be outside Indonesia. It does not pass through us. That provider's own terms and privacy policy apply, for example <a href="https://openai.com/policies/privacy-policy">OpenAI's Privacy Policy</a>.</li>
+      <li><strong>Your API key.</strong> Silo stores it in Android's secure storage on your phone and sends it only to that provider.</li>
+      <li><strong>How to stop.</strong> In <strong>Settings, AI &amp; Receipt Scanning</strong>, switch AI back to on-device and clear the API key. Data already sent is kept under the provider's own rules.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="reports">
+    <h2>7. Bug reports and feature requests</h2>
+    <p>You can use <strong>Report a bug</strong> or <strong>Request a feature</strong> in <strong>More</strong>. Sending a report is voluntary. If you never send one, you can still use all of Silo. Nothing is sent until you press <strong>Send</strong>. Above the Send button, the form shows what will be sent, where it goes, and a link to this policy. If you are under 18, ask a parent or guardian to send reports for you.</p>
+
+    <h3 id="reports-contents">What a report contains</h3>
+    <ul>
+      <li>The title and description you type.</li>
+      <li>Silo's version and build number.</li>
+      <li>Your phone's brand and model, and its Android version.</li>
+      <li>Only if you choose: the error log (long numbers masked), and a screenshot you pick. The app warns you that a screenshot may show balances or names.</li>
+      <li>A record of which version of the form you agreed to.</li>
+    </ul>
+    <p>A report never includes your transactions or amounts automatically. Please do not type personal details into a report that you do not want us to see.</p>
+
+    <h3 id="reports-path">Where it goes</h3>
+    <p>The report goes through Cloudflare to our server at cuang.dev. Our server keeps a record of it and forwards it to our private Discord server. Discord is a third-party service in the USA, and it stores the report. <a href="https://discord.com/privacy">Discord's Privacy Policy</a> applies.</p>
+    <p>To limit abuse, our server turns your IP address into a hash: a scrambled code made from your IP address that cannot be turned back into it. It uses a random secret value to do this. The hash is kept with the report and used only to limit how many reports can be sent. We do not store your IP address itself.</p>
+
+    <h3 id="reports-use">How we use it</h3>
+    <p>We use reports to fix bugs and consider feature requests. When we choose to have an issue fixed, the report's title, description and error log are processed by Google's Gemini AI models through Google Antigravity, a tool where AI agents help write code. Google is outside Indonesia. We do not use reports for advertising and we do not sell them.</p>
+
+    <h3 id="reports-keep">How long we keep it</h3>
+    <p>Each report is deleted 12 months after its last activity, whatever its status. This includes its Discord messages and screenshot, our server record, the hash and our server's processing logs.</p>
+    <p>You can ask us to delete your report sooner. Email <a href="mailto:william@cuang.dev">william@cuang.dev</a> and quote your report number. Where Indonesian law requires, we reply within 3 x 24 hours (72 hours), and we tell you when it is deleted.</p>
+    <p>If a report leads to a change in Silo's code, a short description of the change becomes part of Silo's source code history, which we keep. That description may repeat the report's title.</p>
+  </section>
+
+  <section class="card" id="permissions">
+    <h2>8. Phone permissions</h2>
+    <p>Silo asks Android for these permissions:</p>
+    <ul>
+      <li><strong>Internet:</strong> for the uses in <a href="#online">section 4</a>.</li>
+      <li><strong>Camera:</strong> to scan receipts, including with Google's document scanner.</li>
+      <li><strong>Photos:</strong> only the photos you pick or share into Silo.</li>
+      <li><strong>Notifications:</strong> for the optional daily reminder. The reminder is created on your phone.</li>
+      <li><strong>Run after restart:</strong> to keep the reminder scheduled after your phone restarts.</li>
+      <li><strong>Foreground service:</strong> to keep reading receipts while Silo is in the background.</li>
+      <li><strong>Install updates</strong> (<code>REQUEST_INSTALL_PACKAGES</code>): only to install Silo's own verified updates.</li>
+      <li><strong>Biometrics:</strong> through your phone's own lock, for the optional app lock. Silo gets only a yes or no.</li>
+    </ul>
+    <p>When you save an export or backup, or pick a backup to restore, Android lets you choose the folder or file, and Silo gets access only to what you chose.</p>
+    <p>Silo's app file also lists a few standard permissions that come with the components it is built from: vibration, display over other apps, and storage access on older Android versions. Silo does not ask you for these or use them. It also contains two Google libraries that Silo does not use: Firebase Messaging and Install Referrer.</p>
+  </section>
+
+  <section class="card" id="not-do">
+    <h2>9. What we do not do</h2>
+    <ul>
+      <li>We do not sell personal data.</li>
+      <li>We do not show ads, and Silo has no advertising ID.</li>
+      <li>We have no analytics or tracking of our own, and we do not build profiles of users.</li>
+      <li>We do not ask you to create an account.</li>
+      <li>We do not use your data to decide credit-worthiness or for lending.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="legal-basis">
+    <h2>10. Why we may use data</h2>
+    <p>Data protection laws, including Indonesia's Personal Data Protection Law (Law No. 27 of 2022) and the EU and UK GDPR, require a legal reason for each use of personal data. These are ours.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Use</th><th scope="col">Legal reason</th></tr></thead>
+        <tbody>
+          <tr><td>Fetching exchange rates, downloading the AI model, downloading an update you asked for</td><td>Needed to provide the app features you chose to use</td></tr>
+          <tr><td>Daily update check</td><td>Our legitimate interest in keeping Silo working and secure. You can turn it off.</td></tr>
+          <tr><td>Using Google components for receipt reading, scanning and sign-in</td><td>Our legitimate interest in reliable features. Google handles its diagnostic data under its own policy.</td></tr>
+          <tr><td>Delivering cuang.dev through Cloudflare</td><td>Our legitimate interest in delivering and protecting the site</td></tr>
+          <tr><td>Google Drive backup, restore and photo archive</td><td>Your consent, given when you connect Drive. You can withdraw it at any time.</td></tr>
+          <tr><td>External AI service</td><td>Your consent, given when you set it up. You can withdraw it at any time.</td></tr>
+          <tr><td>Bug reports and feature requests, including AI-assisted fixing</td><td>Your consent, given when you press Send</td></tr>
+          <tr><td>Hash of your IP address for limiting reports</td><td>Our legitimate interest in protecting the report service from abuse</td></tr>
+          <tr><td>Answering your emails and requests</td><td>Needed to handle your request, and to meet our legal obligations</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Withdrawing consent stops future use. It does not make earlier use unlawful.</p>
+  </section>
+
+  <section class="card" id="third-parties">
+    <h2>11. Who receives data</h2>
+    <p>These services receive data only in the cases described above. Each has its own privacy policy.</p>
+    <ul>
+      <li><strong>Cloudflare</strong>: delivers cuang.dev, including update checks, downloads and reports. <a href="https://www.cloudflare.com/privacypolicy/">Privacy policy</a></li>
+      <li><strong>Google</strong>: ML Kit and Google Play services (diagnostic data), Google Sign-In and your Google Drive (if you connect it), and Gemini models through Google Antigravity (report content when we fix an issue). <a href="https://policies.google.com/privacy">Privacy policy</a></li>
+      <li><strong>Discord</strong> (USA): stores bug reports and feature requests. <a href="https://discord.com/privacy">Privacy policy</a></li>
+      <li><strong>Hugging Face</strong>: serves the AI model download. <a href="https://huggingface.co/privacy">Privacy policy</a></li>
+      <li><strong>jsDelivr and currency-api</strong> (<code>currency-api.pages.dev</code>): serve exchange rates. <a href="https://www.jsdelivr.com/terms/privacy-policy">jsDelivr privacy policy</a></li>
+      <li><strong>The external AI provider you choose</strong>, if any, for example OpenAI. <a href="https://openai.com/policies/privacy-policy">OpenAI privacy policy</a></li>
+    </ul>
+    <p>We may also disclose data if the law requires it. We can only disclose what we hold, which is bug reports and emails.</p>
+  </section>
+
+  <section class="card" id="transfers">
+    <h2>12. Data outside Indonesia</h2>
+    <p>The services in <a href="#third-parties">section 11</a> may store or process data outside Indonesia.</p>
+    <ul>
+      <li><strong>Bug reports.</strong> Discord stores reports in the USA. Discord states that it relies on standard contractual clauses and the EU-US Data Privacy Framework. When we fix an issue, Google processes the report's title, description and error log outside Indonesia. Where these safeguards do not apply, the basis for the transfer is your consent on the report form.</li>
+      <li><strong>Services you use yourself.</strong> With Google Drive, an external AI service and Google's components, data goes from your phone to that service under its own terms.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="retention">
+    <h2>13. How long data is kept</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Data</th><th scope="col">Kept</th></tr></thead>
+        <tbody>
+          <tr><td>Your records, photos and settings on the phone</td><td>Until you delete them, use Erase All Data, or uninstall Silo</td></tr>
+          <tr><td>Chat with the AI assistant</td><td>In memory only, until Silo closes</td></tr>
+          <tr><td>Activity log</td><td>Up to 90 days, at most 2,000 entries</td></tr>
+          <tr><td>Error log</td><td>The last 50 entries</td></tr>
+          <tr><td>Automatic backups on the phone</td><td>The last 7</td></tr>
+          <tr><td>Silo's cache</td><td>Until Silo or Android clears it, or you use Erase All Data or uninstall</td></tr>
+          <tr><td>Backups in your Google Drive</td><td>Silo keeps the newest 30 and deletes older ones it created. They stay in your Drive until you delete them.</td></tr>
+          <tr><td>Receipt photos moved to your Google Drive</td><td>In your Drive until you delete them</td></tr>
+          <tr><td>Bug reports and feature requests, with their Discord messages, screenshots, server record, IP hash and processing logs</td><td>Deleted 12 months after the report's last activity, or sooner if you ask</td></tr>
+          <tr><td>Short descriptions of code changes that came from a report</td><td>Kept as part of Silo's source code history</td></tr>
+          <tr><td>Emails you send us</td><td>Deleted within 12 months after your request is resolved</td></tr>
+          <tr><td>Access and error logs on our servers</td><td>None are kept. Cloudflare handles its data under its own policy.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="security">
+    <h2>14. Security</h2>
+    <ul>
+      <li>Your data is kept in Silo's private app storage, which other apps cannot read.</li>
+      <li>You can turn on the app lock, which uses your phone's own screen lock or biometrics.</li>
+      <li>API keys are kept in Android's secure storage.</li>
+      <li>Restoring a backup never imports another phone's AI server settings or app lock setting.</li>
+      <li>Silo checks each update against the published checksum, package name and version. Android installs it only if it is signed with the same key.</li>
+      <li>We do not hold your money records, so they cannot leak from our side.</li>
+    </ul>
+    <p>No system is perfectly secure. Keep your phone locked and up to date, and only install Silo from <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+  </section>
+
+  <section class="card" id="delete">
+    <h2>15. Deleting your data</h2>
+    <ul>
+      <li><strong>Erase All Data.</strong> In <strong>Settings, Data &amp; System</strong>, <strong>Erase All Data</strong> deletes all records, photos, automatic backups, settings and saved API keys. It clears Silo's whole cache, including thumbnails, photos fetched from Drive, shared photos, update downloads and exports. It also disconnects Google Drive. Files in your Drive stay there. The downloaded AI model is kept, because it contains none of your data. To keep a copy first, use <strong>Back Up All Data</strong> or <strong>Share a backup first</strong>.</li>
+      <li><strong>Uninstall.</strong> Uninstalling Silo deletes its data on the phone.</li>
+      <li><strong>Your own copies.</strong> Backups you shared or exported, and files in your Google Drive, are under your control. Delete them where you stored them.</li>
+      <li><strong>Bug reports.</strong> Email <a href="mailto:william@cuang.dev">william@cuang.dev</a> with your report number. We will tell you when it is deleted.</li>
+    </ul>
+    <p>We cannot recover data you deleted on your phone, because we never had a copy.</p>
+  </section>
+
+  <section class="card" id="rights">
+    <h2>16. Your rights</h2>
+    <p>Depending on where you live, laws such as Indonesia's Personal Data Protection Law and the GDPR give you these rights:</p>
+    <ul>
+      <li><strong>Information:</strong> to know who uses your data, why, and on what legal basis. This policy is our answer.</li>
+      <li><strong>Access:</strong> to get a copy of your data.</li>
+      <li><strong>Correction:</strong> to fix data that is wrong or incomplete.</li>
+      <li><strong>Deletion:</strong> to have your data deleted.</li>
+      <li><strong>Withdraw consent:</strong> to stop a use that is based on your consent.</li>
+      <li><strong>Restrict or object:</strong> to ask us to pause or limit a use, or to object to a use based on our legitimate interests.</li>
+      <li><strong>Portability:</strong> to get your data in a format you can take elsewhere.</li>
+      <li><strong>Complain:</strong> to complain to a data protection authority.</li>
+    </ul>
+
+    <h3 id="rights-how">How to use them</h3>
+    <p>Most of your data is on your phone, so you can use these rights yourself in Silo: view and edit your records, use <strong>Back Up All Data</strong>, disconnect Google Drive, clear an API key, or use <strong>Erase All Data</strong>.</p>
+    <p>For data we hold (bug reports and emails), email <a href="mailto:william@cuang.dev">william@cuang.dev</a>. Quote your report number so we can find it. We may ask for details to check that the request is yours. Under Indonesian law, we act within 3 x 24 hours on requests to access or correct your data, to restrict its use, or to withdraw consent. We tell you when we have deleted data.</p>
+    <p>We cannot act on data we do not have. That includes your records on your phone and your files in Google Drive.</p>
+
+    <h3 id="rights-complain">Where to complain</h3>
+    <p>Please contact us first so we can try to fix it. In Indonesia, you can complain to the authority that supervises personal data protection under Law No. 27 of 2022. Until the agency provided for in that Law is formed, the Ministry of Communication and Digital Affairs (Komdigi) carries out this role. In the EU or UK, you can complain to your local data protection authority.</p>
+  </section>
+
+  <section class="card" id="children">
+    <h2>17. Children</h2>
+    <p>Silo is not directed at children under 13. If you are under 18, please use Silo with a parent's or guardian's permission, and ask them to send any bug reports for you. Silo does not check ages. If you believe a child has sent us a report with personal data, email us and we will delete it.</p>
+  </section>
+
+  <section class="card" id="breach">
+    <h2>18. If something goes wrong</h2>
+    <p>If personal data we hold is exposed, we will tell the people affected and the authority in writing within 3 x 24 hours after we become aware of it, as Indonesian law requires. We will say what data was exposed, when and how it happened, and what we are doing about it. We do not hold contact details for most users, so we will also post a notice on the download page and in the app.</p>
+  </section>
+
+  <section class="card" id="changes">
+    <h2>19. Changes to this policy</h2>
+    <p>We may change this policy. Before a change takes effect, we will show it in the app and on this page, and change the date at the top. We will not start a new use of your data until you choose it in the app.</p>
+  </section>
+
+  <section class="card" id="contact">
+    <h2>20. Contact</h2>
+    <p>CDev, developer of Silo<br>
+    Email: <a href="mailto:william@cuang.dev">william@cuang.dev</a><br>
+    Website: <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a></p>
+    <p>See also our <a href="../terms/">Terms of Service</a>.</p>
+  </section>
+
+  <footer>Silo · by CDev · <a href="../terms/">Terms of Service</a> · <a href="id/" hreflang="id">Bahasa Indonesia</a> · <a href="../">Download page</a></footer>
+</main>
+</body>
+</html>

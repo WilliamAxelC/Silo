@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>Silo | Ketentuan Layanan</title>
+  <meta name="description" content="Ketentuan Layanan Silo, aplikasi pencatat keuangan offline gratis untuk Android dari CDev.">
+  <link rel="alternate" hreflang="id" href="https://cuang.dev/projects/silo/terms/id/">
+  <link rel="alternate" hreflang="en" href="https://cuang.dev/projects/silo/terms/">
+  <link rel="icon" href="../../icon-192.png?v=silo2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16; --card: #111827; --border: #1f2937; --text: #f9fafb; --muted: #9ca3af;
+      --primary: #0ea5e9; --primary-ink: #ffffff; --green: #10b981; --amber: #f59e0b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f8fafc; --card: #ffffff; --border: #e5e7eb; --text: #111827; --muted: #4b5563; --primary: #0369a1; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+    header img { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+    .tagline { color: var(--muted); font-size: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+    .download { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--primary); color: var(--primary-ink);
+      font-weight: 700; font-size: 16px; padding: 14px 22px; border-radius: 999px; text-decoration: none; }
+    .btn:hover { filter: brightness(1.08); }
+    .meta { color: var(--muted); font-size: 13px; }
+    .meta code, .sha { font-family: 'Fira Code', monospace; font-size: 12px; word-break: break-all; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    li strong { font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .feature { border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .feature h3 { font-size: 15px; margin-bottom: 4px; }
+    .feature p { color: var(--muted); font-size: 14px; }
+    .note { border-left: 3px solid var(--amber); padding-left: 12px; color: var(--muted); font-size: 14px; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 32px; }
+    a { color: var(--primary); }
+
+    /* Legal page additions */
+    header a.icon { flex-shrink: 0; line-height: 0; }
+    .back { font-size: 14px; font-weight: 600; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+    .lang { margin: -12px 0 24px; }
+    h3 { font-size: 15px; margin: 18px 0 6px; }
+    .card p { margin-bottom: 10px; }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .card ul, .card ol { margin-bottom: 10px; }
+    code { font-family: 'Fira Code', monospace; font-size: 13px; overflow-wrap: anywhere; }
+    .toc ol { columns: 2 220px; column-gap: 24px; }
+    .toc li { margin-bottom: 4px; break-inside: avoid; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; }
+    .statement { border-left: 3px solid var(--primary); padding-left: 12px; font-weight: 500; }
+    section { scroll-margin-top: 16px; }
+    @media (max-width: 480px) { h1 { font-size: 28px; } header img { width: 56px; height: 56px; border-radius: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="icon" href="../../"><img src="../../icon-192.png?v=silo2" alt="Ikon aplikasi Silo"></a>
+    <div>
+      <a class="back" href="../../">Silo</a>
+      <h1>Ketentuan Layanan</h1>
+      <p class="meta">Terakhir diperbarui: 23 November 2026</p>
+    </div>
+  </header>
+  <p class="note lang">Versi bahasa Indonesia ini yang berlaku; versi bahasa Inggris adalah terjemahan. <a href="../" hreflang="en" lang="en">Read in English</a></p>
+
+  <section class="card" id="summary">
+    <h2>Ringkasnya</h2>
+    <ul>
+      <li>Silo gratis. Anda boleh memakainya untuk mencatat keuangan Anda sendiri.</li>
+      <li>Silo adalah alat bantu, bukan nasihat keuangan.</li>
+      <li>Hasil baca struk, jawaban AI, dan kurs bisa keliru. Periksa angka-angka yang penting.</li>
+      <li>Data Anda tersimpan di ponsel Anda. Menyimpan cadangan di tempat lain adalah pilihan dan tanggung jawab Anda.</li>
+      <li>Kami bertanggung jawab atas kerugian yang kami timbulkan dengan sengaja atau karena kelalaian kami. Hak Anda sebagai konsumen tetap berlaku.</li>
+    </ul>
+    <p class="note">Ringkasan ini hanya untuk membantu Anda membaca. Yang berlaku adalah ketentuan lengkap di bawah.</p>
+  </section>
+
+  <nav class="card toc" aria-label="Daftar isi">
+    <h2>Daftar isi</h2>
+    <ol>
+      <li><a href="#about">Tentang ketentuan ini</a></li>
+      <li><a href="#age">Siapa yang boleh memakai Silo</a></li>
+      <li><a href="#licence">Lisensi Anda untuk memakai Silo</a></li>
+      <li><a href="#use">Penggunaan yang diperbolehkan</a></li>
+      <li><a href="#not-advice">Bukan nasihat keuangan</a></li>
+      <li><a href="#accuracy">Periksa angka Anda</a></li>
+      <li><a href="#backups">Data dan cadangan Anda</a></li>
+      <li><a href="#third-party">Layanan pihak ketiga</a></li>
+      <li><a href="#updates">Pembaruan dan versi uji coba</a></li>
+      <li><a href="#feedback">Laporan bug dan ide</a></li>
+      <li><a href="#warranty">Tidak ada jaminan hasil</a></li>
+      <li><a href="#liability">Tanggung jawab</a></li>
+      <li><a href="#termination">Berhenti memakai Silo</a></li>
+      <li><a href="#law">Hukum yang berlaku dan sengketa</a></li>
+      <li><a href="#changes">Perubahan ketentuan ini</a></li>
+      <li><a href="#general">Ketentuan umum</a></li>
+      <li><a href="#contact">Kontak</a></li>
+    </ol>
+  </nav>
+
+  <section class="card" id="about">
+    <h2>1. Tentang ketentuan ini</h2>
+    <p>Ketentuan ini adalah perjanjian antara Anda dan CDev ("kami"), pengembang perorangan yang membuat Silo. "Silo" berarti aplikasi Android (nama paket <code>com.LCSdev.silo</code>) dan halaman unduhannya di <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+    <p>Saat pertama kali Anda membuka Silo, aplikasi menampilkan ketentuan ini dengan tombol <strong>Agree</strong> (Setuju). Anda menerima ketentuan ini dengan mengetuk <strong>Agree</strong>. Jika Anda tidak setuju, jangan gunakan Silo.</p>
+    <p><a href="../../privacy/id/">Kebijakan Privasi</a> kami menjelaskan cara data ditangani. Kebijakan itu adalah pemberitahuan terpisah, bukan bagian dari ketentuan ini.</p>
+  </section>
+
+  <section class="card" id="age">
+    <h2>2. Siapa yang boleh memakai Silo</h2>
+    <p>Silo tidak ditujukan untuk anak di bawah 13 tahun. Jika Anda berusia di bawah 18 tahun, Anda memerlukan izin orang tua atau wali untuk memakai Silo. Silo tidak memeriksa usia.</p>
+  </section>
+
+  <section class="card" id="licence">
+    <h2>3. Lisensi Anda untuk memakai Silo</h2>
+    <p>Lisensi adalah izin dari kami agar Anda dapat memakai Silo. Silo gratis, tanpa iklan, dan tidak memerlukan akun.</p>
+    <p>Kami memberi Anda lisensi pribadi, gratis, non-eksklusif, dan tidak dapat dialihkan untuk memasang dan memakai Silo di perangkat Android yang Anda miliki atau kuasai. Non-eksklusif berarti kami dapat memberi izin yang sama kepada orang lain. Tidak dapat dialihkan berarti Anda tidak boleh memberikannya kepada orang lain. Lisensi ini berlaku sampai berakhir menurut <a href="#termination">bagian 13</a>.</p>
+    <p>Anda tidak boleh:</p>
+    <ul>
+      <li>menjual Silo atau memungut bayaran dari orang lain untuknya;</li>
+      <li>menyebarkan salinan Silo yang sudah diubah, atau menyebut aplikasi lain sebagai Silo;</li>
+      <li>menghapus atau menyembunyikan nama kami atau ketentuan ini dari Silo.</li>
+    </ul>
+    <p>Semua hak atas Silo yang tidak diberikan dalam ketentuan ini tetap milik kami. Sebagian Silo mungkin memakai perangkat lunak sumber terbuka. Lisensi perangkat lunak tersebut berlaku untuk bagian itu.</p>
+    <p>Unduh Silo hanya dari <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>. Salinan dari tempat lain mungkin sudah diubah.</p>
+  </section>
+
+  <section class="card" id="use">
+    <h2>4. Penggunaan yang diperbolehkan</h2>
+    <p>Gunakan Silo sesuai hukum. Jangan:</p>
+    <ul>
+      <li>memakai Silo untuk melanggar hukum, atau untuk mencatat atau merencanakan kegiatan ilegal;</li>
+      <li>mencoba membebani, menyerang, atau masuk tanpa izin ke cuang.dev, layanan pembaruan, atau layanan laporan;</li>
+      <li>mengirim spam, konten kasar, malware, atau data pribadi orang lain melalui formulir laporan di aplikasi;</li>
+      <li>memakai Silo untuk mengakses data orang lain tanpa izin mereka;</li>
+      <li>memakai Google Drive atau layanan AI eksternal melalui Silo dengan cara yang melanggar ketentuan layanan tersebut.</li>
+    </ul>
+    <p>Kami dapat memblokir laporan dari sumber yang menyalahgunakan layanan laporan.</p>
+  </section>
+
+  <section class="card" id="not-advice">
+    <h2>5. Bukan nasihat keuangan</h2>
+    <p>Silo membantu Anda mencatat dan meninjau keuangan Anda sendiri. Silo tidak memberi nasihat keuangan, investasi, pajak, hukum, atau akuntansi. Ini termasuk anggaran, saran menabung, dan jawaban asisten AI.</p>
+    <p>Keputusan keuangan ada di tangan Anda. Untuk nasihat sesuai keadaan Anda, bicarakan dengan tenaga profesional yang berkompeten.</p>
+  </section>
+
+  <section class="card" id="accuracy">
+    <h2>6. Periksa angka Anda</h2>
+    <ul>
+      <li><strong>Hasil baca struk bisa keliru.</strong> Silo membaca struk secara otomatis. Silo bisa salah membaca nama toko, total, tanggal, atau item, terutama pada struk yang pudar, kusut, atau tidak biasa. Silo menandai total yang mungkin salah, tetapi tidak dapat menangkap semua kesalahan.</li>
+      <li><strong>Jawaban AI bisa keliru.</strong> Asisten AI di perangkat maupun layanan AI eksternal yang Anda pasang dapat memberi jawaban yang salah, tidak lengkap, atau mengada-ada. Periksa sebelum Anda mengandalkannya.</li>
+      <li><strong>Kurs bisa keliru atau sudah usang.</strong> Kurs diambil dari layanan publik gratis dan diperbarui paling banyak sekali sehari. Kurs itu mungkin berbeda dengan kurs dari bank atau tempat penukaran uang Anda.</li>
+      <li><strong>Hasil bergantung pada data yang Anda masukkan.</strong> Saldo, anggaran, dan target hanya seakurat catatan di Silo.</li>
+    </ul>
+    <p>Periksa nominal sebelum Anda mengandalkannya, misalnya sebelum membayar tagihan, melapor pajak, atau mengambil keputusan.</p>
+  </section>
+
+  <section class="card" id="backups">
+    <h2>7. Data dan cadangan Anda</h2>
+    <p>Catatan Anda disimpan di ponsel Anda. Kami tidak punya salinannya dan tidak dapat memulihkannya untuk Anda.</p>
+    <ul>
+      <li>Silo membuat cadangan otomatis setiap hari, tetapi cadangan itu disimpan di ponsel yang sama. Jika ponsel hilang, rusak, atau direset, atau Anda mencopot Silo, cadangan itu ikut hilang.</li>
+      <li>Untuk menyimpan salinan di tempat lain, pakai <strong>Back Up All Data</strong>, atau hubungkan Google Drive Anda sendiri.</li>
+      <li><strong>Erase All Data</strong> (di <strong>Settings, Data &amp; System</strong>) dan mencopot aplikasi tidak dapat dibatalkan.</li>
+    </ul>
+    <p>Data Anda adalah milik Anda. Ketentuan ini tidak memberi kami hak apa pun atas data tersebut.</p>
+  </section>
+
+  <section class="card" id="third-party">
+    <h2>8. Layanan pihak ketiga</h2>
+    <p>Beberapa fitur memakai layanan yang tidak kami jalankan. Ketentuan dan kebijakan privasi layanan tersebut yang berlaku.</p>
+    <ul>
+      <li><strong>Google</strong>: ML Kit dan layanan Google Play untuk membaca struk, memindai, dan login, serta Google Drive untuk pencadangan opsional. <a href="https://policies.google.com/terms?hl=id">Persyaratan Layanan Google</a>. File di Drive Anda memakai kuota penyimpanan Google Anda.</li>
+      <li><strong>Layanan AI eksternal</strong> pilihan Anda, misalnya OpenAI: ketentuan penyedia tersebut, misalnya <a href="https://openai.com/policies/terms-of-use">Terms of Use OpenAI</a>. Anda memakai kunci API Anda sendiri. Biaya dari penyedia menjadi tanggungan Anda.</li>
+      <li><strong>Hugging Face</strong>, untuk unduhan model AI: <a href="https://huggingface.co/terms-of-service">Terms of Service Hugging Face</a>. Model tersebut mungkin punya lisensi sendiri.</li>
+      <li><strong>currency-api</strong>, layanan publik gratis untuk kurs mata uang.</li>
+      <li><strong>Cloudflare</strong>, yang menyajikan cuang.dev, <strong>Discord</strong>, tempat laporan bug disimpan, serta model Gemini milik Google melalui Google Antigravity, yang dapat memproses laporan saat kami memperbaiki suatu masalah.</li>
+    </ul>
+    <p>Layanan ini dapat berubah, dibatasi, atau berhenti. Jika itu terjadi, fitur Silo yang memakainya mungkin tidak berfungsi lagi.</p>
+  </section>
+
+  <section class="card" id="updates">
+    <h2>9. Pembaruan dan versi uji coba</h2>
+    <ul>
+      <li>Silo memeriksa versi baru paling banyak sekali sehari, kecuali Anda mematikan <strong>Tell me about new versions</strong> di <strong>More, App info</strong>.</li>
+      <li>Pembaruan hanya diunduh saat Anda mengetuk <strong>Update</strong>. Silo mencocokkannya dengan checksum, nama paket, dan versi yang dipublikasikan. Android hanya memasangnya jika ditandatangani dengan kunci yang sama dengan Silo yang sudah terpasang.</li>
+      <li>Sebagian versi adalah versi uji coba (test build), termasuk versi di kanal uji coba (test channel) opsional. Versi uji coba mungkin masih punya bug, dan fiturnya bisa berubah atau dihapus.</li>
+      <li>Kami tidak wajib menyediakan pembaruan, perbaikan, atau dukungan, maupun mempertahankan fitur tertentu.</li>
+      <li>Cadangkan data Anda sebelum memperbarui.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="feedback">
+    <h2>10. Laporan bug dan ide</h2>
+    <p>Anda dapat memakai <strong>Report a bug</strong> atau <strong>Request a feature</strong> di menu <strong>More</strong>. Jika Anda mengirim ide, kami boleh memakainya untuk mengembangkan Silo tanpa membayar Anda atau berutang apa pun kepada Anda. Data pribadi dalam laporan kami tangani sesuai <a href="../../privacy/id/#reports">Kebijakan Privasi</a>.</p>
+  </section>
+
+  <section class="card" id="warranty">
+    <h2>11. Tidak ada jaminan hasil</h2>
+    <p>Sejauh diizinkan hukum, Silo disediakan "sebagaimana adanya" dan "sebagaimana tersedia". "Sebagaimana adanya" berarti dalam keadaannya saat ini, termasuk kekurangannya. "Sebagaimana tersedia" berarti saat Silo tersedia, tanpa janji bahwa Silo selalu berfungsi.</p>
+    <p>Kami tidak menjanjikan bahwa Silo bebas dari kesalahan, selalu tersedia, atau cocok untuk keperluan tertentu, atau bahwa hasilnya selalu akurat.</p>
+  </section>
+
+  <section class="card" id="liability">
+    <h2>12. Tanggung jawab</h2>
+    <p>Silo adalah aplikasi gratis yang dibuat oleh satu pengembang. Anda bertanggung jawab atas:</p>
+    <ul>
+      <li>keputusan keuangan Anda sendiri;</li>
+      <li>memeriksa nominal dari hasil baca struk, jawaban AI, dan kurs sebelum mengandalkannya;</li>
+      <li>menyimpan cadangan data Anda di tempat selain ponsel Anda;</li>
+      <li>menjaga keamanan ponsel, kunci layar, dan akun Google Anda;</li>
+      <li>ketentuan dan biaya layanan pihak ketiga yang Anda pilih;</li>
+      <li>memasang Silo hanya dari halaman unduhan kami.</li>
+    </ul>
+    <p>Sejauh diizinkan hukum, kami tidak bertanggung jawab atas kerugian yang timbul dari hal-hal tersebut, kecuali kerugian itu disebabkan oleh tindakan sengaja atau kelalaian kami.</p>
+    <p>Tidak ada bagian dari ketentuan ini yang membatasi hak Anda sebagai konsumen menurut hukum Indonesia, termasuk Undang-Undang Nomor 8 Tahun 1999 tentang Perlindungan Konsumen, atau menurut hukum negara tempat Anda tinggal.</p>
+  </section>
+
+  <section class="card" id="termination">
+    <h2>13. Berhenti memakai Silo</h2>
+    <ul>
+      <li>Anda dapat berhenti memakai Silo kapan saja dengan mencopotnya. Mencopot Silo menghapus datanya di ponsel Anda.</li>
+      <li>Kami dapat berhenti menyediakan Silo, unduhannya, atau fitur online apa pun.</li>
+      <li>Jika Anda melanggar ketentuan ini secara serius, lisensi Anda berakhir dan Anda harus berhenti memakai Silo.</li>
+    </ul>
+    <p>Bagian 5, 6, 7, 11, 12, dan 14 tetap berlaku setelah Anda berhenti memakai Silo.</p>
+  </section>
+
+  <section class="card" id="law">
+    <h2>14. Hukum yang berlaku dan sengketa</h2>
+    <p>Ketentuan ini tunduk pada hukum Republik Indonesia.</p>
+    <p>Jika ada masalah, mohon kirim email kepada kami lebih dulu di <a href="mailto:william@cuang.dev">william@cuang.dev</a>. Kami akan berusaha menyelesaikannya bersama Anda. Jika tidak berhasil, Anda dapat membawa sengketa ke Badan Penyelesaian Sengketa Konsumen (BPSK) atau ke pengadilan di Indonesia. Jika hukum negara Anda memberi hak untuk mengajukan gugatan di pengadilan setempat atau memakai aturan perlindungan konsumen di negara itu, ketentuan ini tidak menghapus hak tersebut.</p>
+  </section>
+
+  <section class="card" id="changes">
+    <h2>15. Perubahan ketentuan ini</h2>
+    <p>Kami dapat mengubah ketentuan ini. Sebelum ketentuan baru berlaku, Silo menampilkannya di aplikasi, dan kami mengubah tanggal di bagian atas halaman ini. Ketentuan baru hanya berlaku bagi Anda setelah Anda mengetuk <strong>Agree</strong>. Jika Anda tidak setuju, ketuk <strong>Later</strong> (Nanti). Anda tetap boleh memakai Silo dengan ketentuan yang sudah Anda setujui sebelumnya.</p>
+  </section>
+
+  <section class="card" id="general">
+    <h2>16. Ketentuan umum</h2>
+    <ul>
+      <li>Jika pengadilan menyatakan sebagian ketentuan ini tidak sah, bagian lainnya tetap berlaku.</li>
+      <li>Jika kami tidak langsung menegakkan suatu ketentuan, kami tetap dapat menegakkannya nanti.</li>
+      <li>Anda tidak boleh mengalihkan hak Anda berdasarkan ketentuan ini kepada orang lain.</li>
+      <li>Ketentuan ini adalah keseluruhan perjanjian antara Anda dan kami mengenai Silo.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="contact">
+    <h2>17. Kontak</h2>
+    <p>CDev, pengembang Silo<br>
+    Email: <a href="mailto:william@cuang.dev">william@cuang.dev</a><br>
+    Situs: <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a></p>
+  </section>
+
+  <footer>Silo · by CDev · <a href="../../privacy/id/">Kebijakan Privasi</a> · <a href="../" hreflang="en">English</a> · <a href="../../">Halaman unduhan</a></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>Silo | Terms of Service</title>
+  <meta name="description" content="Terms of Service for Silo, a free offline money tracker for Android by CDev.">
+  <link rel="alternate" hreflang="en" href="https://cuang.dev/projects/silo/terms/">
+  <link rel="alternate" hreflang="id" href="https://cuang.dev/projects/silo/terms/id/">
+  <link rel="icon" href="../icon-192.png?v=silo2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16; --card: #111827; --border: #1f2937; --text: #f9fafb; --muted: #9ca3af;
+      --primary: #0ea5e9; --primary-ink: #ffffff; --green: #10b981; --amber: #f59e0b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f8fafc; --card: #ffffff; --border: #e5e7eb; --text: #111827; --muted: #4b5563; --primary: #0369a1; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+    header img { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+    .tagline { color: var(--muted); font-size: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+    .download { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--primary); color: var(--primary-ink);
+      font-weight: 700; font-size: 16px; padding: 14px 22px; border-radius: 999px; text-decoration: none; }
+    .btn:hover { filter: brightness(1.08); }
+    .meta { color: var(--muted); font-size: 13px; }
+    .meta code, .sha { font-family: 'Fira Code', monospace; font-size: 12px; word-break: break-all; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    li strong { font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .feature { border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .feature h3 { font-size: 15px; margin-bottom: 4px; }
+    .feature p { color: var(--muted); font-size: 14px; }
+    .note { border-left: 3px solid var(--amber); padding-left: 12px; color: var(--muted); font-size: 14px; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 32px; }
+    a { color: var(--primary); }
+
+    /* Legal page additions */
+    header a.icon { flex-shrink: 0; line-height: 0; }
+    .back { font-size: 14px; font-weight: 600; text-decoration: none; }
+    .back:hover { text-decoration: underline; }
+    .lang { margin: -12px 0 24px; }
+    h3 { font-size: 15px; margin: 18px 0 6px; }
+    .card p { margin-bottom: 10px; }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .card ul, .card ol { margin-bottom: 10px; }
+    code { font-family: 'Fira Code', monospace; font-size: 13px; overflow-wrap: anywhere; }
+    .toc ol { columns: 2 220px; column-gap: 24px; }
+    .toc li { margin-bottom: 4px; break-inside: avoid; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; }
+    .statement { border-left: 3px solid var(--primary); padding-left: 12px; font-weight: 500; }
+    section { scroll-margin-top: 16px; }
+    @media (max-width: 480px) { h1 { font-size: 28px; } header img { width: 56px; height: 56px; border-radius: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="icon" href="../"><img src="../icon-192.png?v=silo2" alt="Silo app icon"></a>
+    <div>
+      <a class="back" href="../">Silo</a>
+      <h1>Terms of Service</h1>
+      <p class="meta">Last updated: 23 November 2026</p>
+    </div>
+  </header>
+  <p class="note lang">An Indonesian version is available. If they differ, the Indonesian version applies. <a href="id/" hreflang="id" lang="id">Baca dalam bahasa Indonesia</a></p>
+
+  <section class="card" id="summary">
+    <h2>In short</h2>
+    <ul>
+      <li>Silo is free. You may use it for your own money tracking.</li>
+      <li>Silo is a tool, not financial advice.</li>
+      <li>Receipt reading, AI answers and exchange rates can be wrong. Check the numbers that matter.</li>
+      <li>Your data lives on your phone. Keeping a backup somewhere else is up to you.</li>
+      <li>We answer for harm we cause on purpose or through negligence. Your rights as a consumer stay in place.</li>
+    </ul>
+    <p class="note">This summary helps you read the terms. The full terms below are what apply.</p>
+  </section>
+
+  <nav class="card toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#about">About these terms</a></li>
+      <li><a href="#age">Who can use Silo</a></li>
+      <li><a href="#licence">Your licence to use Silo</a></li>
+      <li><a href="#use">Acceptable use</a></li>
+      <li><a href="#not-advice">Not financial advice</a></li>
+      <li><a href="#accuracy">Check your numbers</a></li>
+      <li><a href="#backups">Your data and backups</a></li>
+      <li><a href="#third-party">Third-party services</a></li>
+      <li><a href="#updates">Updates and test builds</a></li>
+      <li><a href="#feedback">Bug reports and ideas</a></li>
+      <li><a href="#warranty">No promises about results</a></li>
+      <li><a href="#liability">Responsibilities</a></li>
+      <li><a href="#termination">Stopping use</a></li>
+      <li><a href="#law">Governing law and disputes</a></li>
+      <li><a href="#changes">Changes to these terms</a></li>
+      <li><a href="#general">General</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+
+  <section class="card" id="about">
+    <h2>1. About these terms</h2>
+    <p>These terms are an agreement between you and CDev ("we", "us"), the individual developer who makes Silo. "Silo" means the Android app (package name <code>com.LCSdev.silo</code>) and its download page at <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+    <p>When you first open Silo, it shows these terms with an <strong>Agree</strong> button. You accept these terms by tapping <strong>Agree</strong>. If you do not agree, do not use Silo.</p>
+    <p>Our <a href="../privacy/">Privacy Policy</a> explains how data is handled. It is a separate notice, not part of these terms.</p>
+  </section>
+
+  <section class="card" id="age">
+    <h2>2. Who can use Silo</h2>
+    <p>Silo is not directed at children under 13. If you are under 18, you need a parent's or guardian's permission to use Silo. Silo does not check ages.</p>
+  </section>
+
+  <section class="card" id="licence">
+    <h2>3. Your licence to use Silo</h2>
+    <p>A licence is our permission for you to use Silo. Silo is free. It has no ads and needs no account.</p>
+    <p>We give you a personal, free, non-exclusive and non-transferable licence to install and use Silo on Android devices you own or control. Non-exclusive means we can give the same permission to others. Non-transferable means you cannot pass it on. The licence lasts until it ends under <a href="#termination">section 13</a>.</p>
+    <p>You may not:</p>
+    <ul>
+      <li>sell Silo, or charge others for it;</li>
+      <li>share changed copies of Silo, or present another app as Silo;</li>
+      <li>remove or hide our name or these terms from Silo.</li>
+    </ul>
+    <p>We keep all rights in Silo that these terms do not give you. Parts of Silo may use open-source software. Their own licences apply to those parts.</p>
+    <p>Only download Silo from <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>. Copies from anywhere else may have been changed.</p>
+  </section>
+
+  <section class="card" id="use">
+    <h2>4. Acceptable use</h2>
+    <p>Use Silo lawfully. Do not:</p>
+    <ul>
+      <li>use Silo to break the law, or to record or plan illegal activity;</li>
+      <li>try to overload, attack or get unauthorised access to cuang.dev, the update service or the report service;</li>
+      <li>send spam, abusive content, malware, or other people's personal data through the in-app report form;</li>
+      <li>use Silo to access another person's data without their permission;</li>
+      <li>use Google Drive or an external AI service through Silo in a way that breaks that service's terms.</li>
+    </ul>
+    <p>We may block reports from a source that misuses the report service.</p>
+  </section>
+
+  <section class="card" id="not-advice">
+    <h2>5. Not financial advice</h2>
+    <p>Silo helps you record and review your own money. It does not give financial, investment, tax, legal or accounting advice. This includes budgets, savings suggestions, and answers from the AI assistant.</p>
+    <p>You make your own financial decisions. For advice about your situation, talk to a qualified professional.</p>
+  </section>
+
+  <section class="card" id="accuracy">
+    <h2>6. Check your numbers</h2>
+    <ul>
+      <li><strong>Receipt reading can be wrong.</strong> Silo reads receipts automatically. It can misread the merchant, total, date or items, especially on faded, crumpled or unusual receipts. Silo flags totals that might be wrong, but it cannot catch every mistake.</li>
+      <li><strong>AI answers can be wrong.</strong> The on-device AI assistant and any external AI service you set up can give answers that are wrong, incomplete or made up. Check them before you rely on them.</li>
+      <li><strong>Exchange rates can be wrong or out of date.</strong> Rates come from a free public service and are updated at most once a day. They may not match the rate your bank or money changer gives you.</li>
+      <li><strong>Results depend on what you enter.</strong> Balances, budgets and goals are only as accurate as the records in Silo.</li>
+    </ul>
+    <p>Check amounts before you rely on them, for example before paying a bill, filing taxes or making a decision.</p>
+  </section>
+
+  <section class="card" id="backups">
+    <h2>7. Your data and backups</h2>
+    <p>Your records are stored on your phone. We do not have a copy and cannot recover them for you.</p>
+    <ul>
+      <li>Silo makes automatic backups each day, but they are stored on the same phone. If the phone is lost, broken or reset, or you uninstall Silo, those backups are lost too.</li>
+      <li>To keep a copy somewhere else, use <strong>Back Up All Data</strong>, or connect your own Google Drive.</li>
+      <li><strong>Erase All Data</strong> (in <strong>Settings, Data &amp; System</strong>) and uninstalling cannot be undone.</li>
+    </ul>
+    <p>You own your data. These terms give us no rights to it.</p>
+  </section>
+
+  <section class="card" id="third-party">
+    <h2>8. Third-party services</h2>
+    <p>Some features use services that we do not run. Their own terms and privacy policies apply.</p>
+    <ul>
+      <li><strong>Google</strong>: ML Kit and Google Play services for receipt reading, scanning and sign-in, and Google Drive for optional backups. <a href="https://policies.google.com/terms">Google Terms of Service</a>. Files in your Drive count toward your Google storage.</li>
+      <li><strong>An external AI service</strong> you choose, such as OpenAI: that provider's terms, for example <a href="https://openai.com/policies/terms-of-use">OpenAI's Terms of Use</a>. You use your own API key. Any charges from the provider are yours.</li>
+      <li><strong>Hugging Face</strong>, for the AI model download: <a href="https://huggingface.co/terms-of-service">Hugging Face Terms of Service</a>. The model may have its own licence.</li>
+      <li><strong>currency-api</strong>, a free public service for exchange rates.</li>
+      <li><strong>Cloudflare</strong>, which delivers cuang.dev, <strong>Discord</strong>, where bug reports are stored, and Google's Gemini models through Google Antigravity, which may process a report when we fix an issue.</li>
+    </ul>
+    <p>These services can change, limit or stop. If one does, the feature in Silo that uses it may stop working.</p>
+  </section>
+
+  <section class="card" id="updates">
+    <h2>9. Updates and test builds</h2>
+    <ul>
+      <li>Silo checks for new versions at most once a day unless you turn off <strong>Tell me about new versions</strong> in <strong>More, App info</strong>.</li>
+      <li>An update downloads only when you tap <strong>Update</strong>. Silo checks it against the published checksum, package name and version. Android installs it only if it is signed with the same key as the Silo you have.</li>
+      <li>Some versions are test builds, including those on the optional test channel. Test builds may have bugs, and features may change or be removed.</li>
+      <li>We are not obliged to provide updates, fixes or support, or to keep any feature.</li>
+      <li>Back up your data before you update.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="feedback">
+    <h2>10. Bug reports and ideas</h2>
+    <p>You can use <strong>Report a bug</strong> or <strong>Request a feature</strong> in <strong>More</strong>. If you send an idea, we may use it to improve Silo without paying you or owing you anything. We handle the personal data in reports as the <a href="../privacy/#reports">Privacy Policy</a> describes.</p>
+  </section>
+
+  <section class="card" id="warranty">
+    <h2>11. No promises about results</h2>
+    <p>As far as the law allows, Silo is provided "as is" and "as available". "As is" means in its current state, including any faults. "As available" means when it is available, with no promise that it always works.</p>
+    <p>We do not promise that Silo will be free of errors, always available, or fit for a particular purpose, or that its results will be accurate.</p>
+  </section>
+
+  <section class="card" id="liability">
+    <h2>12. Responsibilities</h2>
+    <p>Silo is a free app made by one developer. You are responsible for:</p>
+    <ul>
+      <li>your own financial decisions;</li>
+      <li>checking amounts from receipt reading, AI answers and exchange rates before you rely on them;</li>
+      <li>keeping a backup of your data somewhere other than your phone;</li>
+      <li>keeping your phone, screen lock and Google account secure;</li>
+      <li>the terms and charges of third-party services you choose to use;</li>
+      <li>installing Silo only from our download page.</li>
+    </ul>
+    <p>As far as the law allows, we are not liable for losses that come from these things, except where caused by our intentional act or negligence.</p>
+    <p>Nothing in these terms limits your rights as a consumer under Indonesian law, including Law No. 8 of 1999 on Consumer Protection, or under the laws of the country where you live.</p>
+  </section>
+
+  <section class="card" id="termination">
+    <h2>13. Stopping use</h2>
+    <ul>
+      <li>You can stop using Silo at any time by uninstalling it. Uninstalling deletes Silo's data on your phone.</li>
+      <li>We may stop offering Silo, its downloads, or any online feature.</li>
+      <li>If you seriously break these terms, your licence ends and you must stop using Silo.</li>
+    </ul>
+    <p>Sections 5, 6, 7, 11, 12 and 14 still apply after your use ends.</p>
+  </section>
+
+  <section class="card" id="law">
+    <h2>14. Governing law and disputes</h2>
+    <p>These terms are governed by the laws of the Republic of Indonesia.</p>
+    <p>If you have a problem, please email us first at <a href="mailto:william@cuang.dev">william@cuang.dev</a>. We will try to solve it with you. If we cannot, you may take the dispute to a Consumer Dispute Settlement Body (<em>Badan Penyelesaian Sengketa Konsumen</em>, BPSK) or to the courts of Indonesia. If the law of your country gives you the right to bring a claim in your own local courts, or to rely on its consumer protection rules, these terms do not take that right away.</p>
+  </section>
+
+  <section class="card" id="changes">
+    <h2>15. Changes to these terms</h2>
+    <p>We may change these terms. Before new terms apply, Silo shows them in the app, and we change the date at the top of this page. New terms apply to you only once you tap <strong>Agree</strong>. If you do not agree, tap <strong>Later</strong>. You may keep using Silo under the terms you accepted earlier.</p>
+  </section>
+
+  <section class="card" id="general">
+    <h2>16. General</h2>
+    <ul>
+      <li>If a court finds part of these terms invalid, the rest still applies.</li>
+      <li>If we do not enforce a term right away, we can still enforce it later.</li>
+      <li>You may not transfer your rights under these terms to someone else.</li>
+      <li>These terms are the whole agreement between you and us about Silo.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="contact">
+    <h2>17. Contact</h2>
+    <p>CDev, developer of Silo<br>
+    Email: <a href="mailto:william@cuang.dev">william@cuang.dev</a><br>
+    Website: <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a></p>
+  </section>
+
+  <footer>Silo · by CDev · <a href="../privacy/">Privacy Policy</a> · <a href="id/" hreflang="id">Bahasa Indonesia</a> · <a href="../">Download page</a></footer>
+</main>
+</body>
+</html>
