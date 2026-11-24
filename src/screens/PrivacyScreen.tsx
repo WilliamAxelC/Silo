@@ -50,6 +50,7 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
 
 const STAYS = [
   'Your transactions, accounts, budgets, goals and receipt photos (unless you connect Google Drive or use External AI)',
+  'Imported contacts and split bills (only shared when you tap WhatsApp or Share)',
   'Receipt reading (OCR) and the on-device AI chat',
   'Nothing is ever sent to the developer except a report you choose to send',
 ];

@@ -29,7 +29,9 @@ const ProgressBar = ({ spent, limit, theme }: { spent: number; limit: number; th
   const barColor = getProgressTone(rawPercentage, theme);
 
   useEffect(() => {
-    Animated.timing(progressAnim, { toValue: percentage, duration: 650, useNativeDriver: false }).start();
+    const anim = Animated.timing(progressAnim, { toValue: percentage, duration: 650, useNativeDriver: false });
+    anim.start();
+    return () => anim.stop();
   }, [percentage, progressAnim]);
 
   return (

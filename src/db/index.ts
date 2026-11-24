@@ -20,7 +20,7 @@ export interface AITransactionRow {
   category: string | null;
 }
 
-export const DB_SCHEMA_VERSION = 20;
+export const DB_SCHEMA_VERSION = 21;
 
 export function initDatabasePragmas(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
@@ -550,6 +550,54 @@ function migrateToVersion20(sqliteDb: typeof expoDb = expoDb) {
   `);
 }
 
+/**
+ * Split bills & local contacts: stores user-imported or manually added contacts and extends
+ * shared_splits with contact links, phone snapshots, currency, split mode/breakdown, and
+ * optional repayment transaction tracking.
+ */
+function migrateToVersion21(sqliteDb: typeof expoDb = expoDb) {
+  sqliteDb.withTransactionSync(() => {
+    sqliteDb.execSync(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        device_contact_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_contacts_device_id ON contacts(device_contact_id);
+    `);
+
+    const existingCols = new Set(
+      sqliteDb.getAllSync<{ name: string }>('PRAGMA table_info(shared_splits);').map((c) => c.name)
+    );
+    const extraColumns: Array<[string, string]> = [
+      ['contact_id', 'INTEGER REFERENCES contacts(id) ON DELETE SET NULL'],
+      ['phone', 'TEXT'],
+      ['currency', 'TEXT'],
+      ['split_mode', "TEXT DEFAULT 'equal'"],
+      ['breakdown_json', 'TEXT'],
+      ['settled_at', 'INTEGER'],
+      ['repayment_transaction_id', 'INTEGER REFERENCES transactions(id) ON DELETE SET NULL'],
+      ['created_at', 'INTEGER'],
+    ];
+
+    const alterSql = extraColumns
+      .filter(([column]) => !existingCols.has(column))
+      .map(([column, definition]) => `ALTER TABLE shared_splits ADD COLUMN ${column} ${definition};`)
+      .join('\n');
+    if (alterSql) {
+      sqliteDb.execSync(alterSql);
+    }
+
+    sqliteDb.execSync(`
+      CREATE INDEX IF NOT EXISTS idx_shared_splits_tx ON shared_splits(transaction_id);
+      CREATE INDEX IF NOT EXISTS idx_shared_splits_contact ON shared_splits(contact_id);
+    `);
+  });
+}
+
 function createTagTables(sqliteDb: typeof expoDb = expoDb) {
   sqliteDb.execSync(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -1010,6 +1058,10 @@ export function runMigrations(sqliteDb: typeof expoDb = expoDb) {
 
   if (currentVersion < 20) {
     migrateToVersion20(sqliteDb);
+  }
+
+  if (currentVersion < 21) {
+    migrateToVersion21(sqliteDb);
   }
 
   seedDefaultSettings(sqliteDb);

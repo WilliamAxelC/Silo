@@ -194,3 +194,13 @@ jest.mock('expo-notifications', () => ({
   clearLastNotificationResponse: jest.fn(),
   clearLastNotificationResponseAsync: jest.fn(async () => {}),
 }));
+
+jest.mock('expo-contacts', () => ({
+  Fields: {
+    Name: 'name',
+    PhoneNumbers: 'phoneNumbers',
+  },
+  requestPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true })),
+  getPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true })),
+  getContactsAsync: jest.fn(async () => ({ data: [] })),
+}));

@@ -5,6 +5,9 @@ import { CategorySelectorModal } from '../CategorySelectorModal';
 import { SourceSelectorModal } from '../SourceSelectorModal';
 import { AmountCalculatorModal } from '../AmountCalculatorKeypad';
 import { FilterSheet } from '../FilterSheet';
+import { ContactsPickerModal } from '../ContactsPickerModal';
+import { SettleSplitModal } from '../SettleSplitModal';
+import { PaymentDetailsModal } from '../PaymentDetailsModal';
 import { EMPTY_FILTERS } from '../../features/transactions/filters';
 
 const ReactTestRenderer = require('react-test-renderer');
@@ -34,6 +37,20 @@ const MODALS: Array<[string, React.ReactElement]> = [
   ],
   ['SourceSelectorModal', <SourceSelectorModal visible onClose={noop} onPickImage={noop} />],
   ['AmountCalculatorModal', <AmountCalculatorModal visible onClose={noop} initialValue="" currencyCode="IDR" onDone={noop} />],
+  ['ContactsPickerModal', <ContactsPickerModal visible mode="manage" onClose={noop} />],
+  [
+    'SettleSplitModal',
+    <SettleSplitModal
+      visible
+      personName="Budi"
+      subtitle="Dinner"
+      totals={[{ currency: 'IDR', amount: 50000 }]}
+      defaultWalletId={1}
+      onConfirm={noop}
+      onClose={noop}
+    />,
+  ],
+  ['PaymentDetailsModal', <PaymentDetailsModal visible onClose={noop} />],
 ];
 
 // Regression (accessibility pass 2026-11-23): a pressable is one element to TalkBack, so a tap-outside

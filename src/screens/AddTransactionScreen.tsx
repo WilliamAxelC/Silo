@@ -87,6 +87,7 @@ import { consumeTrustedSharedImage } from '../services/ocr/normalizeImage';
 import { ReceiptItemsEditor } from '../components/ReceiptItemsEditor';
 import { CategorySelectorModal } from '../components/CategorySelectorModal';
 import { SourceSelectorModal } from '../components/SourceSelectorModal';
+import { useSplitsStore } from '../features/splits/store';
 
 export { parseReceiptLineItemsText, serializeReceiptLineItems };
 
@@ -100,7 +101,19 @@ export const AddTransactionScreen = () => {
   const reviewBatchTotalParam = route.params?.reviewBatchTotal;
   const initialDate = route.params?.initialDate;
   const sharedImageUri = route.params?.sharedImageUri;
+  const openSplitAfterSave = route.params?.openSplitAfterSave;
   const handledSharedImageRef = useRef<string | null>(null);
+  const splits = useSplitsStore((s) => s.splits);
+  const ensureSplitsLoaded = useSplitsStore((s) => s.ensureLoaded);
+  useEffect(() => {
+    if (editingId) {
+      ensureSplitsLoaded();
+    }
+  }, [editingId, ensureSplitsLoaded]);
+  const editingSplitCount = useMemo(
+    () => (editingId ? splits.filter((s) => s.transactionId === editingId).length : 0),
+    [editingId, splits]
+  );
   const theme = useAppTheme();
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
@@ -1078,6 +1091,18 @@ export const AddTransactionScreen = () => {
           }
           return;
         }
+        if (openSplitAfterSave && data.type === 'expense' && typeof newTransactionId === 'number') {
+          const navAny = navigation as unknown as {
+            replace?: (screen: string, params: Record<string, unknown>) => void;
+          };
+          if (typeof navAny.replace === 'function') {
+            navAny.replace('SplitBillEditor', { transactionId: newTransactionId });
+          } else {
+            navigation.navigate('SplitBillEditor', { transactionId: newTransactionId });
+          }
+          setTimeout(() => resetForm(), 100);
+          return;
+        }
       }
 
       returnToPreviousScreen();
@@ -2010,8 +2035,22 @@ export const AddTransactionScreen = () => {
             </View>
           ) : null}
 
-          {/* Secondary Actions (Template / Duplicate & Delete) */}
+          {/* Secondary Actions (Split Bill, Template / Duplicate & Delete) */}
           <View style={styles.secondaryStack}>
+            {editingId && type === 'expense' ? (
+              <TouchableOpacity
+                style={[styles.templateSaveButton, { borderColor: theme.primary, backgroundColor: theme.primaryMuted }]}
+                onPress={() => navigation.navigate('SplitBillEditor', { transactionId: editingId })}
+                disabled={isSaving}
+                accessibilityRole="button"
+                accessibilityLabel={editingSplitCount > 0 ? 'View or edit split bill' : 'Split this bill'}
+              >
+                <Ionicons name="people-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                <Text style={[styles.secondaryActionText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+                  {editingSplitCount > 0 ? `View / Edit split (${editingSplitCount})` : 'Split bill'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
             {editingId ? (
               <View style={styles.secondaryActionRow}>
                 <TouchableOpacity

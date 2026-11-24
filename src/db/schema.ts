@@ -84,10 +84,27 @@ export const appSettings = sqliteTable('app_settings', {
   value: text('value').notNull(),
 });
 
+export const contacts = sqliteTable('contacts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  phone: text('phone'),
+  deviceContactId: text('device_contact_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const sharedSplits = sqliteTable('shared_splits', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   transactionId: integer('transaction_id').references(() => transactions.id, { onDelete: 'cascade' }).notNull(),
+  contactId: integer('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
   personName: text('person_name').notNull(),
+  phone: text('phone'),
   amountOwed: real('amount_owed').notNull(),
+  currency: text('currency'),
+  splitMode: text('split_mode').default('equal'),
+  breakdownJson: text('breakdown_json'),
   isSettled: integer('is_settled', { mode: 'boolean' }).default(false),
+  settledAt: integer('settled_at'),
+  repaymentTransactionId: integer('repayment_transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
+  createdAt: integer('created_at'),
 });

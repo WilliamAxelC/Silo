@@ -185,6 +185,31 @@ describe('restoreBackupFile', () => {
     expect(mockMain.getAllSync('SELECT name FROM goals;').map((r: any) => r.name)).toEqual(['Emergency fund']);
   });
 
+  it('restores contacts and extended shared_splits with foreign keys intact', async () => {
+    const file = path.join(mockTmp, 'splits.db');
+    const { raw, db } = makeDb(file);
+    db.runSync(
+      `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (8, 1, 'Kopi', -100000, 'expense', 5);`
+    );
+    db.runSync(
+      `INSERT INTO contacts (id, name, phone, device_contact_id, created_at, updated_at) VALUES (4, 'Sari', '0812345678', 'dev-4', 1, 1);`
+    );
+    db.runSync(
+      `INSERT INTO shared_splits (transaction_id, contact_id, person_name, phone, amount_owed, currency, split_mode, is_settled)
+       VALUES (8, 4, 'Sari', '0812345678', 50000, 'IDR', 'equal', 0);`
+    );
+    raw.close();
+
+    await restoreBackupFile(`file://${file}`);
+
+    expect(mockMain.getAllSync('SELECT name, phone FROM contacts;')).toEqual([{ name: 'Sari', phone: '0812345678' }]);
+    expect(
+      mockMain.getAllSync('SELECT contact_id, person_name, amount_owed, currency, split_mode FROM shared_splits;')
+    ).toEqual([
+      { contact_id: 4, person_name: 'Sari', amount_owed: 50000, currency: 'IDR', split_mode: 'equal' },
+    ]);
+  });
+
   it('restores older backups that predate transaction_templates cleanly', async () => {
     const file = path.join(mockTmp, 'legacy.db');
     const { raw, db } = makeDb(file);

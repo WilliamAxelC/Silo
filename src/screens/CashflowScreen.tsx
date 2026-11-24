@@ -38,6 +38,7 @@ import {
 import { MonthlyCalendarView } from '../components/MonthlyCalendarView';
 import { WelcomeSheet } from '../components/WelcomeSheet';
 import { UNCATEGORIZED_EXPENSE_LABEL } from '../features/transactions/constants';
+import { getTransactionSplitCounts, useSplitsStore } from '../features/splits/store';
 import type { Transaction, TransactionType } from '../features/transactions/types';
 import type { DailyTotal, SearchTransactionsOptions } from '../db/index';
 
@@ -74,6 +75,7 @@ interface TransactionRowProps {
   item: Transaction;
   accountLabel?: string;
   dateLabel?: string;
+  splitBadge?: string;
   currencyCode: string;
   useThousandsSeparator: boolean;
   theme: ReturnType<typeof useAppTheme>;
@@ -84,6 +86,7 @@ const TransactionRow = React.memo(function TransactionRow({
   item,
   accountLabel,
   dateLabel,
+  splitBadge,
   currencyCode,
   useThousandsSeparator,
   theme,
@@ -95,7 +98,7 @@ const TransactionRow = React.memo(function TransactionRow({
   const tagLabel = item.tags && item.tags.length > 0 ? item.tags.map((t) => `#${t}`).join(' ') : '';
   const subtitle = isTransfer
     ? [dateLabel, accountLabel, tagLabel, item.note].filter(Boolean).join(' · ')
-    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, tagLabel, item.note]
+    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, splitBadge, tagLabel, item.note]
         .filter(Boolean)
         .join(' · ');
   const amountText = formatDisplayCurrency(
@@ -171,6 +174,9 @@ export const CashflowScreen = () => {
   const wallets = useTransactionStore((s) => s.wallets);
   const categories = useTransactionStore((s) => s.categories);
   const tags = useTransactionStore((s) => s.tags);
+  const splits = useSplitsStore((s) => s.splits);
+  const ensureSplitsLoaded = useSplitsStore((s) => s.ensureLoaded);
+  const splitCounts = useMemo(() => getTransactionSplitCounts(splits), [splits]);
   const showUpdateBanner = useUpdateStore(selectShowUpdateBanner);
   const latestVersion = useUpdateStore((s) => s.latest);
   const dismissUpdate = useUpdateStore((s) => s.dismiss);
@@ -217,6 +223,10 @@ export const CashflowScreen = () => {
     setFilterRefreshTick((tick) => tick + 1);
     setRefreshing(false);
   }, [fetchTransactions]);
+
+  useEffect(() => {
+    ensureSplitsLoaded();
+  }, [ensureSplitsLoaded]);
 
   useFocusEffect(
     useCallback(() => {
@@ -618,18 +628,28 @@ export const CashflowScreen = () => {
     [walletNames, showAccountNames]
   );
 
+  const getSplitBadge = useCallback(
+    (transactionId: number): string | undefined => {
+      const info = splitCounts[transactionId];
+      if (!info || info.total === 0) return undefined;
+      return info.unpaid > 0 ? `Split · ${info.unpaid} unpaid` : 'Split · Settled';
+    },
+    [splitCounts]
+  );
+
   const renderTransactionRow = useCallback(
     ({ item }: { item: Transaction }) => (
       <TransactionRow
         item={item}
         accountLabel={getAccountLabel(item)}
+        splitBadge={getSplitBadge(item.id)}
         currencyCode={currencyCode}
         useThousandsSeparator={useThousandsSeparator}
         theme={theme}
         onPress={handleOpenTransaction}
       />
     ),
-    [getAccountLabel, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+    [getAccountLabel, getSplitBadge, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
   );
 
   const currentYear = new Date().getFullYear();
@@ -646,6 +666,7 @@ export const CashflowScreen = () => {
           item={item}
           dateLabel={dateLabel}
           accountLabel={getAccountLabel(item, true)}
+          splitBadge={getSplitBadge(item.id)}
           currencyCode={currencyCode}
           useThousandsSeparator={useThousandsSeparator}
           theme={theme}
@@ -653,7 +674,7 @@ export const CashflowScreen = () => {
         />
       );
     },
-    [currentYear, locale, getAccountLabel, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+    [currentYear, locale, getAccountLabel, getSplitBadge, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
   );
 
   const renderSectionHeader = useCallback(
@@ -865,6 +886,7 @@ export const CashflowScreen = () => {
                         key={tx.id}
                         item={tx}
                         accountLabel={getAccountLabel(tx)}
+                        splitBadge={getSplitBadge(tx.id)}
                         currencyCode={currencyCode}
                         useThousandsSeparator={useThousandsSeparator}
                         theme={theme}

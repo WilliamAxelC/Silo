@@ -50,6 +50,8 @@ import { RecurringScreen } from '../screens/RecurringScreen';
 import { ReportScreen } from '../screens/ReportScreen';
 import { PrivacyScreen } from '../screens/PrivacyScreen';
 import { GoalsScreen } from '../screens/GoalsScreen';
+import { SplitBillsScreen } from '../screens/SplitBillsScreen';
+import { SplitBillEditorScreen } from '../screens/SplitBillEditorScreen';
 
 /** How long after Silo goes to the background the AI model is released. */
 const BACKGROUND_MODEL_UNLOAD_MS = 10_000;
@@ -74,6 +76,8 @@ export const APP_LINKING = {
       Report: 'report',
       Privacy: 'privacy',
       Goals: 'goals',
+      SplitBills: 'splits',
+      SplitBillEditor: 'splits/:transactionId',
     },
   },
   async getInitialURL() {
@@ -294,6 +298,8 @@ export const AppNavigator = () => {
           <Stack.Screen name="Report" component={ReportScreen} />
           <Stack.Screen name="Privacy" component={PrivacyScreen} />
           <Stack.Screen name="Goals" component={GoalsScreen} />
+          <Stack.Screen name="SplitBills" component={SplitBillsScreen} />
+          <Stack.Screen name="SplitBillEditor" component={SplitBillEditorScreen} />
         </Stack.Navigator>
       </NavigationContainer>
       <UpdateSheet />

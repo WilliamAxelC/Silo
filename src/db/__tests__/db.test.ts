@@ -142,7 +142,7 @@ describe('Database Layer and SQLite Operations', () => {
       expect(settings.some((s: { key: string; value: string }) => s.key === 'currencyCode')).toBe(true);
 
       const versionRow = testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;');
-      expect(versionRow?.user_version).toBe(20);
+      expect(versionRow?.user_version).toBe(21);
 
       const templatesTable = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
@@ -165,7 +165,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(20);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(21);
       const tbl = testDb.getFirstSync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_templates';`
       );
@@ -208,7 +208,7 @@ describe('Database Layer and SQLite Operations', () => {
 
       runMigrations(testDb as any);
 
-      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(20);
+      expect(testDb.getFirstSync<{ user_version: number }>('PRAGMA user_version;')?.user_version).toBe(21);
       const row = testDb.getFirstSync<{ image_uri: string; thumbnail_uri: string | null }>(
         'SELECT image_uri, thumbnail_uri FROM receipt_queue;'
       );
@@ -260,6 +260,44 @@ describe('Database Layer and SQLite Operations', () => {
       // Verify child records cascaded
       expect(testDb.getAllSync('SELECT * FROM transaction_items WHERE transaction_id = 100').length).toBe(0);
       expect(testDb.getAllSync('SELECT * FROM shared_splits WHERE transaction_id = 100').length).toBe(0);
+    });
+
+    it('creates v21 contacts table and extended shared_splits columns with ON DELETE SET NULL for contact_id', () => {
+      testDb.execSync('PRAGMA foreign_keys = ON;');
+      const contactsCols = testDb.getAllSync<{ name: string }>('PRAGMA table_info(contacts);').map((c) => c.name);
+      expect(contactsCols).toEqual(
+        expect.arrayContaining(['id', 'name', 'phone', 'device_contact_id', 'created_at', 'updated_at'])
+      );
+      const splitCols = testDb.getAllSync<{ name: string }>('PRAGMA table_info(shared_splits);').map((c) => c.name);
+      expect(splitCols).toEqual(
+        expect.arrayContaining([
+          'contact_id',
+          'phone',
+          'currency',
+          'split_mode',
+          'breakdown_json',
+          'settled_at',
+          'repayment_transaction_id',
+          'created_at',
+        ])
+      );
+
+      testDb.runSync(
+        `INSERT INTO contacts (id, name, phone, created_at, updated_at) VALUES (10, 'Budi', '0812345', 1, 1);`
+      );
+      testDb.runSync(
+        `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (101, 1, 'Cafe', -100000, 'expense', 1);`
+      );
+      testDb.runSync(
+        `INSERT INTO shared_splits (transaction_id, contact_id, person_name, phone, amount_owed, currency, split_mode, is_settled)
+         VALUES (101, 10, 'Budi', '0812345', 50000, 'IDR', 'equal', 0);`
+      );
+
+      testDb.runSync('DELETE FROM contacts WHERE id = 10;');
+      const split = testDb.getFirstSync<{ contact_id: number | null; person_name: string }>(
+        'SELECT contact_id, person_name FROM shared_splits WHERE transaction_id = 101;'
+      );
+      expect(split).toEqual({ contact_id: null, person_name: 'Budi' });
     });
 
     it('cascades deletion from wallets to transactions and budgets', () => {

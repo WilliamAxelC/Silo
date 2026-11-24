@@ -36,6 +36,7 @@ export const RESTORE_TABLES = [
   'transactions',
   'transaction_items',
   'transaction_tags',
+  'contacts',
   'shared_splits',
   'recurring_rules',
   'transaction_templates',

@@ -41,6 +41,7 @@ import {
   type BudgetPlanInput,
 } from '../features/budgets/plans';
 import { mapTransactionRowToModel, type TransactionListRow } from '../features/transactions/mappers';
+import { useSplitsStore } from '../features/splits/store';
 import type { CategoryRecord, CategoryType, TagRecord, Transaction, TransactionInput, TransactionUpdate, TransactionType, Wallet, WalletType } from '../features/transactions/types';
 
 export type { Transaction, TransactionInput, TransactionUpdate } from '../features/transactions/types';
@@ -1046,6 +1047,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         transactionsDirty: state.transactionsDirty,
         dataVersion: state.dataVersion + 1,
       }));
+      useSplitsStore.getState?.()?.pruneTransaction?.(id);
     } catch (error) {
       console.error('Failed to delete transaction:', error);
       set({ error: error instanceof Error ? error.message : String(error) });

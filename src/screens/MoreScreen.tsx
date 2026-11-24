@@ -12,6 +12,7 @@ import { DOWNLOAD_PAGE_URL, isNewer, useUpdateStore } from '../services/updates'
 import { useAppUpdateStore } from '../services/appUpdate';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
 import { DB_SCHEMA_VERSION } from '../db/index';
+import { useSplitsStore } from '../features/splits/store';
 
 export const MoreScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -32,6 +33,12 @@ export const MoreScreen = () => {
   const channel = useUpdateStore((s) => s.channel);
   const setChannel = useUpdateStore((s) => s.setChannel);
   const openUpdateSheet = useAppUpdateStore((s) => s.openSheet);
+  const splits = useSplitsStore((s) => s.splits);
+  const ensureSplitsLoaded = useSplitsStore((s) => s.ensureLoaded);
+  React.useEffect(() => {
+    ensureSplitsLoaded();
+  }, [ensureSplitsLoaded]);
+  const unpaidSplitCount = splits.filter((s) => !s.isSettled).length;
   const versionTaps = useRef<{ count: number; at: number }>({ count: 0, at: 0 });
 
   /** Seven quick taps on Version switch to (or from) the test channel: early builds from the test branch. */
@@ -189,6 +196,28 @@ export const MoreScreen = () => {
               <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Savings goals</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('SplitBills')}
+            accessibilityRole="button"
+            accessibilityLabel="Split Bills"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="people-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Split Bills</Text>
+            </View>
+            <View style={styles.menuRowRight}>
+              {unpaidSplitCount > 0 ? (
+                <Text style={[styles.badgeText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>
+                  {unpaidSplitCount} unpaid
+                </Text>
+              ) : null}
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            </View>
           </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
@@ -446,6 +475,8 @@ const styles = StyleSheet.create({
   divider: { height: 1, marginLeft: 44 },
   menuCard: { borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: 'hidden' },
   menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 14 },
+  menuRowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  badgeText: { fontWeight: '700' },
   settingRowLeft: { flexDirection: 'row', alignItems: 'center' },
   settingText: { marginLeft: 10, fontSize: 14, fontWeight: '500' },
   infoBlock: { paddingHorizontal: 14, paddingVertical: 12, gap: 8 },

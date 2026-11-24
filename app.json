@@ -28,7 +28,8 @@
       "versionCode": 10,
       "allowBackup": false,
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.WRITE_CONTACTS"
       ],
       "intentFilters": [
         {
@@ -83,6 +84,12 @@
         {
           "color": "#0284C7",
           "defaultChannel": "daily-reminder"
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Silo lets you pick contacts to import for splitting bills. Imported contacts stay on your phone."
         }
       ]
     ],

@@ -79,6 +79,7 @@ import { clearErrorLog } from '../services/errorLog';
 import { useUpdateStore } from '../services/updates';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useGoalsStore } from '../features/goals/goals';
+import { useSplitsStore } from '../features/splits/store';
 import { DriveSyncSection } from '../components/DriveSyncSection';
 import appConfig from '../../app.json';
 
@@ -582,6 +583,7 @@ export const SettingsScreen = () => {
     try {
       const { transactions } = await restoreBackupFile(uri);
       useGoalsStore.getState().load();
+      useSplitsStore.getState().load();
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
       store.invalidateData?.();
@@ -668,6 +670,7 @@ export const SettingsScreen = () => {
       await eraseAllData();
       clearErrorLog();
       useGoalsStore.getState().load();
+      useSplitsStore.getState().load();
       await useSettingsStore.getState().loadSettings();
       const store = useTransactionStore.getState();
       store.invalidateData?.();

@@ -34,6 +34,7 @@ import { getActiveModelConfig } from '../services/ai/config';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { useAIStore } from '../store/useAIStore';
 import { useGoalsStore } from '../features/goals/goals';
+import { useSplitsStore } from '../features/splits/store';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -182,6 +183,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
     try {
       const { transactions } = await restoreBackupFile(uri);
       useGoalsStore.getState().load();
+      useSplitsStore.getState().load();
       await useSettingsStore.getState().loadSettings();
       const txStore = useTransactionStore.getState();
       txStore.invalidateData?.();

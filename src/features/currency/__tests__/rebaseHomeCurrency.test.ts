@@ -70,9 +70,17 @@ describe('rebaseHomeCurrency', () => {
     const yen = addWallet({ name: 'Yen', type: 'cash', initialBalance: 0, currency: 'JPY' });
 
     const lunch = insert({ wallet_id: bca, type: 'expense', total_amount: -50_000 });
+    db.runSync(
+      `INSERT INTO shared_splits (transaction_id, person_name, amount_owed, currency, is_settled) VALUES (?, 'Budi', 25000, NULL, 0);`,
+      [lunch]
+    );
     insert({ wallet_id: bca, to_wallet_id: gopay, type: 'transfer', total_amount: -200_000 });
     insert({ wallet_id: bca, to_wallet_id: yen, type: 'transfer', total_amount: -1_000_000, to_amount: 10_000, fx_rate: 100 });
     const ramen = insert({ wallet_id: yen, type: 'expense', total_amount: -320_000, original_amount: -3_200, original_currency: 'JPY', fx_rate: 100 });
+    db.runSync(
+      `INSERT INTO shared_splits (transaction_id, person_name, amount_owed, currency, is_settled) VALUES (?, 'Ken', 1600, 'JPY', 0);`,
+      [ramen]
+    );
     const book = insert({ wallet_id: usd, type: 'expense', total_amount: -160_000, original_amount: -10, original_currency: 'USD', fx_rate: 16_000 });
     db.runSync(`INSERT INTO budgets (category, limit_amount, wallet_id) VALUES ('Food & Dining', 3200000, 1);`);
     db.runSync(`INSERT INTO recurring_rules (template_json, frequency, start_date, created_at) VALUES (?, 'monthly', 1, 1);`, [
@@ -103,6 +111,12 @@ describe('rebaseHomeCurrency', () => {
       totalAmount: -11.63, originalAmount: -186_000, originalCurrency: 'IDR',
     });
     expect((db as any).getFirstSync(`SELECT value FROM app_settings WHERE key = 'currencyCode';`)?.value).toBe('USD');
+    expect(
+      (db as any).getAllSync('SELECT person_name AS name, amount_owed AS owed, currency FROM shared_splits ORDER BY id;')
+    ).toEqual([
+      { name: 'Budi', owed: 25_000, currency: 'IDR' },
+      { name: 'Ken', owed: 1_600, currency: 'JPY' },
+    ]);
   });
 
   it('detects when a plain relabel would be wrong', () => {

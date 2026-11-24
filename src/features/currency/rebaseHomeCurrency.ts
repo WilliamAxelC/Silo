@@ -92,10 +92,7 @@ export function rebaseHomeCurrency(db: Db, fromCurrency: string, toCurrency: str
       `UPDATE budget_plans SET currency = CASE WHEN currency IS NULL THEN ? WHEN currency = ? THEN NULL ELSE currency END;`,
       [from, to],
     );
-    const splits = db.getAllSync<{ id: number; owed: number }>('SELECT id, amount_owed AS owed FROM shared_splits;');
-    for (const split of splits) {
-      db.runSync('UPDATE shared_splits SET amount_owed = ? WHERE id = ?;', [convert(split.owed), split.id]);
-    }
+    db.runSync('UPDATE shared_splits SET currency = ? WHERE currency IS NULL;', [from]);
 
     // Templates and recurring rules are saved transaction inputs; rebase them the same way so new
     // occurrences keep their old-currency amount on the (now foreign) account.

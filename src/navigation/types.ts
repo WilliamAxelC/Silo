@@ -26,6 +26,8 @@ export type RootStackParamList = {
     initialDate?: number;
     /** A receipt photo shared to Silo from another app: scanned as soon as the screen opens. */
     sharedImageUri?: string;
+    /** After saving a new expense, jump directly to SplitBillEditor for that transaction. */
+    openSplitAfterSave?: boolean;
   };
   ReceiptInbox: undefined;
   /** editWalletId: open the account editor for that account on arrival. */
@@ -36,6 +38,8 @@ export type RootStackParamList = {
   Report: { kind?: 'bug' | 'feature' } | undefined;
   Privacy: undefined;
   Goals: undefined;
+  SplitBills: undefined;
+  SplitBillEditor: { transactionId: number };
   Settings: undefined;
   SystemLogs: undefined;
 };
