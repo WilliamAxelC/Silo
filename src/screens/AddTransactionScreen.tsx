@@ -114,6 +114,10 @@ export const AddTransactionScreen = () => {
     () => (editingId ? splits.filter((s) => s.transactionId === editingId).length : 0),
     [editingId, splits]
   );
+  const editingSplitUnpaid = useMemo(
+    () => (editingId ? splits.filter((s) => s.transactionId === editingId && !s.isSettled).length : 0),
+    [editingId, splits]
+  );
   const theme = useAppTheme();
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
@@ -2043,11 +2047,26 @@ export const AddTransactionScreen = () => {
                 onPress={() => navigation.navigate('SplitBillEditor', { transactionId: editingId })}
                 disabled={isSaving}
                 accessibilityRole="button"
-                accessibilityLabel={editingSplitCount > 0 ? 'View or edit split bill' : 'Split this bill'}
+                accessibilityLabel={
+                  editingSplitCount === 0
+                    ? 'Split this bill'
+                    : editingSplitUnpaid > 0
+                      ? `Open split, ${editingSplitUnpaid} unpaid`
+                      : 'Open split, everyone paid'
+                }
               >
-                <Ionicons name="people-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                <Ionicons
+                  name={editingSplitCount === 0 ? 'people-outline' : editingSplitUnpaid > 0 ? 'people' : 'checkmark-done-circle'}
+                  size={18}
+                  color={editingSplitCount > 0 && editingSplitUnpaid === 0 ? theme.income : editingSplitCount > 0 ? theme.warning : theme.primary}
+                  style={{ marginRight: 6 }}
+                />
                 <Text style={[styles.secondaryActionText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
-                  {editingSplitCount > 0 ? `View / Edit split (${editingSplitCount})` : 'Split bill'}
+                  {editingSplitCount === 0
+                    ? 'Split bill'
+                    : editingSplitUnpaid > 0
+                      ? `Split · ${editingSplitUnpaid} of ${editingSplitCount} unpaid`
+                      : 'Split · everyone paid'}
                 </Text>
               </TouchableOpacity>
             ) : null}

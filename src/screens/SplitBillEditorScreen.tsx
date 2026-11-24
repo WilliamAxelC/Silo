@@ -32,6 +32,7 @@ import {
   shareMessageWithIntent,
 } from '../features/splits/messaging';
 import { useSplitsStore } from '../features/splits/store';
+import { useSplitPaidToggle } from '../features/splits/useSplitPaidToggle';
 import type { SiloContact, SplitBreakdown, SplitMode } from '../features/splits/types';
 import {
   formatAmountForInput,
@@ -134,6 +135,13 @@ export const SplitBillEditorScreen = () => {
     () => splits.filter((s) => s.transactionId === transactionId),
     [splits, transactionId]
   );
+  // Setup is open for a new split and folds away once a split is saved (requested 2026-11-24).
+  const [setupOverride, setSetupOverride] = useState<boolean | null>(null);
+  const setupOpen = setupOverride ?? existingSplits.length === 0;
+  const setSetupOpen = (open: boolean) => setSetupOverride(open);
+  const { toggle: togglePaid, modal: settleModal } = useSplitPaidToggle(locale);
+  const paidCount = existingSplits.filter((e) => e.isSettled).length;
+  const allPaid = existingSplits.length > 0 && paidCount === existingSplits.length;
 
   const billCurrency = tx?.originalCurrency ?? homeCurrency;
   const billTotal = useMemo(() => {
@@ -152,7 +160,6 @@ export const SplitBillEditorScreen = () => {
   const [itemDrafts, setItemDrafts] = useState<ReceiptLineItemDraft[]>([]);
   const [itemAssignments, setItemAssignments] = useState<Record<string, string[]>>({});
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
-  const [savedNotice, setSavedNotice] = useState(false);
   const [initializedForTx, setInitializedForTx] = useState<number | null>(null);
 
   useEffect(() => {
@@ -217,7 +224,6 @@ export const SplitBillEditorScreen = () => {
     setItemDrafts(parsedItems);
     setItemAssignments(nextAssignments);
     setInitializedForTx(tx.id);
-    setSavedNotice(false);
   }, [tx, initializedForTx, billCurrency, billTotal]);
 
   const participantKeys = useMemo(() => participants.map((p) => p.key), [participants]);
@@ -298,7 +304,6 @@ export const SplitBillEditorScreen = () => {
       }));
       return [...fromContacts, ...adHocOnly];
     });
-    setSavedNotice(false);
   }, []);
 
   const handleRemoveParticipant = (key: string) => {
@@ -310,7 +315,6 @@ export const SplitBillEditorScreen = () => {
       }
       return next;
     });
-    setSavedNotice(false);
   };
 
   const handleFillRemaining = (targetKey: string) => {
@@ -320,7 +324,6 @@ export const SplitBillEditorScreen = () => {
       ...prev,
       [targetKey]: targetVal > 0 ? formatAmountForInput(targetVal, billCurrency) : '',
     }));
-    setSavedNotice(false);
   };
 
   const toggleItemAssignee = (itemId: string, participantKey: string) => {
@@ -332,7 +335,6 @@ export const SplitBillEditorScreen = () => {
         [itemId]: exists ? current.filter((id) => id !== participantKey) : [...current, participantKey],
       };
     });
-    setSavedNotice(false);
   };
 
   const assignItemToAll = (itemId: string) => {
@@ -345,12 +347,10 @@ export const SplitBillEditorScreen = () => {
         [itemId]: alreadyAll ? [] : allKeys,
       };
     });
-    setSavedNotice(false);
   };
 
   const addInlineItem = () => {
     setItemDrafts((prev) => [...prev, createReceiptItemDraft()]);
-    setSavedNotice(false);
   };
 
   const updateInlineItem = (id: string, field: 'name' | 'price', value: string) => {
@@ -363,7 +363,6 @@ export const SplitBillEditorScreen = () => {
         return { ...item, name: value };
       })
     );
-    setSavedNotice(false);
   };
 
   const removeInlineItem = (id: string) => {
@@ -373,7 +372,6 @@ export const SplitBillEditorScreen = () => {
       delete next[id];
       return next;
     });
-    setSavedNotice(false);
   };
 
   const handleSave = async () => {
@@ -444,10 +442,16 @@ export const SplitBillEditorScreen = () => {
       currency: billCurrency,
       entries,
     });
-    setSavedNotice(true);
+    setSetupOpen(false);
   };
 
   const money = (amount: number) => formatDisplayCurrency(amount, billCurrency, useThousandsSeparator);
+  const unpaidTotal = existingSplits.filter((e) => !e.isSettled).reduce((sum, e) => sum + e.amountOwed, 0);
+  // My share of the saved split: the bill minus what the others owe (only when I was included).
+  const savedSelfShare =
+    existingSplits.length > 0 && existingSplits[0].breakdown?.includeSelf !== false
+      ? Math.max(0, billTotal - existingSplits.reduce((sum, e) => sum + e.amountOwed, 0))
+      : null;
 
   const selectedContactIds = participants
     .map((p) => p.contactId)
@@ -529,444 +533,18 @@ export const SplitBillEditorScreen = () => {
             </Text>
           </View>
 
-          {/* Participants */}
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                People
-              </Text>
-              <TouchableOpacity
-                style={[styles.addPeopleBtn, { backgroundColor: theme.primaryMuted }]}
-                onPress={() => setContactsModalVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Add or pick people"
-              >
-                <Ionicons name="person-add-outline" size={16} color={theme.primary} />
-                <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
-                  {participants.length > 0 ? 'Edit people' : 'Add people'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.includeSelfRow}>
-              <Text style={{ color: theme.text, fontSize: theme.scaleFont(14), flex: 1 }}>
-                Include my own share
-              </Text>
-              <Switch
-                value={includeSelf}
-                onValueChange={(val) => {
-                  setIncludeSelf(val);
-                  setSavedNotice(false);
-                }}
-                accessibilityLabel="Include my own share"
-                trackColor={{ true: theme.primary, false: theme.border }}
-              />
-            </View>
-
-            {participants.length > 0 ? (
-              <View style={styles.chipsWrap}>
-                {participants.map((p) => (
-                  <View
-                    key={p.key}
-                    style={[styles.personChip, { backgroundColor: theme.background, borderColor: theme.border }]}
-                  >
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
-                      {p.name}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => handleRemoveParticipant(p.key)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${p.name}`}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="close-circle" size={18} color={theme.textMuted} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
-                Tap &quot;Add people&quot; to import contacts or add someone manually.
-              </Text>
-            )}
-          </View>
-
-          {/* Split Mode Switcher */}
-          <View style={[styles.modeBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            {(
-              [
-                { key: 'equal', label: 'Equal' },
-                { key: 'custom', label: 'Custom' },
-                { key: 'items', label: 'By Items' },
-              ] as Array<{ key: SplitMode; label: string }>
-            ).map((opt) => {
-              const active = splitMode === opt.key;
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[styles.modeTab, active && { backgroundColor: theme.primary }]}
-                  onPress={() => {
-                    setSplitMode(opt.key);
-                    setSavedNotice(false);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={`Split mode ${opt.label}`}
-                >
-                  <Text
-                    style={{
-                      color: active ? theme.onPrimary : theme.textMuted,
-                      fontWeight: '700',
-                      fontSize: theme.scaleFont(13),
-                    }}
-                  >
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Mode Body */}
-          {splitMode === 'equal' ? (
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                Equal breakdown
-              </Text>
-              {includeSelf ? (
-                <View style={[styles.splitRow, { borderBottomColor: theme.border }]}>
-                  <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
-                    Me (my share)
-                  </Text>
-                  <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: theme.scaleFont(14) }}>
-                    {money(resolvedSelfShare)}
-                  </Text>
-                </View>
-              ) : null}
-              {participants.map((p) => (
-                <View key={p.key} style={[styles.splitRow, { borderBottomColor: theme.border }]}>
-                  <View style={styles.flex}>
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
-                      {p.name}
-                    </Text>
-                    {p.phone ? (
-                      <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>{p.phone}</Text>
-                    ) : null}
-                  </View>
-                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(14) }}>
-                    {money(resolvedShares[p.key] ?? 0)}
-                  </Text>
-                </View>
-              ))}
-              {participants.length === 0 ? (
-                <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
-                  Add participants above to preview equal shares.
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {splitMode === 'custom' ? (
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          {/* Split result: who owes what, paid status, share and mark paid in one place */}
+          {existingSplits.length > 0 ? (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="split-result">
               <View style={styles.sectionHeaderRow}>
-                <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                  Custom amounts
-                </Text>
-                <Text
-                  style={{
-                    color: customResult.isBalanced ? theme.income : theme.expense,
-                    fontWeight: '700',
-                    fontSize: theme.scaleFont(12),
-                  }}
-                >
-                  {customResult.isBalanced
-                    ? 'Balanced ✓'
-                    : customResult.remaining > 0
-                      ? `Remaining: ${money(customResult.remaining)}`
-                      : `Over by: ${money(Math.abs(customResult.remaining))}`}
-                </Text>
-              </View>
-
-              {includeSelf ? (
-                <View style={styles.customRow}>
-                  <View style={styles.flex}>
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
-                      Me (my share)
-                    </Text>
-                    {!customResult.isBalanced ? (
-                      <TouchableOpacity onPress={() => handleFillRemaining(SELF_PARTICIPANT_ID)}>
-                        <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
-                          Fill remainder
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <View style={[styles.customInputWrap, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                    <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
-                      {getCurrencySymbol(billCurrency)}
-                    </Text>
-                    <TextInput
-                      style={[styles.customInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
-                      value={customTexts[SELF_PARTICIPANT_ID] ?? ''}
-                      onChangeText={(t) => {
-                        setCustomTexts((prev) => ({
-                          ...prev,
-                          [SELF_PARTICIPANT_ID]: formatAmountInput(t, billCurrency),
-                        }));
-                        setSavedNotice(false);
-                      }}
-                      keyboardType="decimal-pad"
-                      placeholder="0"
-                      placeholderTextColor={theme.textMuted}
-                      accessibilityLabel="Custom amount for Me"
-                    />
-                  </View>
-                </View>
-              ) : null}
-
-              {participants.map((p) => (
-                <View key={p.key} style={styles.customRow}>
-                  <View style={styles.flex}>
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
-                      {p.name}
-                    </Text>
-                    {!customResult.isBalanced ? (
-                      <TouchableOpacity onPress={() => handleFillRemaining(p.key)}>
-                        <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
-                          Fill remainder
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <View style={[styles.customInputWrap, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                    <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
-                      {getCurrencySymbol(billCurrency)}
-                    </Text>
-                    <TextInput
-                      style={[styles.customInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
-                      value={customTexts[p.key] ?? ''}
-                      onChangeText={(t) => {
-                        setCustomTexts((prev) => ({
-                          ...prev,
-                          [p.key]: formatAmountInput(t, billCurrency),
-                        }));
-                        setSavedNotice(false);
-                      }}
-                      keyboardType="decimal-pad"
-                      placeholder="0"
-                      placeholderTextColor={theme.textMuted}
-                      accessibilityLabel={`Custom amount for ${p.name}`}
-                    />
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          {splitMode === 'items' ? (
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                  Assign receipt items
-                </Text>
-                <TouchableOpacity
-                  style={[styles.addPeopleBtn, { backgroundColor: theme.primaryMuted }]}
-                  onPress={addInlineItem}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add item"
-                >
-                  <Ionicons name="add" size={16} color={theme.primary} />
-                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
-                    Add item
+                <View style={styles.flex}>
+                  <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(15) }]}>Split</Text>
+                  <Text style={{ color: allPaid ? theme.income : theme.textMuted, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
+                    {allPaid
+                      ? 'Everyone has paid'
+                      : `${paidCount} of ${existingSplits.length} paid · ${money(unpaidTotal)} still owed`}
                   </Text>
-                </TouchableOpacity>
-              </View>
-
-              {itemDrafts.map((item) => {
-                const parsedPrice = Math.abs(parseSignedAmount(item.price, undefined, billCurrency));
-                const assignees = itemAssignments[item.id] ?? [];
-                const unassigned = parsedPrice > 0 && assignees.length === 0;
-                return (
-                  <View
-                    key={item.id}
-                    style={[
-                      styles.itemCard,
-                      {
-                        backgroundColor: theme.background,
-                        borderColor: unassigned ? theme.warning : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.itemEditRow}>
-                      <TextInput
-                        style={[
-                          styles.itemNameInput,
-                          { borderColor: theme.border, backgroundColor: theme.surface, color: theme.text, fontSize: theme.scaleFont(13) },
-                        ]}
-                        value={item.name}
-                        onChangeText={(t) => updateInlineItem(item.id, 'name', t)}
-                        placeholder="Item name"
-                        placeholderTextColor={theme.textMuted}
-                        accessibilityLabel="Item name"
-                      />
-                      <TextInput
-                        style={[
-                          styles.itemPriceInput,
-                          { borderColor: theme.border, backgroundColor: theme.surface, color: theme.text, fontSize: theme.scaleFont(13) },
-                        ]}
-                        value={item.price}
-                        onChangeText={(t) => updateInlineItem(item.id, 'price', t)}
-                        placeholder="Price"
-                        placeholderTextColor={theme.textMuted}
-                        keyboardType="decimal-pad"
-                        accessibilityLabel="Item price"
-                      />
-                      <TouchableOpacity
-                        style={styles.itemDeleteBtn}
-                        onPress={() => removeInlineItem(item.id)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove ${item.name || 'item'}`}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={theme.expense} />
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.assignChipsRow}>
-                      {includeSelf ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.assignChip,
-                            {
-                              borderColor: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primary : theme.border,
-                              backgroundColor: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primaryMuted : theme.surface,
-                            },
-                          ]}
-                          onPress={() => toggleItemAssignee(item.id, SELF_PARTICIPANT_ID)}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: assignees.includes(SELF_PARTICIPANT_ID) }}
-                        >
-                          <Text
-                            style={{
-                              color: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primary : theme.text,
-                              fontWeight: '600',
-                              fontSize: theme.scaleFont(12),
-                            }}
-                          >
-                            Me
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      {participants.map((p) => {
-                        const selected = assignees.includes(p.key);
-                        return (
-                          <TouchableOpacity
-                            key={p.key}
-                            style={[
-                              styles.assignChip,
-                              {
-                                borderColor: selected ? theme.primary : theme.border,
-                                backgroundColor: selected ? theme.primaryMuted : theme.surface,
-                              },
-                            ]}
-                            onPress={() => toggleItemAssignee(item.id, p.key)}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected }}
-                          >
-                            <Text
-                              style={{
-                                color: selected ? theme.primary : theme.text,
-                                fontWeight: '600',
-                                fontSize: theme.scaleFont(12),
-                              }}
-                            >
-                              {p.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-
-                      {participants.length > 0 ? (
-                        <TouchableOpacity
-                          style={[styles.assignChip, { borderColor: theme.border, backgroundColor: theme.surface }]}
-                          onPress={() => assignItemToAll(item.id)}
-                          accessibilityRole="button"
-                        >
-                          <Text style={{ color: theme.textMuted, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
-                            All
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              })}
-
-              {itemDrafts.length === 0 ? (
-                <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
-                  No receipt items on this transaction yet. Tap &quot;Add item&quot; above to enter them.
-                </Text>
-              ) : (
-                <View style={styles.itemTotalsBox}>
-                  <View style={styles.itemTotalLine}>
-                    <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>Items subtotal</Text>
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
-                      {money(itemizedResult.itemsSubtotal)}
-                    </Text>
-                  </View>
-                  {itemizedResult.adjustmentTotal !== 0 ? (
-                    <View style={styles.itemTotalLine}>
-                      <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>
-                        {itemizedResult.adjustmentTotal > 0 ? 'Tax & fees (prorated)' : 'Discount (prorated)'}
-                      </Text>
-                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
-                        {itemizedResult.adjustmentTotal > 0 ? '+' : '-'}
-                        {money(Math.abs(itemizedResult.adjustmentTotal))}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {participants.map((p) => (
-                    <View key={p.key} style={styles.itemTotalLine}>
-                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
-                        {p.name}
-                      </Text>
-                      <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
-                        {money(resolvedShares[p.key] ?? 0)}
-                      </Text>
-                    </View>
-                  ))}
-                  {includeSelf ? (
-                    <View style={styles.itemTotalLine}>
-                      <Text style={{ color: theme.textMuted, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
-                        Me (my share)
-                      </Text>
-                      <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
-                        {money(resolvedSelfShare)}
-                      </Text>
-                    </View>
-                  ) : null}
                 </View>
-              )}
-            </View>
-          ) : null}
-
-          <TouchableOpacity
-            style={[styles.saveBtn, { backgroundColor: theme.primary }]}
-            onPress={() => void handleSave()}
-            accessibilityRole="button"
-            accessibilityLabel="Save split"
-          >
-            <Text style={[styles.saveBtnText, { color: theme.onPrimary, fontSize: theme.scaleFont(15) }]}>
-              Save Split
-            </Text>
-          </TouchableOpacity>
-
-          {savedNotice || existingSplits.length > 0 ? (
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 12 }]}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                  {savedNotice ? 'Saved · Share now' : 'Share saved split'}
-                </Text>
                 <TouchableOpacity
                   onPress={() => {
                     const summaryMsg = formatGroupSummaryMessage({
@@ -981,14 +559,22 @@ export const SplitBillEditorScreen = () => {
                     });
                     void shareMessageWithIntent(summaryMsg, `Split: ${tx.merchantName}`);
                   }}
+                  style={styles.linkBtn}
                   accessibilityRole="button"
                   accessibilityLabel="Share group summary"
                 >
-                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
-                    Group Summary
-                  </Text>
+                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Group summary</Text>
                 </TouchableOpacity>
               </View>
+
+              {savedSelfShare != null ? (
+                <View style={[styles.resultRow, { borderTopColor: theme.border }]}>
+                  <View style={styles.flex}>
+                    <Text style={{ color: theme.textMuted, fontWeight: '600', fontSize: theme.scaleFont(14) }}>Me (my share)</Text>
+                  </View>
+                  <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: theme.scaleFont(14) }}>{money(savedSelfShare)}</Text>
+                </View>
+              ) : null}
 
               {existingSplits.map((entry) => {
                 const msg = formatPersonBillMessage({
@@ -1005,38 +591,522 @@ export const SplitBillEditorScreen = () => {
                   useThousandsSeparator,
                 });
                 return (
-                  <View key={entry.id} style={[styles.shareRow, { borderTopColor: theme.border }]}>
+                  <View key={entry.id} style={[styles.resultRow, { borderTopColor: theme.border }]} testID={`split-person-${entry.id}`}>
                     <View style={styles.flex}>
-                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
+                      <Text style={{ color: theme.text, fontWeight: '700', fontSize: theme.scaleFont(14) }} numberOfLines={1}>
                         {entry.personName}
                       </Text>
-                      <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
+                      <Text
+                        style={{
+                          color: entry.isSettled ? theme.income : theme.text,
+                          fontWeight: '700',
+                          fontSize: theme.scaleFont(14),
+                          textDecorationLine: entry.isSettled ? 'line-through' : 'none',
+                        }}
+                      >
                         {money(entry.amountOwed)}
                       </Text>
                     </View>
+                    {!entry.isSettled ? (
+                      <>
+                        <TouchableOpacity
+                          style={[styles.iconPill, { backgroundColor: '#25D36618', borderColor: '#25D366' }]}
+                          onPress={() => void openWhatsAppMessage(msg, entry.phone, effectiveCountryCode)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Send WhatsApp to ${entry.personName}`}
+                        >
+                          <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.iconPill, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
+                          onPress={() => void shareMessageWithIntent(msg, `Split with ${entry.personName}`)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Share bill with ${entry.personName}`}
+                        >
+                          <Ionicons name="share-outline" size={18} color={theme.primary} />
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
                     <TouchableOpacity
-                      style={[styles.iconPill, { backgroundColor: '#25D36618', borderColor: '#25D366' }]}
-                      onPress={() => void openWhatsAppMessage(msg, entry.phone, effectiveCountryCode)}
+                      style={[
+                        styles.paidBtn,
+                        entry.isSettled
+                          ? { backgroundColor: theme.incomeMuted, borderColor: theme.income }
+                          : { backgroundColor: theme.surface, borderColor: theme.border },
+                      ]}
+                      onPress={() => togglePaid(entry)}
                       accessibilityRole="button"
-                      accessibilityLabel={`Send WhatsApp to ${entry.personName}`}
+                      accessibilityState={{ checked: entry.isSettled }}
+                      accessibilityLabel={entry.isSettled ? `${entry.personName} has paid. Mark unpaid` : `Mark ${entry.personName} as paid`}
                     >
-                      <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.iconPill, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]}
-                      onPress={() => void shareMessageWithIntent(msg, `Split with ${entry.personName}`)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Share bill with ${entry.personName}`}
-                    >
-                      <Ionicons name="share-outline" size={18} color={theme.primary} />
+                      <Ionicons
+                        name={entry.isSettled ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={16}
+                        color={entry.isSettled ? theme.income : theme.textMuted}
+                      />
+                      <Text style={{ color: entry.isSettled ? theme.income : theme.text, fontWeight: '700', fontSize: theme.scaleFont(12) }}>
+                        {entry.isSettled ? 'Paid' : 'Mark paid'}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 );
               })}
             </View>
           ) : null}
+
+          {existingSplits.length > 0 ? (
+            <TouchableOpacity
+              style={[styles.setupToggle, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              onPress={() => setSetupOpen(!setupOpen)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: setupOpen }}
+              accessibilityLabel={setupOpen ? 'Hide split setup' : 'Edit split'}
+              testID="split-setup-toggle"
+            >
+              <Ionicons name="create-outline" size={18} color={theme.primary} />
+              <Text style={{ color: theme.text, fontWeight: '700', fontSize: theme.scaleFont(14), flex: 1 }}>
+                {setupOpen ? 'Hide split setup' : 'Edit split'}
+              </Text>
+              <Ionicons name={setupOpen ? 'chevron-up' : 'chevron-down'} size={18} color={theme.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+
+          {setupOpen ? (
+            <>
+            {/* Participants */}
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                  People
+                </Text>
+                <TouchableOpacity
+                  style={[styles.addPeopleBtn, { backgroundColor: theme.primaryMuted }]}
+                  onPress={() => setContactsModalVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add or pick people"
+                >
+                  <Ionicons name="person-add-outline" size={16} color={theme.primary} />
+                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
+                    {participants.length > 0 ? 'Edit people' : 'Add people'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.includeSelfRow}>
+                <Text style={{ color: theme.text, fontSize: theme.scaleFont(14), flex: 1 }}>
+                  Include my own share
+                </Text>
+                <Switch
+                  value={includeSelf}
+                  onValueChange={(val) => {
+                    setIncludeSelf(val);
+                  }}
+                  accessibilityLabel="Include my own share"
+                  trackColor={{ true: theme.primary, false: theme.border }}
+                />
+              </View>
+
+              {participants.length > 0 ? (
+                <View style={styles.chipsWrap}>
+                  {participants.map((p) => (
+                    <View
+                      key={p.key}
+                      style={[styles.personChip, { backgroundColor: theme.background, borderColor: theme.border }]}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
+                        {p.name}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => handleRemoveParticipant(p.key)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${p.name}`}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
+                  Tap &quot;Add people&quot; to import contacts or add someone manually.
+                </Text>
+              )}
+            </View>
+
+            {/* Split Mode Switcher */}
+            <View style={[styles.modeBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              {(
+                [
+                  { key: 'equal', label: 'Equal' },
+                  { key: 'custom', label: 'Custom' },
+                  { key: 'items', label: 'By Items' },
+                ] as Array<{ key: SplitMode; label: string }>
+              ).map((opt) => {
+                const active = splitMode === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.modeTab, active && { backgroundColor: theme.primary }]}
+                    onPress={() => {
+                      setSplitMode(opt.key);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Split mode ${opt.label}`}
+                  >
+                    <Text
+                      style={{
+                        color: active ? theme.onPrimary : theme.textMuted,
+                        fontWeight: '700',
+                        fontSize: theme.scaleFont(13),
+                      }}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Mode Body */}
+            {splitMode === 'equal' ? (
+              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                  Equal breakdown
+                </Text>
+                {includeSelf ? (
+                  <View style={[styles.splitRow, { borderBottomColor: theme.border }]}>
+                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
+                      Me (my share)
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: theme.scaleFont(14) }}>
+                      {money(resolvedSelfShare)}
+                    </Text>
+                  </View>
+                ) : null}
+                {participants.map((p) => (
+                  <View key={p.key} style={[styles.splitRow, { borderBottomColor: theme.border }]}>
+                    <View style={styles.flex}>
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
+                        {p.name}
+                      </Text>
+                      {p.phone ? (
+                        <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>{p.phone}</Text>
+                      ) : null}
+                    </View>
+                    <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(14) }}>
+                      {money(resolvedShares[p.key] ?? 0)}
+                    </Text>
+                  </View>
+                ))}
+                {participants.length === 0 ? (
+                  <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
+                    Add participants above to preview equal shares.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {splitMode === 'custom' ? (
+              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    Custom amounts
+                  </Text>
+                  <Text
+                    style={{
+                      color: customResult.isBalanced ? theme.income : theme.expense,
+                      fontWeight: '700',
+                      fontSize: theme.scaleFont(12),
+                    }}
+                  >
+                    {customResult.isBalanced
+                      ? 'Balanced ✓'
+                      : customResult.remaining > 0
+                        ? `Remaining: ${money(customResult.remaining)}`
+                        : `Over by: ${money(Math.abs(customResult.remaining))}`}
+                  </Text>
+                </View>
+
+                {includeSelf ? (
+                  <View style={styles.customRow}>
+                    <View style={styles.flex}>
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
+                        Me (my share)
+                      </Text>
+                      {!customResult.isBalanced ? (
+                        <TouchableOpacity onPress={() => handleFillRemaining(SELF_PARTICIPANT_ID)}>
+                          <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
+                            Fill remainder
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <View style={[styles.customInputWrap, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                      <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
+                        {getCurrencySymbol(billCurrency)}
+                      </Text>
+                      <TextInput
+                        style={[styles.customInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+                        value={customTexts[SELF_PARTICIPANT_ID] ?? ''}
+                        onChangeText={(t) => {
+                          setCustomTexts((prev) => ({
+                            ...prev,
+                            [SELF_PARTICIPANT_ID]: formatAmountInput(t, billCurrency),
+                          }));
+                        }}
+                        keyboardType="decimal-pad"
+                        placeholder="0"
+                        placeholderTextColor={theme.textMuted}
+                        accessibilityLabel="Custom amount for Me"
+                      />
+                    </View>
+                  </View>
+                ) : null}
+
+                {participants.map((p) => (
+                  <View key={p.key} style={styles.customRow}>
+                    <View style={styles.flex}>
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(14) }}>
+                        {p.name}
+                      </Text>
+                      {!customResult.isBalanced ? (
+                        <TouchableOpacity onPress={() => handleFillRemaining(p.key)}>
+                          <Text style={{ color: theme.primary, fontSize: theme.scaleFont(12), fontWeight: '600' }}>
+                            Fill remainder
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <View style={[styles.customInputWrap, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                      <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
+                        {getCurrencySymbol(billCurrency)}
+                      </Text>
+                      <TextInput
+                        style={[styles.customInput, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+                        value={customTexts[p.key] ?? ''}
+                        onChangeText={(t) => {
+                          setCustomTexts((prev) => ({
+                            ...prev,
+                            [p.key]: formatAmountInput(t, billCurrency),
+                          }));
+                        }}
+                        keyboardType="decimal-pad"
+                        placeholder="0"
+                        placeholderTextColor={theme.textMuted}
+                        accessibilityLabel={`Custom amount for ${p.name}`}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {splitMode === 'items' ? (
+              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={[styles.sectionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    Assign receipt items
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.addPeopleBtn, { backgroundColor: theme.primaryMuted }]}
+                    onPress={addInlineItem}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add item"
+                  >
+                    <Ionicons name="add" size={16} color={theme.primary} />
+                    <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
+                      Add item
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {itemDrafts.map((item) => {
+                  const parsedPrice = Math.abs(parseSignedAmount(item.price, undefined, billCurrency));
+                  const assignees = itemAssignments[item.id] ?? [];
+                  const unassigned = parsedPrice > 0 && assignees.length === 0;
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.itemCard,
+                        {
+                          backgroundColor: theme.background,
+                          borderColor: unassigned ? theme.warning : theme.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.itemEditRow}>
+                        <TextInput
+                          style={[
+                            styles.itemNameInput,
+                            { borderColor: theme.border, backgroundColor: theme.surface, color: theme.text, fontSize: theme.scaleFont(13) },
+                          ]}
+                          value={item.name}
+                          onChangeText={(t) => updateInlineItem(item.id, 'name', t)}
+                          placeholder="Item name"
+                          placeholderTextColor={theme.textMuted}
+                          accessibilityLabel="Item name"
+                        />
+                        <TextInput
+                          style={[
+                            styles.itemPriceInput,
+                            { borderColor: theme.border, backgroundColor: theme.surface, color: theme.text, fontSize: theme.scaleFont(13) },
+                          ]}
+                          value={item.price}
+                          onChangeText={(t) => updateInlineItem(item.id, 'price', t)}
+                          placeholder="Price"
+                          placeholderTextColor={theme.textMuted}
+                          keyboardType="decimal-pad"
+                          accessibilityLabel="Item price"
+                        />
+                        <TouchableOpacity
+                          style={styles.itemDeleteBtn}
+                          onPress={() => removeInlineItem(item.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${item.name || 'item'}`}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={theme.expense} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.assignChipsRow}>
+                        {includeSelf ? (
+                          <TouchableOpacity
+                            style={[
+                              styles.assignChip,
+                              {
+                                borderColor: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primary : theme.border,
+                                backgroundColor: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primaryMuted : theme.surface,
+                              },
+                            ]}
+                            onPress={() => toggleItemAssignee(item.id, SELF_PARTICIPANT_ID)}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: assignees.includes(SELF_PARTICIPANT_ID) }}
+                          >
+                            <Text
+                              style={{
+                                color: assignees.includes(SELF_PARTICIPANT_ID) ? theme.primary : theme.text,
+                                fontWeight: '600',
+                                fontSize: theme.scaleFont(12),
+                              }}
+                            >
+                              Me
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+
+                        {participants.map((p) => {
+                          const selected = assignees.includes(p.key);
+                          return (
+                            <TouchableOpacity
+                              key={p.key}
+                              style={[
+                                styles.assignChip,
+                                {
+                                  borderColor: selected ? theme.primary : theme.border,
+                                  backgroundColor: selected ? theme.primaryMuted : theme.surface,
+                                },
+                              ]}
+                              onPress={() => toggleItemAssignee(item.id, p.key)}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
+                            >
+                              <Text
+                                style={{
+                                  color: selected ? theme.primary : theme.text,
+                                  fontWeight: '600',
+                                  fontSize: theme.scaleFont(12),
+                                }}
+                              >
+                                {p.name}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+
+                        {participants.length > 0 ? (
+                          <TouchableOpacity
+                            style={[styles.assignChip, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                            onPress={() => assignItemToAll(item.id)}
+                            accessibilityRole="button"
+                          >
+                            <Text style={{ color: theme.textMuted, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
+                              All
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })}
+
+                {itemDrafts.length === 0 ? (
+                  <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }}>
+                    No receipt items on this transaction yet. Tap &quot;Add item&quot; above to enter them.
+                  </Text>
+                ) : (
+                  <View style={styles.itemTotalsBox}>
+                    <View style={styles.itemTotalLine}>
+                      <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>Items subtotal</Text>
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
+                        {money(itemizedResult.itemsSubtotal)}
+                      </Text>
+                    </View>
+                    {itemizedResult.adjustmentTotal !== 0 ? (
+                      <View style={styles.itemTotalLine}>
+                        <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(12) }}>
+                          {itemizedResult.adjustmentTotal > 0 ? 'Tax & fees (prorated)' : 'Discount (prorated)'}
+                        </Text>
+                        <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(12) }}>
+                          {itemizedResult.adjustmentTotal > 0 ? '+' : '-'}
+                          {money(Math.abs(itemizedResult.adjustmentTotal))}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {participants.map((p) => (
+                      <View key={p.key} style={styles.itemTotalLine}>
+                        <Text style={{ color: theme.text, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
+                          {p.name}
+                        </Text>
+                        <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
+                          {money(resolvedShares[p.key] ?? 0)}
+                        </Text>
+                      </View>
+                    ))}
+                    {includeSelf ? (
+                      <View style={styles.itemTotalLine}>
+                        <Text style={{ color: theme.textMuted, fontWeight: '600', fontSize: theme.scaleFont(13) }}>
+                          Me (my share)
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: theme.scaleFont(13) }}>
+                          {money(resolvedSelfShare)}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+              onPress={() => void handleSave()}
+              accessibilityRole="button"
+              accessibilityLabel="Save split"
+            >
+              <Text style={[styles.saveBtnText, { color: theme.onPrimary, fontSize: theme.scaleFont(15) }]}>
+                Save Split
+              </Text>
+            </TouchableOpacity>
+            </>
+          ) : null}
+
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {settleModal}
 
       <ContactsPickerModal
         visible={contactsModalVisible}
@@ -1050,6 +1120,10 @@ export const SplitBillEditorScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  resultRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, paddingVertical: 10, minHeight: 56 },
+  paidBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
+  setupToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, minHeight: 52, paddingHorizontal: 14, marginBottom: 12 },
+  linkBtn: { minHeight: 48, justifyContent: 'center', paddingLeft: 8 },
   container: { flex: 1 },
   flex: { flex: 1 },
   header: {

@@ -75,7 +75,8 @@ interface TransactionRowProps {
   item: Transaction;
   accountLabel?: string;
   dateLabel?: string;
-  splitBadge?: string;
+  /** Expense split with others: 'pending' while anyone still owes, 'paid' once everyone paid. */
+  splitStatus?: { state: 'pending' | 'paid'; unpaid: number };
   currencyCode: string;
   useThousandsSeparator: boolean;
   theme: ReturnType<typeof useAppTheme>;
@@ -86,7 +87,7 @@ const TransactionRow = React.memo(function TransactionRow({
   item,
   accountLabel,
   dateLabel,
-  splitBadge,
+  splitStatus,
   currencyCode,
   useThousandsSeparator,
   theme,
@@ -98,7 +99,7 @@ const TransactionRow = React.memo(function TransactionRow({
   const tagLabel = item.tags && item.tags.length > 0 ? item.tags.map((t) => `#${t}`).join(' ') : '';
   const subtitle = isTransfer
     ? [dateLabel, accountLabel, tagLabel, item.note].filter(Boolean).join(' · ')
-    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, splitBadge, tagLabel, item.note]
+    : [dateLabel, item.category || UNCATEGORIZED_EXPENSE_LABEL, accountLabel, tagLabel, item.note]
         .filter(Boolean)
         .join(' · ');
   const amountText = formatDisplayCurrency(
@@ -125,10 +126,26 @@ const TransactionRow = React.memo(function TransactionRow({
       style={[styles.transactionRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${foreignText ? `${foreignText} (${amountText})` : amountText}, ${subtitle}`}
+      accessibilityLabel={`${item.merchantName || 'Unknown'}, ${isTransfer ? 'transfer ' : ''}${foreignText ? `${foreignText} (${amountText})` : amountText}, ${subtitle}${
+        splitStatus ? (splitStatus.state === 'paid' ? ', split, everyone paid' : `, split, ${splitStatus.unpaid} unpaid`) : ''
+      }`}
     >
       <View style={[styles.iconContainer, { backgroundColor: tint + '18' }]}>
         <Ionicons name={isTransfer ? 'swap-horizontal' : isIncome ? 'arrow-down' : 'arrow-up'} size={16} color={tint} />
+        {splitStatus ? (
+          <View
+            testID={`split-status-${splitStatus.state}`}
+            style={[
+              styles.splitBadge,
+              {
+                backgroundColor: splitStatus.state === 'paid' ? theme.income : theme.warning,
+                borderColor: theme.surface,
+              },
+            ]}
+          >
+            <Ionicons name={splitStatus.state === 'paid' ? 'checkmark' : 'people'} size={10} color={theme.onPrimary} />
+          </View>
+        ) : null}
       </View>
       <View style={styles.transactionDetails}>
         <Text style={[styles.transactionTitle, { color: theme.text, fontSize: theme.scaleFont(14) }]} numberOfLines={1}>
@@ -628,11 +645,11 @@ export const CashflowScreen = () => {
     [walletNames, showAccountNames]
   );
 
-  const getSplitBadge = useCallback(
-    (transactionId: number): string | undefined => {
+  const getSplitStatus = useCallback(
+    (transactionId: number): TransactionRowProps['splitStatus'] => {
       const info = splitCounts[transactionId];
       if (!info || info.total === 0) return undefined;
-      return info.unpaid > 0 ? `Split · ${info.unpaid} unpaid` : 'Split · Settled';
+      return { state: info.unpaid > 0 ? 'pending' : 'paid', unpaid: info.unpaid };
     },
     [splitCounts]
   );
@@ -642,14 +659,14 @@ export const CashflowScreen = () => {
       <TransactionRow
         item={item}
         accountLabel={getAccountLabel(item)}
-        splitBadge={getSplitBadge(item.id)}
+        splitStatus={getSplitStatus(item.id)}
         currencyCode={currencyCode}
         useThousandsSeparator={useThousandsSeparator}
         theme={theme}
         onPress={handleOpenTransaction}
       />
     ),
-    [getAccountLabel, getSplitBadge, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+    [getAccountLabel, getSplitStatus, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
   );
 
   const currentYear = new Date().getFullYear();
@@ -666,7 +683,7 @@ export const CashflowScreen = () => {
           item={item}
           dateLabel={dateLabel}
           accountLabel={getAccountLabel(item, true)}
-          splitBadge={getSplitBadge(item.id)}
+          splitStatus={getSplitStatus(item.id)}
           currencyCode={currencyCode}
           useThousandsSeparator={useThousandsSeparator}
           theme={theme}
@@ -674,7 +691,7 @@ export const CashflowScreen = () => {
         />
       );
     },
-    [currentYear, locale, getAccountLabel, getSplitBadge, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
+    [currentYear, locale, getAccountLabel, getSplitStatus, currencyCode, useThousandsSeparator, theme, handleOpenTransaction]
   );
 
   const renderSectionHeader = useCallback(
@@ -886,7 +903,7 @@ export const CashflowScreen = () => {
                         key={tx.id}
                         item={tx}
                         accountLabel={getAccountLabel(tx)}
-                        splitBadge={getSplitBadge(tx.id)}
+                        splitStatus={getSplitStatus(tx.id)}
                         currencyCode={currencyCode}
                         useThousandsSeparator={useThousandsSeparator}
                         theme={theme}
@@ -1108,6 +1125,17 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 28 },
   sectionHeader: { fontSize: 12, fontWeight: '700', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
   transactionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 62, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
+  splitBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   iconContainer: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   transactionDetails: { flex: 1, marginRight: 10 },
   transactionTitle: { fontSize: 14, fontWeight: '600' },

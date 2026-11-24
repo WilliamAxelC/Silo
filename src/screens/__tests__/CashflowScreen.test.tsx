@@ -692,4 +692,25 @@ describe('CashflowScreen', () => {
 
     ReactTestRenderer.act(() => renderer.unmount());
   });
+
+  // Requested 2026-11-24: an expense with a split shows an icon that changes once everyone has paid.
+  it('regression: marks split expenses with a badge that turns to paid when everyone paid', () => {
+    const { useSplitsStore } = require('../../features/splits/store');
+    const entry = (over: any) => ({ id: 1, transactionId: 1, personName: 'Valen', amountOwed: 12_500, isSettled: false, ...over });
+    useSplitsStore.setState({ splits: [entry({}), entry({ id: 2, personName: 'Budi', isSettled: true })], loaded: true, ensureLoaded: jest.fn() } as any);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+    expect(renderer.root.findAllByProps({ testID: 'split-status-pending' }).length).toBeGreaterThan(0);
+    const row = renderer.root.findAll((n: any) => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('Warung'))[0];
+    expect(row.props.accessibilityLabel).toContain('split, 1 unpaid');
+
+    ReactTestRenderer.act(() => {
+      useSplitsStore.setState({ splits: [entry({ isSettled: true }), entry({ id: 2, isSettled: true })] } as any);
+    });
+    expect(renderer.root.findAllByProps({ testID: 'split-status-pending' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ testID: 'split-status-paid' }).length).toBeGreaterThan(0);
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });
