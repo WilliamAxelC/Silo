@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.5] - 2026-11-25
 ### Changed
 - Split Bill: each expense's split page now shows who owes what, with Mark paid, WhatsApp and Share on each
   person; the setup folds away after saving (Edit split to change it). All Splits stays in More.
