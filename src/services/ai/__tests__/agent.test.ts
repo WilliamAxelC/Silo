@@ -1193,7 +1193,7 @@ describe('AI Agent & Context Engine', () => {
 
     it('replaces the made-up network excuse with an honest, mode-specific answer', () => {
       expect(replaceFalseConnectivityClaim(reported, 'rag')).toMatch(/^I couldn't find records in Silo/);
-      expect(replaceFalseConnectivityClaim(reported, 'chat')).toMatch(/Switch to Grounded/);
+      expect(replaceFalseConnectivityClaim(reported, 'chat')).toMatch(/^I couldn't find records in Silo/);
       for (const variant of [
         'Sorry, there was a server issue retrieving your records.',
         "I'm unable to retrieve your data right now.",
@@ -1213,11 +1213,21 @@ describe('AI Agent & Context Engine', () => {
       }
     });
 
-    it('tells the model in Chat mode that Silo is offline and cannot see records there', () => {
+    // Reported 2026-11-24: "the local model in chat mode doesn't have access to my data". Chat mode now gets
+    // the same facts as Grounded mode (it can just talk more freely).
+    it('regression: Chat mode receives the facts from the user\'s records and is told Silo is offline', () => {
       (useSettingsStore.getState as jest.Mock).mockReturnValue({ localSystemPrompt: '' });
-      const chat = buildLocalMessagesForMode('How much did I spend?', 'chat', useAIStore.getState());
+      const facts = [
+        { id: 'summary', kind: 'summary', label: 'Summary', content: 'Summary: Spent Rp 4.121.000, Income Rp 10.300.000', score: 1 } as RetrievedContextItem,
+        { id: 'top', kind: 'top-categories', label: 'Top', content: 'Top categories: Food & Dining Rp 1.100.000', score: 1 } as RetrievedContextItem,
+      ];
+      const chat = buildLocalMessagesForMode('Whats my most spending category', 'chat', useAIStore.getState(), facts);
+      expect(chat[0].content).toContain('Top categories: Food & Dining Rp 1.100.000');
+      expect(chat[0].content).toMatch(/quote amounts exactly/);
       expect(chat[0].content).toMatch(/never mention internet, network or server problems/);
-      expect(chat[0].content).toMatch(/switch to Grounded mode/);
+      expect(chat[0].content).not.toMatch(/switch to Grounded/i);
+      const external = buildExternalMessagesForMode('Whats my most spending category', 'chat', useAIStore.getState(), facts);
+      expect(external[0].content).toContain('Summary: Spent Rp 4.121.000');
     });
   });
 

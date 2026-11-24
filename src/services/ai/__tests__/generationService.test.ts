@@ -365,6 +365,21 @@ describe('GenerationService', () => {
       expect(callArgs.disableThinking).toBe(true);
     });
 
+    // Reported 2026-11-24 (screenshots): "Whats my most spending category" in Chat mode got generic tips,
+    // because only Grounded mode looked up the user's records.
+    it('regression: looks up the user\'s records for Chat mode too and sends them to the model', async () => {
+      const agent = require('../agent');
+      const spy = jest.spyOn(agent, 'buildRetrievedContext').mockReturnValue([
+        { id: 'top', kind: 'top-categories', label: 'Top', content: 'Top categories: Food & Dining Rp 1.100.000', score: 1 },
+      ]);
+      const service = getGenerationService();
+      await service.startGeneration({ prompt: 'Whats my most spending category', mode: 'chat' });
+      expect(spy).toHaveBeenCalledWith('Whats my most spending category');
+      const args = adapter.completion.mock.calls[0][1];
+      expect(args.messages[0]).toMatchObject({ role: 'system', content: expect.stringContaining('Top categories: Food & Dining Rp 1.100.000') });
+      spy.mockRestore();
+    });
+
     it('disables Qwen thinking by default and sends structured messages in both local chat and grounded (rag) modes', async () => {
       const service = getGenerationService();
 

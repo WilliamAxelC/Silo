@@ -245,6 +245,19 @@ function removeGeneratedControlTokens(value: string) {
   return text;
 }
 
+/**
+ * Facts from the user's records for every question, in both Grounded and Chat mode. A lookup failure must not
+ * break the chat: the model then answers without facts.
+ */
+function safeRetrieve(prompt: string) {
+  try {
+    return buildRetrievedContext(prompt);
+  } catch (error) {
+    console.warn('Finance fact lookup failed:', error);
+    return undefined;
+  }
+}
+
 function stripThinkingBlocks(value: string): string {
   let cleaned = value.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (cleaned.toLowerCase().includes('<think>')) {
@@ -873,7 +886,7 @@ class GenerationService {
         { role: 'user', content: prompt },
       ];
     } else {
-      const retrievedContext = mode === 'rag' ? buildRetrievedContext(prompt) : undefined;
+      const retrievedContext = safeRetrieve(prompt);
       messages = buildExternalMessagesForMode(prompt, mode, store, retrievedContext);
     }
 
@@ -1066,7 +1079,7 @@ class GenerationService {
   }
 
   private async prepareLocalMessages({ userPrompt, mode }: PreparePromptParams): Promise<ExternalChatMessage[]> {
-    const retrievedContext = mode === 'rag' ? buildRetrievedContext(userPrompt) : undefined;
+    const retrievedContext = safeRetrieve(userPrompt);
     return buildLocalMessagesForMode(userPrompt, mode, useAIStore.getState(), retrievedContext);
   }
 
@@ -1083,7 +1096,7 @@ class GenerationService {
     });
 
     try {
-      const retrievedContext = mode === 'rag' ? buildRetrievedContext(userPrompt) : undefined;
+      const retrievedContext = safeRetrieve(userPrompt);
       return buildPromptForMode(userPrompt, mode, useAIStore.getState(), retrievedContext);
     } finally {
       if (!isLlamaRnBackend(previousRuntimeInfo)) {

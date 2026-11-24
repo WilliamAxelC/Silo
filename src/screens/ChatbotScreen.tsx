@@ -28,6 +28,7 @@ import { getGenerationService, type GenerationServiceRuntimeSnapshot } from '../
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { getChatRuntimePreloadService, type ChatRuntimePreloadSnapshot } from '../services/ai/chatRuntimePreloadService';
 import { ChatChart } from '../components/ChatChart';
+import { AI_DISCLAIMER_CAPTION, AiDisclaimerModal } from '../components/AiDisclaimer';
 
 function parseMessageWithCharts(text: string) {
   const cleanText = text.replace(/<\/chart>/g, '');
@@ -1103,7 +1104,14 @@ export const ChatbotScreen = () => {
             </TouchableOpacity>
           )}
         </View>
+        <Text
+          style={{ color: theme.textMuted, fontSize: theme.scaleFont(11), textAlign: 'center', paddingHorizontal: 16, paddingBottom: 6 }}
+          testID="ai-caption"
+        >
+          {AI_DISCLAIMER_CAPTION}
+        </Text>
       </KeyboardAvoidingView>
+      <AiDisclaimerModal />
     </SafeAreaView>
   );
 };

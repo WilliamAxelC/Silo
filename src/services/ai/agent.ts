@@ -2459,9 +2459,11 @@ const MAX_LOCAL_HISTORY_TURN_CHARS = 180;
 const MAX_LOCAL_SUMMARY_CHARS = 220;
 const MAX_LOCAL_USER_PROMPT_CHARS = 450;
 const DEFAULT_LOCAL_SYSTEM_PROMPT =
-  'You are Silo AI, a concise offline personal finance assistant. Reply in 2-4 short sentences or brief bullets; never invent balances or transactions. ' +
-  "You cannot see the user's records in this mode: if asked about their own spending, balances or budgets, tell them to switch to Grounded mode. " +
+  'You are Silo AI, a friendly personal finance assistant running on this phone. Reply in 2-5 short sentences or a brief list. ' +
+  "When the question is about the user's own money, answer from the facts from their Silo records below and quote amounts exactly as written; " +
+  'never invent or recalculate balances, totals or transactions. For general money questions, give practical advice that fits their numbers. ' +
   'Silo runs entirely on this phone, so never mention internet, network or server problems.';
+const CHAT_FACTS_HEADING = "Facts from the user's Silo records (use when relevant):";
 const DEFAULT_GROUNDED_SYSTEM_PROMPT =
   "You are Silo AI. Below are the user's real Silo finance records. Answer ONLY from these facts in 1-3 short sentences (or a brief list if asked). " +
   "Quote amounts exactly as written; never recalculate. Reply in the user's language. If the data does not cover the question, say so clearly.";
@@ -2590,7 +2592,7 @@ const FALSE_CONNECTIVITY_CLAIM =
 export function replaceFalseConnectivityClaim(text: string, mode: LocalAiMode): string {
   if (!FALSE_CONNECTIVITY_CLAIM.test(text)) return text;
   return mode === 'chat'
-    ? "Chat mode can't see your Silo records. Switch to Grounded to ask about your spending, balances or budgets."
+    ? "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\""
     : "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"";
 }
 
@@ -2636,6 +2638,10 @@ export function buildLocalMessagesForMode(
 
   if (mode === 'rag' && retrievedContext) {
     systemPrompt = buildGroundedSystemPrompt(retrievedContext, customSystemPrompt);
+  } else if (mode === 'chat' && retrievedContext?.length) {
+    // Chat mode also sees the user's records (reported 2026-11-24: "the local model in chat mode doesn't have
+    // access to my data"), but may talk more freely than Grounded mode.
+    systemPrompt = `${systemPrompt}\n\n${CHAT_FACTS_HEADING}\n${buildCompactContextBlock(retrievedContext, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS)}`;
   }
 
   const historyForPrompt = getTrimmedHistoryForPrompt(userPrompt, state);
@@ -2692,6 +2698,9 @@ export function buildExternalMessagesForMode(
   if (mode === 'rag' && retrievedContext) {
     const contextBlock = buildCompactContextBlock(retrievedContext, 2000);
     systemPrompt = `${systemPrompt}\n\nThe grounded finance facts below are the user's real Silo records. Answer only from these facts in 1-3 short sentences, quoting amounts exactly as written. If the facts do not cover the question, say so clearly.\n\nGrounded finance facts:\n${contextBlock}`;
+  } else if (mode === 'chat' && retrievedContext?.length) {
+    const contextBlock = buildCompactContextBlock(retrievedContext, 2000);
+    systemPrompt = `${systemPrompt}\n\nWhen the user asks about their own money, use these facts from their Silo records and quote amounts exactly; for general questions, give practical advice that fits them.\n\n${CHAT_FACTS_HEADING}\n${contextBlock}`;
   }
 
   const messages: ExternalChatMessage[] = [];
