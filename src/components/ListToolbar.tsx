@@ -53,6 +53,10 @@ type ToolbarProps = {
   onOpenFilters: () => void;
   /** Hide search and filters (e.g. calendar view). */
   hideSearchAndFilters?: boolean;
+  /** The leading control stretches to fill the row (no spacer competing for the width). */
+  leadingFills?: boolean;
+  /** Filters button as an icon (with its count badge) to leave room for a wide leading control. */
+  iconOnlyFilters?: boolean;
 };
 
 /**
@@ -69,6 +73,8 @@ export function ListToolbar({
   activeFilterCount,
   onOpenFilters,
   hideSearchAndFilters,
+  leadingFills,
+  iconOnlyFilters,
 }: ToolbarProps) {
   const theme = useAppTheme();
   const [open, setOpen] = useState(searchQuery.length > 0);
@@ -128,7 +134,7 @@ export function ListToolbar({
           <View style={styles.spacer} />
         ) : (
           <>
-            {inlineSearchOpen ? searchBox : <View style={styles.spacer} />}
+            {inlineSearchOpen ? searchBox : leadingFills ? null : <View style={styles.spacer} />}
             {!inlineSearchOpen ? (
               <TouchableOpacity
                 style={[
@@ -149,7 +155,7 @@ export function ListToolbar({
             <TouchableOpacity
               style={[
                 styles.filterBtn,
-                inlineSearchOpen && styles.filterBtnCompact,
+                (inlineSearchOpen || iconOnlyFilters) && styles.filterBtnCompact,
                 filtersOn
                   ? { backgroundColor: theme.primary, borderColor: theme.primary }
                   : { backgroundColor: theme.surface, borderColor: theme.border },
@@ -161,7 +167,7 @@ export function ListToolbar({
               testID="toolbar-filter-button"
             >
               <Ionicons name="options-outline" size={18} color={filtersOn ? theme.onPrimary : theme.text} />
-              {!inlineSearchOpen ? (
+              {!inlineSearchOpen && !iconOnlyFilters ? (
                 <Text style={[styles.filterText, { color: filtersOn ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) }]}>
                   Filters
                 </Text>

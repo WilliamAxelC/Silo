@@ -140,4 +140,33 @@ describe('ListToolbar', () => {
     expect(onChange).toHaveBeenCalledWith('calendar');
     ReactTestRenderer.act(() => r.unmount());
   });
+
+  // Reported 2026-11-24: the Reports Expenses/Income toggle was squeezed ("Expense/s" wrapped) because a
+  // spacer shared the row with it. leadingFills drops the spacer; iconOnlyFilters frees more width.
+  it('regression: lets a wide leading control fill the row and shows Filters as an icon with its badge', () => {
+    let r: any;
+    ReactTestRenderer.act(() => {
+      r = ReactTestRenderer.create(
+        <ListToolbar
+          leading={<Text>TOGGLE</Text>}
+          leadingFills
+          iconOnlyFilters
+          searchQuery=""
+          onChangeSearch={jest.fn()}
+          searchPlaceholder="Search"
+          searchPlacement="below"
+          activeFilterCount={2}
+          onOpenFilters={jest.fn()}
+        />
+      );
+    });
+    const row = r.root.findByProps({ testID: 'list-toolbar' }).children[0];
+    const flexKids = row.children.filter((c: any) => StyleSheet.flatten(c.props?.style)?.flex === 1);
+    expect(flexKids).toHaveLength(0); // no spacer competing with the leading control
+    const words = r.root.findAllByType(Text).map((t: any) => t.props.children);
+    expect(words).not.toContain('Filters');
+    expect(r.root.findByProps({ testID: 'toolbar-filter-button' }).props.accessibilityLabel).toBe('Filters, 2 on');
+    expect(words).toContain(2);
+    ReactTestRenderer.act(() => r.unmount());
+  });
 });

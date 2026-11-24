@@ -319,61 +319,49 @@ export const ReportsScreen = () => {
         <View style={styles.toolbarWrap}>
           <ListToolbar
             leading={
-              <View style={[styles.toggleContainer, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <TouchableOpacity
-                  style={[
-                    styles.toggleBtn,
-                    reportType === 'expense' ? { backgroundColor: theme.expense } : { backgroundColor: 'transparent' },
-                  ]}
-                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    hasUserToggledReportTypeRef.current = true;
-                    setReportType('expense');
-                    setExpandedCategories({});
-                    setSelectedCategoryName(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Show expense reports"
-                >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      { color: reportType === 'expense' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
-                    ]}
-                  >
-                    Expenses
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.toggleBtn,
-                    reportType === 'income' ? { backgroundColor: theme.income } : { backgroundColor: 'transparent' },
-                  ]}
-                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    hasUserToggledReportTypeRef.current = true;
-                    setReportType('income');
-                    setExpandedCategories({});
-                    setSelectedCategoryName(null);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Show income reports"
-                >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      { color: reportType === 'income' ? theme.onPrimary : theme.textMuted, fontSize: theme.scaleFont(13) },
-                    ]}
-                  >
-                    Income
-                  </Text>
-                </TouchableOpacity>
+              <View
+                style={[styles.toggleContainer, { borderColor: theme.border, backgroundColor: theme.background }]}
+                accessibilityRole="radiogroup"
+                testID="report-type-toggle"
+              >
+                {(
+                  [
+                    { key: 'expense', label: 'Expenses', icon: 'arrow-up', color: theme.expense, a11y: 'Show expense reports' },
+                    { key: 'income', label: 'Income', icon: 'arrow-down', color: theme.income, a11y: 'Show income reports' },
+                  ] as const
+                ).map((opt) => {
+                  const selected = reportType === opt.key;
+                  return (
+                    <TouchableOpacity
+                      key={opt.key}
+                      style={[styles.toggleBtn, selected && { backgroundColor: opt.color }]}
+                      onPress={() => {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        hasUserToggledReportTypeRef.current = true;
+                        setReportType(opt.key);
+                        setExpandedCategories({});
+                        setSelectedCategoryName(null);
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, checked: selected }}
+                      accessibilityLabel={opt.a11y}
+                    >
+                      {/* Same arrows as Cashflow rows: money going out (up) and coming in (down). */}
+                      <Ionicons name={opt.icon} size={18} color={selected ? theme.onPrimary : opt.color} />
+                      <Text
+                        style={[styles.toggleText, { color: selected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(14) }]}
+                        numberOfLines={1}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             }
             searchPlacement="below"
+            leadingFills
+            iconOnlyFilters
             searchQuery={searchQuery}
             onChangeSearch={(text) => {
               setSearchQuery(text);
@@ -780,9 +768,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    padding: 3,
+    gap: 3,
   },
-  toggleBtn: { flex: 1, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  toggleBtn: { flex: 1, minHeight: 44, borderRadius: 9, flexDirection: 'row', gap: 6, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   groupByRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
   groupByLabel: { fontWeight: '700', marginRight: 2 },
   groupByChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
