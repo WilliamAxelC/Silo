@@ -208,6 +208,7 @@ def build_prompt(t: dict) -> str:
         "- Run every command in the foreground and wait for it to finish. Never background a command and never end",
         "  your turn while something is still running: nobody will wake you up afterwards.",
         "- Do not touch android/ build config, app.json versions, secrets, or git remotes. Never push.",
+        f"- Add one plain line under '## [Unreleased]' in CHANGELOG.md (Fixed or Added) describing the user-visible change, ending with '(ticket #{t['n']})'.",
         f"- Commit your work on this branch with a message starting 'fix(ticket #{t['n']}):' or 'feat(ticket #{t['n']}):'.",
         "- Finish with a short receipt (under 150 words): root cause, what changed, tests added, test results.",
     ]
