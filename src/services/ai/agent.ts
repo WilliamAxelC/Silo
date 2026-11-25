@@ -96,6 +96,14 @@ export interface GroundedParsedQuery {
   asksBiggest: boolean;
   asksIncomeVsSpending: boolean;
   asksTopCategories: boolean;
+  /** "Which store did I spend the most at?" */
+  asksTopMerchants: boolean;
+  /** "average daily spending", "rata-rata per hari" */
+  asksAverage: boolean;
+  /** Judgement questions ("am I doing okay?", "can I afford ...?") that need the overview and balance. */
+  asksFinancialHealth: boolean;
+  /** The earlier period of a comparison ("this month vs last month"); `period` is then the later one. */
+  comparePeriod: GroundedTimePeriod | null;
 }
 
 export interface BuildRetrievedContextOptions {
@@ -103,6 +111,8 @@ export interface BuildRetrievedContextOptions {
   now?: Date | number;
   /** Billing month start day (1-28); defaults to the user's setting. */
   monthStartDay?: number;
+  /** Earlier user questions in this chat, oldest first, so a follow-up like "And last month?" keeps its topic. */
+  previousUserPrompts?: string[];
 }
 
 const MONTH_SHORT_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -749,7 +759,81 @@ const STOP_WORDS = new Set([
   'good',
   'bad',
   'situation',
+  // Question words and filler from the 2026-11-25 chat benchmark (src/services/ai/chatBench).
+  'whats',
+  'hows',
+  'wheres',
+  'im',
+  'ive',
+  'dont',
+  'financially',
+  'time',
+  'times',
+  'order',
+  'ordered',
+  'orders',
+  'store',
+  'stores',
+  'shop',
+  'shops',
+  'merchant',
+  'merchants',
+  'daily',
+  'costs',
+  'paying',
+  'should',
+  'could',
+  'cut',
+  'back',
+  'take',
+  'without',
+  'idea',
+  'new',
+  'afford',
+  'next',
+  'buying',
+  'blow',
+  'blowing',
+  'million',
+  'thousand',
+  'juta',
+  'ribu',
+  'terbanyak',
+  'thing',
+  'things',
+  'stuff',
 ]);
+
+/**
+ * Everyday words that stand for a group of merchants. "coffee" should find Kopi Kenangan and Starbucks, not only
+ * a merchant with "coffee" in its name (chat benchmark 2026-11-25).
+ */
+const KEYWORD_CONCEPTS: Array<{ triggers: string[]; terms: string[] }> = [
+  {
+    triggers: ['coffee', 'kopi', 'cafe', 'kafe', 'ngopi'],
+    terms: ['coffee', 'kopi', 'starbucks', 'cafe', 'kafe', 'kenangan', 'janji jiwa', 'tomoro', 'fore'],
+  },
+  {
+    triggers: ['subscription', 'langganan', 'streaming'],
+    terms: ['subscription', 'langganan', 'netflix', 'spotify', 'youtube', 'disney', 'vidio', 'icloud', 'google one', 'chatgpt'],
+  },
+  { triggers: ['rent', 'sewa', 'kontrakan'], terms: ['rent', 'sewa', 'kos', 'kost', 'kontrakan'] },
+  { triggers: ['ojek', 'ojol', 'ride'], terms: ['gojek', 'grab', 'maxim', 'ojek', 'ride'] },
+  { triggers: ['fuel', 'petrol', 'bensin'], terms: ['pertamina', 'shell', 'bensin', 'pertalite', 'pertamax', 'fuel'] },
+  { triggers: ['delivery'], terms: ['gofood', 'grabfood', 'shopeefood', 'delivery'] },
+  { triggers: ['trip', 'vacation', 'holiday'], terms: ['trip', 'travel', 'flight', 'hotel', 'traveloka', 'tiket', 'vacation', 'holiday'] },
+];
+
+/** "subscriptions" -> "subscription" so prefix search also finds the singular. */
+function stemKeyword(term: string): string {
+  return term.length > 4 && term.endsWith('s') && !term.endsWith('ss') ? term.slice(0, -1) : term;
+}
+
+function expandKeyword(term: string): string[] {
+  const stem = stemKeyword(term);
+  const concept = KEYWORD_CONCEPTS.find((c) => c.triggers.includes(term) || c.triggers.includes(stem));
+  return concept ? concept.terms : [stem];
+}
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -804,6 +888,14 @@ function formatSignedCurrency(amount: number): string {
     return formatCurrency(0);
   }
   return amount > 0 ? `+${formatCurrency(amount)}` : formatCurrency(-Math.abs(amount));
+}
+
+/** "Rp 1.200.000 more in Nov 2026 than in Oct 2026 (Rp 13.279.500 vs Rp 12.079.500)" */
+function describeChange(current: number, previous: number, currentLabel: string, previousLabel: string): string {
+  const diff = current - previous;
+  const pair = `(${formatCurrency(current)} vs ${formatCurrency(previous)})`;
+  if (diff === 0) return `the same in ${currentLabel} as in ${previousLabel} ${pair}`;
+  return `${formatCurrency(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'} in ${currentLabel} than in ${previousLabel} ${pair}`;
 }
 
 function formatShortDate(ms: number, referenceYear?: number): string {
@@ -1343,7 +1435,10 @@ export function parseGroundedQuery(
 ): GroundedParsedQuery {
   const db = options?.db ?? expoDb;
   const period = parseTimePeriod(userPrompt, options?.now, options?.monthStartDay ?? currentMonthStartDay());
-  const cleanedPrompt = period.matchedText ? userPrompt.replace(period.matchedText, ' ') : userPrompt;
+  const comparePeriod = parseComparisonPeriod(userPrompt, period, options?.now, options?.monthStartDay ?? currentMonthStartDay());
+  // Both periods' words ("October and November") are dates, not merchants to search for.
+  let cleanedPrompt = period.matchedText ? userPrompt.replace(period.matchedText, ' ') : userPrompt;
+  if (comparePeriod?.matchedText) cleanedPrompt = cleanedPrompt.replace(comparePeriod.matchedText, ' ');
 
   const userCategories = options?.categories ?? loadUserCategories(db);
   const wallets = options?.wallets ?? loadWalletsBasic(db);
@@ -1376,8 +1471,24 @@ export function parseGroundedQuery(
     /\b(income|earn|earned|earning|earnings|vs|versus|compare|comparison|cashflow|cash\s+flow|net|pemasukan|pendapatan|penghasilan|banding|bandingkan|dibanding|perbandingan|arus\s+kas)\b/i.test(
       userPrompt,
     );
+  // The old pattern ended in `categor\b`, which never matches "category": "What is my most spent category"
+  // got no category facts and the model made up a list (reported 2026-11-25).
+  const asksWhereMoneyGoes =
+    /\bwhere\s+(?:did|does|do|is|has)\s+(?:all\s+)?(?:my\s+)?money\s+(?:go|goes|going|gone)\b|\buang(?:ku)?\s+(?:saya\s+)?(?:habis|lari)\s+ke\s+mana\b/i.test(
+      userPrompt,
+    );
   const asksTopCategories =
-    /\b(top\s+categor|categor(?:y|ies)\s+breakdown|spending\s+breakdown|where\s+(?:did|does)\s+(?:my\s+)?money\s+go|most\s+spent\s+categor|kategori\s+(?:terbesar|terbanyak|tertinggi)|rincian\s+kategori|pengeluaran\s+per\s+kategori)\b/i.test(
+    asksWhereMoneyGoes ||
+    /\b(?:top\s+(?:spending\s+)?categor\w*|categor(?:y|ies)\s+breakdown|spending\s+breakdown|by\s+categor\w*|most\s+(?:spent|spending)|spen[dt]\s+(?:the\s+)?most\s+on|(?:biggest|largest|highest|main|top)\s+(?:spending\s+|expense\s+)?categor\w*|kategori\s+(?:\p{L}+\s+)?(?:terbesar|terbanyak|tertinggi|paling\s+(?:besar|banyak))|rincian\s+kategori|pengeluaran\s+per\s+kategori|paling\s+banyak\s+(?:keluar|habis|belanja))\b/iu.test(
+      userPrompt,
+    );
+  const asksTopMerchants =
+    /\b(?:which|what)\s+(?:store|shop|merchant|place|restaurant|vendor|outlet)s?\b.*\bmost\b|\btop\s+(?:merchants?|stores?|shops?|places)\b|\b(?:toko|merchant|tempat)\s+(?:\p{L}+\s+)?(?:terbanyak|paling\s+(?:sering|banyak|besar))\b/iu.test(
+      userPrompt,
+    );
+  const asksAverage = /\b(?:average|avg|per\s+day|a\s+day|daily\s+(?:spend|spending|average)|rata[\s-]*rata|per\s+hari|sehari)\b/i.test(userPrompt);
+  const asksFinancialHealth =
+    /\b(?:afford|doing\s+(?:okay|ok|well|fine|good|alright)|how\s+am\s+i\s+doing|on\s+track|financial(?:ly)?\s+(?:health|situation|shape|ok|okay|fine)|financially|can\s+i\s+(?:buy|get)|mampu\s+beli|sanggup\s+beli|cukup\s+(?:uang|duit)|keuangan(?:ku)?\s+(?:sehat|aman|oke|baik))\b/i.test(
       userPrompt,
     );
 
@@ -1396,13 +1507,16 @@ export function parseGroundedQuery(
     !asksBiggest &&
     !asksIncomeVsSpending &&
     !/\b(spend|spent|spending|expense|expenses|pengeluaran|beli|bayar)\b/i.test(userPrompt);
-  const asksBalance = explicitBalancePhrase || genericLeftWithoutBudget || accountBalanceImplied;
+  // "Where is my money going?" names "my money" but asks about spending, not the balance.
+  const asksBalance = (explicitBalancePhrase && !asksWhereMoneyGoes) || genericLeftWithoutBudget || accountBalanceImplied;
+  const orderedPeriod = comparePeriod && comparePeriod.fromMs > period.fromMs ? comparePeriod : period;
+  const earlierPeriod = comparePeriod && comparePeriod.fromMs > period.fromMs ? period : comparePeriod;
 
   const consumedTokens = new Set<string>([...categoryTokens, ...accountTokens]);
   const keywords = extractSearchKeywords(cleanedPrompt, consumedTokens);
 
   return {
-    period,
+    period: orderedPeriod,
     categories,
     account,
     keywords,
@@ -1412,7 +1526,82 @@ export function parseGroundedQuery(
     asksBiggest,
     asksIncomeVsSpending,
     asksTopCategories,
+    asksTopMerchants,
+    asksAverage,
+    asksFinancialHealth,
+    comparePeriod: earlierPeriod,
   };
+}
+
+// "than last month", or a comparison word next to an earlier period ("compared to before"). "Income vs spending"
+// compares two totals of one period, not two periods.
+const COMPARISON_PATTERN =
+  /\bthan\s+(?:last|previous|before|usual|the\s+(?:last|previous))\b|\b(?:compare[sd]?|comparison|vs|versus|banding|bandingkan|dibanding(?:kan)?|perbandingan|daripada|ketimbang)\b.*\b(?:last|previous|prior|before|sebelumnya|lalu|kemarin)\b/i;
+
+const FOLLOW_UP_START = /^(?:and|but|what\s+about|how\s+about|same\s+for|terus|trus|lalu|kalau|kalo|gimana\s+dengan|bagaimana\s+dengan)\b/i;
+const FOLLOW_UP_REFERENCE = /\b(?:that|it|this\s+one|those|them|itu|tersebut|tadi)\b/i;
+
+/**
+ * A short follow-up ("And last month?", "What category was that?") carries no topic of its own, so it is read
+ * together with the previous question; a period named in the follow-up replaces the earlier one.
+ */
+export function resolveFollowUpPrompt(userPrompt: string, previousUserPrompts: string[] = []): string {
+  const previous = previousUserPrompts[previousUserPrompts.length - 1]?.trim();
+  const current = userPrompt.trim();
+  if (!previous || current.split(/\s+/).length > 7) return userPrompt;
+  if (!FOLLOW_UP_START.test(current) && !FOLLOW_UP_REFERENCE.test(current)) return userPrompt;
+  const previousPeriod = parseTimePeriod(previous);
+  const base =
+    parseTimePeriod(current).isExplicit && previousPeriod.matchedText ? previous.replace(previousPeriod.matchedText, ' ') : previous;
+  return `${base.replace(/\s+/g, ' ').replace(/[\s?.!]+$/, '').trim()}. ${current}`;
+}
+
+/** The period before `period` of the same size, for "this month vs last month" style questions. */
+function previousPeriodOf(period: GroundedTimePeriod, now: Date | number | undefined, monthStartDay: number): GroundedTimePeriod | null {
+  switch (period.kind) {
+    case 'this-month':
+      return parseTimePeriod('last month', now, monthStartDay);
+    case 'this-week':
+      return parseTimePeriod('last week', now, monthStartDay);
+    case 'today':
+      return parseTimePeriod('yesterday', now, monthStartDay);
+    case 'this-year':
+      return parseTimePeriod('last year', now, monthStartDay);
+    case 'named-month':
+    case 'last-month': {
+      const start = new Date(period.fromMs);
+      const prev = new Date(start.getFullYear(), start.getMonth() - 1, 15);
+      const label = `${MONTH_SHORT_NAMES[prev.getMonth()]} ${prev.getFullYear()}`;
+      return {
+        kind: 'named-month',
+        label,
+        fromMs: new Date(prev.getFullYear(), prev.getMonth(), start.getDate(), 0, 0, 0, 0).getTime(),
+        toMs: period.fromMs,
+        isExplicit: true,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * A second period for comparison questions: an explicitly named one ("October and November"), or the
+ * period before the asked one when the question compares ("more than last month", "vs last week").
+ */
+function parseComparisonPeriod(
+  userPrompt: string,
+  period: GroundedTimePeriod,
+  now: Date | number | undefined,
+  monthStartDay: number,
+): GroundedTimePeriod | null {
+  const rest = period.matchedText ? userPrompt.replace(period.matchedText, ' ') : userPrompt;
+  const second = parseTimePeriod(rest, now, monthStartDay);
+  if (period.isExplicit && second.isExplicit && (second.fromMs !== period.fromMs || second.toMs !== period.toMs)) {
+    return second;
+  }
+  if (!COMPARISON_PATTERN.test(userPrompt)) return null;
+  return previousPeriodOf(period, now, monthStartDay);
 }
 
 function getTotalBalance(db: GroundedSqliteDb): number {
@@ -1585,8 +1774,13 @@ function queryKeywordMatches(
     COALESCE(SUM(CASE WHEN t.type != 'transfer' AND t.line_items_text IS NOT NULL AND TRIM(t.line_items_text) != '' THEN 1 ELSE 0 END), 0) AS line_item_row_count
   `;
 
+  // An everyday word ("coffee") stands for its merchants (KEYWORD_CONCEPTS) when it is alone or the last word
+  // ("Bali trip", "Netflix subscription"). Leading it, it is part of a name ("Coffee Place", "Kopi Kenangan")
+  // and is matched as written, plural stem aside.
+  const termGroups = terms.map((term, idx) => (idx === terms.length - 1 ? expandKeyword(term) : [stemKeyword(term)]));
+
   // 1. Primary path: FTS5 requiring ALL terms (AND) with uncapped SQL COUNT/SUM.
-  const matchQuery = terms.map((w) => `"${w}"*`).join(' AND ');
+  const matchQuery = termGroups.map((alts) => `(${alts.map((alt) => `"${alt}"*`).join(' OR ')})`).join(' AND ');
   const ftsParams = [matchQuery, ...tailParams];
   const ftsAggRows = safeQuery<KeywordAggregateSqlRow>(
     db,
@@ -1606,13 +1800,10 @@ function queryKeywordMatches(
 
   // 2. Fallback path: LIKE ... ESCAPE '\' requiring ALL terms (AND) across merchant/note/items/category.
   if (totalCount === 0 && allowLikeFallback) {
-    likeClause = terms
-      .map(
-        () =>
-          "(t.merchant_name LIKE ? ESCAPE '\\' OR t.note LIKE ? ESCAPE '\\' OR t.line_items_text LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM transaction_items i WHERE i.transaction_id = t.id AND i.category LIKE ? ESCAPE '\\'))",
-      )
-      .join(' AND ');
-    terms.forEach((term) => {
+    const likeAlt =
+      "(t.merchant_name LIKE ? ESCAPE '\\' OR t.note LIKE ? ESCAPE '\\' OR t.line_items_text LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM transaction_items i WHERE i.transaction_id = t.id AND i.category LIKE ? ESCAPE '\\'))";
+    likeClause = termGroups.map((alts) => `(${alts.map(() => likeAlt).join(' OR ')})`).join(' AND ');
+    termGroups.flat().forEach((term) => {
       const pattern = `%${escapeLikePattern(term)}%`;
       likeParams.push(pattern, pattern, pattern, pattern);
     });
@@ -1665,13 +1856,13 @@ function queryKeywordMatches(
           ftsParams,
         );
 
-    const normalizedTerms = terms.map((t) => normalizeForMatch(t));
+    const normalizedGroups = termGroups.map((alts) => alts.map((alt) => normalizeForMatch(alt)));
     const currencyCode = currentCurrencyCode();
 
     for (const row of candidateRows) {
       const merchantNorm = normalizeForMatch(row.merchant_name || '');
-      const remainingTerms = normalizedTerms.filter((t) => !merchantNorm.includes(t));
-      if (remainingTerms.length === 0) {
+      const remainingGroups = normalizedGroups.filter((alts) => !alts.some((alt) => merchantNorm.includes(alt)));
+      if (remainingGroups.length === 0) {
         // Merchant itself matched every search term; keep the full receipt total.
         continue;
       }
@@ -1681,7 +1872,7 @@ function queryKeywordMatches(
       let matchedItemCount = 0;
       for (const item of parsedItems) {
         const itemHay = normalizeForMatch(`${item.name} ${item.note}`);
-        if (!remainingTerms.every((t) => itemHay.includes(t))) {
+        if (!remainingGroups.every((alts) => alts.some((alt) => itemHay.includes(alt)))) {
           continue;
         }
         const price = item.price.trim() ? Math.abs(parseSignedAmount(item.price.trim(), undefined, currencyCode)) : 0;
@@ -1760,6 +1951,7 @@ export function buildRetrievedContext(
   const basicWallets = loadWalletsBasic(db);
   const userCategories = loadUserCategories(db);
   const monthStartDay = options?.monthStartDay ?? currentMonthStartDay();
+  userPrompt = resolveFollowUpPrompt(userPrompt, options?.previousUserPrompts);
   const parsed = parseGroundedQuery(userPrompt, {
     db,
     now,
@@ -1784,7 +1976,8 @@ export function buildRetrievedContext(
     hasKeywordIntent ||
     parsed.wantsRecent ||
     parsed.asksIncomeVsSpending ||
-    parsed.asksTopCategories;
+    parsed.asksTopCategories ||
+    parsed.asksTopMerchants;
 
   const asksExplicitOverview =
     /\b(summary|overview|report|ringkasan|total\s+(?:spend|spent|spending|expense|expenses|pengeluaran)|overall\s+(?:spend|spent|spending|expense|expenses))\b/i.test(
@@ -1800,16 +1993,20 @@ export function buildRetrievedContext(
   let includeSummary =
     !hasSpecificIntent ||
     parsed.asksIncomeVsSpending ||
+    parsed.asksFinancialHealth ||
+    parsed.asksAverage ||
     asksExplicitOverview ||
     asksUnscopedSpending;
   let includeTopCategories =
     parsed.asksTopCategories ||
     parsed.asksIncomeVsSpending ||
+    parsed.asksFinancialHealth ||
     asksExplicitOverview ||
     (!hasSpecificIntent && !asksUnscopedSpending);
   const includeBiggest = parsed.asksBiggest;
   const includeBudgets = parsed.asksBudget;
-  const includeBalance = parsed.asksBalance;
+  const includeBalance = parsed.asksBalance || parsed.asksFinancialHealth;
+  const comparePeriod = parsed.comparePeriod;
   const includeRecent = parsed.wantsRecent;
 
   // Filter recent rows by parsed.categories unless the prompt has a separate unmodified recent-list clause
@@ -1895,8 +2092,11 @@ export function buildRetrievedContext(
           row.currency && row.currency !== currentCurrencyCode()
             ? formatDisplayCurrency(n, row.currency)
             : formatCurrency(n);
-        const remText = remaining >= 0 ? `remaining ${fmt(remaining)}` : `over by ${fmt(Math.abs(remaining))}`;
-        return `${row.category}: limit ${fmt(limit)}, spent ${fmt(spent)}, ${remText}`;
+        // What is left comes first: the 0.8B model read "over by" as a surplus and the limit as what remains
+        // (chat benchmark 2026-11-25).
+        const remText =
+          remaining >= 0 ? `${fmt(remaining)} left` : `nothing left, OVER budget by ${fmt(Math.abs(remaining))}`;
+        return `${row.category}: ${remText} (limit ${fmt(limit)}, spent ${fmt(spent)})`;
       };
 
       const accountPart = account ? `, Account: ${account.name}` : '';
@@ -1913,13 +2113,20 @@ export function buildRetrievedContext(
         const sumSpent = rowsToEmit.reduce((s, r) => s + (Number(r.spent ?? 0) || 0), 0);
         const sumRem = sumLimit - sumSpent;
         const sumRemText =
-          sumRem >= 0 ? `remaining ${formatCurrency(sumRem)}` : `over by ${formatCurrency(Math.abs(sumRem))}`;
+          sumRem >= 0 ? `${formatCurrency(sumRem)} left` : `OVER budget by ${formatCurrency(Math.abs(sumRem))}`;
 
+        // Name the over-budget ones outright; the 0.8B model otherwise picked the wrong one (chat benchmark).
+        const overRows = rowsToEmit.filter((r) => (Number(r.spent ?? 0) || 0) > (Number(r.limit_amount ?? 0) || 0));
+        const withinRows = rowsToEmit.filter((r) => !overRows.includes(r));
+        const overPart =
+          overRows.length > 0
+            ? ` Over budget: ${overRows.map((r) => r.category).join(', ')}.${withinRows.length > 0 ? ` Within budget: ${withinRows.map((r) => r.category).join(', ')}.` : ''}`
+            : ' All within budget.';
         budgetItems.push({
           id: 'budgets-summary',
           kind: 'budget',
           label: 'Budgets',
-          content: `Budgets (${budgetPeriodLabel}${accountPart}): Total limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}, ${sumRemText}`,
+          content: `Budgets (${budgetPeriodLabel}${accountPart}): all budgets together ${sumRemText} (limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}).${overPart}`,
           score: 955,
         });
         rowsToEmit.forEach((row, idx) => {
@@ -2007,13 +2214,42 @@ export function buildRetrievedContext(
 
       const actionWord = catMatch.type === 'income' ? 'income' : 'spent';
       const txnWord = catCount === 1 ? 'txn' : 'txns';
+      const periodPart = comparePeriod ? ` in ${period.label}` : '';
       categoryItems.push({
         id: `category-${catMatch.name.toLowerCase()}`,
         kind: 'category-spending',
         label: `${catMatch.name} ${actionWord}`,
-        content: `Category ${catMatch.name}: ${formatCurrency(catTotal)} ${actionWord} (${catCount} ${txnWord}${merchantsSuffix})`,
+        content: `Category ${catMatch.name}${periodPart}: ${formatCurrency(catTotal)} ${actionWord} (${catCount} ${txnWord}${merchantsSuffix})`,
         score: 950,
       });
+
+      if (comparePeriod) {
+        const prevParams: any[] =
+          account !== null
+            ? [catMatch.name, comparePeriod.fromMs, comparePeriod.toMs, account.id]
+            : [catMatch.name, comparePeriod.fromMs, comparePeriod.toMs];
+        const prevRows = safeQuery<{ total?: number | null; count?: number | null }>(
+          db,
+          `SELECT
+             COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.amount > 0 THEN i.amount ELSE ABS(t.total_amount) END), 0) AS total,
+             COUNT(DISTINCT t.id) AS count
+           FROM transactions t
+           JOIN transaction_items i ON t.id = i.transaction_id
+           WHERE t.type != 'transfer' AND ${amountCondition}
+             AND LOWER(i.category) = LOWER(?)
+             AND t.date >= ? AND t.date < ?${walletFilterJoinSql}`,
+          prevParams,
+        );
+        const prevTotal = Number(prevRows[0]?.total ?? 0) || 0;
+        const prevCount = Number(prevRows[0]?.count ?? 0) || 0;
+        categoryItems.push({
+          id: `category-${catMatch.name.toLowerCase()}-compare`,
+          kind: 'category-spending',
+          label: `${catMatch.name} ${actionWord} (${comparePeriod.label})`,
+          content: `Category ${catMatch.name} in ${comparePeriod.label}: ${formatCurrency(prevTotal)} ${actionWord} (${prevCount} ${prevCount === 1 ? 'txn' : 'txns'}); ${describeChange(catTotal, prevTotal, period.label, comparePeriod.label)}`,
+          score: 949,
+        });
+      }
     }
   }
 
@@ -2059,6 +2295,9 @@ export function buildRetrievedContext(
         sumPart = `, total spent ${formatCurrency(matchResult.expenseSum)}`;
       } else if (matchResult.incomeCount > 0 && matchResult.expenseCount === 0) {
         sumPart = `, total income ${formatCurrency(matchResult.incomeSum)}`;
+      } else if (matchResult.incomeCount > 0 && matchResult.expenseCount > 0) {
+        // "coffee" finds Kopi Kenangan purchases and also a "Kopi Senja" client payment: give both totals.
+        sumPart = `, total spent ${formatCurrency(matchResult.expenseSum)} in ${matchResult.expenseCount} ${matchResult.expenseCount === 1 ? 'expense' : 'expenses'}, income ${formatCurrency(matchResult.incomeSum)} in ${matchResult.incomeCount}`;
       }
 
       const scopePart = outsidePeriod ? ', outside current month' : '';
@@ -2156,6 +2395,13 @@ export function buildRetrievedContext(
     const totalIncome = Number(summaryRows[0]?.total_income ?? 0) || 0;
     const txCount = Number(summaryRows[0]?.tx_count ?? 0) || 0;
     const net = totalIncome - totalSpent;
+    const netWord = net > 0 ? ' saved' : net < 0 ? ' overspent' : '';
+    const elapsedDays = Math.max(1, Math.ceil((Math.min(now.getTime(), period.toMs) - period.fromMs) / 86_400_000));
+    const averagePart =
+      parsed.asksAverage && totalSpent > 0
+        ? `, average spent per day ${formatCurrency(Math.round(totalSpent / elapsedDays))} over ${elapsedDays} ${elapsedDays === 1 ? 'day' : 'days'}`
+        : '';
+    const summaryLabel = comparePeriod ? `Summary ${period.label}` : 'Summary';
 
     items.push(
       txCount === 0
@@ -2170,10 +2416,40 @@ export function buildRetrievedContext(
             id: 'period-summary',
             kind: 'summary',
             label: 'Period summary',
-            content: `Summary: Spent ${formatCurrency(totalSpent)}, Income ${formatCurrency(totalIncome)}, Net ${formatSignedCurrency(net)} (${txCount} ${txCount === 1 ? 'txn' : 'txns'})`,
+            content: `${summaryLabel}: Spent ${formatCurrency(totalSpent)}, Income ${formatCurrency(totalIncome)}, Net ${formatSignedCurrency(net)}${netWord} (${txCount} ${txCount === 1 ? 'txn' : 'txns'}${averagePart})`,
             score: parsed.asksIncomeVsSpending ? 945 : 900,
           },
     );
+
+    if (comparePeriod) {
+      const prevRows = safeQuery<{ total_spent?: number | null; total_income?: number | null; tx_count?: number | null }>(
+        db,
+        `SELECT
+           COALESCE(SUM(CASE WHEN total_amount < 0 THEN ABS(total_amount) ELSE 0 END), 0) AS total_spent,
+           COALESCE(SUM(CASE WHEN total_amount > 0 THEN total_amount ELSE 0 END), 0) AS total_income,
+           COUNT(*) AS tx_count
+         FROM transactions
+         WHERE type != 'transfer' AND date >= ? AND date < ?${walletFilterSql}`,
+        account !== null ? [comparePeriod.fromMs, comparePeriod.toMs, account.id] : [comparePeriod.fromMs, comparePeriod.toMs],
+      );
+      const prevSpent = Number(prevRows[0]?.total_spent ?? 0) || 0;
+      const prevIncome = Number(prevRows[0]?.total_income ?? 0) || 0;
+      const prevCount = Number(prevRows[0]?.tx_count ?? 0) || 0;
+      items.push({
+        id: 'period-summary-compare',
+        kind: 'summary',
+        label: `Summary ${comparePeriod.label}`,
+        content: `Summary ${comparePeriod.label}: Spent ${formatCurrency(prevSpent)}, Income ${formatCurrency(prevIncome)}, Net ${formatSignedCurrency(prevIncome - prevSpent)} (${prevCount} ${prevCount === 1 ? 'txn' : 'txns'})`,
+        score: 944,
+      });
+      items.push({
+        id: 'period-change',
+        kind: 'summary',
+        label: 'Spending change',
+        content: `Spending: ${describeChange(totalSpent, prevSpent, period.label, comparePeriod.label)}`,
+        score: 943,
+      });
+    }
   }
 
   // 5. Top 3 spending categories (only when income-vs-spending, top-categories, overview, or generic)
@@ -2194,16 +2470,46 @@ export function buildRetrievedContext(
     );
     if (topCategoryRows.length > 0) {
       const topStr = topCategoryRows
-        .map((row) => `${row.category} ${formatCurrency(row.total ?? 0)}`)
+        .map((row, idx) => `${idx + 1}. ${row.category} ${formatCurrency(row.total ?? 0)}`)
         .join(', ');
+      const first = topCategoryRows[0];
+      const leadPart = parsed.asksTopCategories
+        ? `Most spent category: ${first.category} ${formatCurrency(first.total ?? 0)}. `
+        : '';
       items.push({
         id: 'top-categories',
         kind: 'top-categories',
         label: 'Top categories',
-        content: `Top categories: ${topStr}`,
+        content: `${leadPart}Top spending categories: ${topStr}`,
         score: parsed.asksTopCategories ? 945 : 840,
       });
     }
+  }
+
+  // 5b. Top merchants (only when asked: "which store did I spend the most at?")
+  if (parsed.asksTopMerchants) {
+    const merchantRows = safeQuery<{ merchant_name?: string; total?: number | null; count?: number | null }>(
+      db,
+      `SELECT t.merchant_name, SUM(ABS(t.total_amount)) AS total, COUNT(*) AS count
+       FROM transactions t
+       WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
+       GROUP BY t.merchant_name
+       ORDER BY total DESC
+       LIMIT 3`,
+      periodParams,
+    );
+    items.push({
+      id: 'top-merchants',
+      kind: 'top-categories',
+      label: 'Top merchants',
+      content:
+        merchantRows.length > 0
+          ? `Top merchants by spending: ${merchantRows
+              .map((row, idx) => `${idx + 1}. ${row.merchant_name} ${formatCurrency(row.total ?? 0)} (${row.count} ${row.count === 1 ? 'txn' : 'txns'})`)
+              .join(', ')}`
+          : 'Top merchants by spending: none in this period.',
+      score: 946,
+    });
   }
 
   // 6. Biggest single expense (only when asked)
@@ -2212,12 +2518,14 @@ export function buildRetrievedContext(
       merchant_name?: string;
       amount?: number | null;
       date?: number | null;
+      category?: string | null;
     }>(
       db,
       `SELECT
          t.merchant_name,
          ABS(t.total_amount) AS amount,
-         t.date
+         t.date,
+         (SELECT i.category FROM transaction_items i WHERE i.transaction_id = t.id ORDER BY i.amount DESC, i.id ASC LIMIT 1) AS category
        FROM transactions t
        WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
        ORDER BY t.total_amount ASC, t.date DESC
@@ -2227,11 +2535,12 @@ export function buildRetrievedContext(
     const biggest = biggestRows[0];
     if (biggest && biggest.merchant_name && typeof biggest.amount === 'number' && biggest.amount > 0) {
       const datePart = typeof biggest.date === 'number' ? formatShortDate(biggest.date, refYear) : '';
+      const categoryPart = biggest.category?.trim() ? `, category ${biggest.category.trim()}` : '';
       items.push({
         id: 'biggest-expense',
         kind: 'biggest-expense',
         label: 'Biggest expense',
-        content: `Biggest expense: ${biggest.merchant_name} ${formatCurrency(biggest.amount)} (${datePart})`,
+        content: `Biggest expense: ${biggest.merchant_name} ${formatCurrency(biggest.amount)} (${datePart}${categoryPart})`,
         score: 950,
       });
     } else {
@@ -2458,11 +2767,15 @@ function supportsQwenChatTemplate(runtimeInfo: LocalRuntimeInfo | null | undefin
 const MAX_LOCAL_HISTORY_TURN_CHARS = 180;
 const MAX_LOCAL_SUMMARY_CHARS = 220;
 const MAX_LOCAL_USER_PROMPT_CHARS = 450;
+// Tuned on the chat benchmark (src/services/ai/chatBench, bench/chat/README.md) with Qwen 3.5 0.8B.
 const DEFAULT_LOCAL_SYSTEM_PROMPT =
-  'You are Silo AI, a friendly personal finance assistant running on this phone. Reply in 2-5 short sentences or a brief list. ' +
-  "When the question is about the user's own money, answer from the facts from their Silo records below and quote amounts exactly as written; " +
-  'never invent or recalculate balances, totals or transactions. For general money questions, give practical advice that fits their numbers. ' +
-  'Silo runs entirely on this phone, so never mention internet, network or server problems.';
+  'You are Silo AI, a friendly personal finance assistant inside the Silo app on this phone. Amounts are in Rupiah (Rp). ' +
+  "For questions about the user's money, answer the question directly in the first sentence using the facts from their Silo records below. " +
+  'Copy names and amounts exactly as written; never invent, round or recalculate categories, merchants, balances or amounts. ' +
+  "If the facts do not answer the question, say you don't have that in their Silo records. " +
+  'For general money questions, give one or two practical tips that fit their numbers. ' +
+  'If the question has nothing to do with money or Silo (like the weather), say briefly that you only help with money matters. ' +
+  'Reply in 1-4 short sentences, in the language of the question. Never mention internet, network or server problems.';
 const CHAT_FACTS_HEADING = "Facts from the user's Silo records (use when relevant):";
 const DEFAULT_GROUNDED_SYSTEM_PROMPT =
   "You are Silo AI. Below are the user's real Silo finance records. Answer ONLY from these facts in 1-3 short sentences (or a brief list if asked). " +
@@ -2596,6 +2909,79 @@ export function replaceFalseConnectivityClaim(text: string, mode: LocalAiMode): 
     : "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"";
 }
 
+const REPLY_AMOUNT_PATTERN =
+  /(?<![\p{L}\p{N}])(rp\.?\s*|idr\s*|\$\s*)?[-+]?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(\s*(?:juta|jt|million|ribu|rb|thousand|k)\b)?/giu;
+
+interface ReplyAmount {
+  value: number;
+  hasCurrency: boolean;
+  approximate: boolean;
+}
+
+/** Amounts in a model reply or prompt: "Rp 4.899.000", "4,899,000", "Rp 15.20", "4.9 juta". */
+export function extractReplyAmounts(text: string): ReplyAmount[] {
+  const amounts: ReplyAmount[] = [];
+  for (const match of text.matchAll(REPLY_AMOUNT_PATTERN)) {
+    const raw = match[2];
+    const scale = (match[3] ?? '').trim().toLowerCase();
+    const grouped = raw.match(/^(\d{1,3}(?:[.,]\d{3})+)(?:[.,]\d{1,2})?$/);
+    let value = grouped ? Number(grouped[1].replace(/[.,]/g, '')) : Number(raw.replace(',', '.'));
+    if (!Number.isFinite(value)) continue;
+    let approximate = false;
+    if (['juta', 'jt', 'million'].includes(scale)) {
+      value *= 1_000_000;
+      approximate = true;
+    } else if (['ribu', 'rb', 'thousand', 'k'].includes(scale)) {
+      value *= 1_000;
+      approximate = true;
+    }
+    amounts.push({ value, hasCurrency: Boolean(match[1]), approximate });
+  }
+  return amounts;
+}
+
+/**
+ * Money amounts in `reply` that appear nowhere in what the model was shown. Counts, dates and years are
+ * ignored: only amounts written with a currency, a thousands separator or a scale word ("4.9 juta") count.
+ */
+export function findUngroundedAmounts(reply: string, context: string): number[] {
+  const known = extractReplyAmounts(context).map((a) => a.value);
+  return extractReplyAmounts(reply)
+    .filter((a) => a.hasCurrency || a.approximate || a.value >= 10_000)
+    .filter((a) =>
+      !known.some((k) => (a.approximate ? Math.abs(k - a.value) <= Math.max(0.06 * k, 1) : Math.abs(k - a.value) < 1)),
+    )
+    .map((a) => a.value);
+}
+
+/**
+ * Last step for every local chat reply. The small model sometimes writes amounts that are not in the user's
+ * records (reported 2026-11-25: "Transport: Rp 15.20 (1 transaction)" next to a made-up category list). A
+ * reply with any such amount is replaced by the facts it was given, so Silo never shows invented money.
+ */
+export function finalizeLocalChatReply(reply: string, messages: ExternalChatMessage[], mode: LocalAiMode = 'chat'): string {
+  const text = replaceFalseConnectivityClaim(reply, mode);
+  const context = messages.map((m) => m.content).join('\n');
+  if (findUngroundedAmounts(text, context).length === 0) return text;
+
+  const system = messages.find((m) => m.role === 'system')?.content ?? '';
+  const factsStart = [CHAT_FACTS_HEADING, 'Grounded local facts:']
+    .map((heading) => ({ heading, idx: system.indexOf(heading) }))
+    .find((entry) => entry.idx >= 0);
+  const facts = factsStart
+    ? system
+        .slice(factsStart.idx + factsStart.heading.length)
+        .split(/\n\n/)[0]
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+    : [];
+  if (facts.length === 0) {
+    return "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"";
+  }
+  return `Here is what your Silo records show:\n${facts.join('\n')}`;
+}
+
 function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], customSystemPrompt: string) {
   const contextBlock = buildCompactContextBlock(retrievedContext, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
   if (customSystemPrompt) {
@@ -2644,22 +3030,18 @@ export function buildLocalMessagesForMode(
     systemPrompt = `${systemPrompt}\n\n${CHAT_FACTS_HEADING}\n${buildCompactContextBlock(retrievedContext, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS)}`;
   }
 
+  // The small local model copies earlier answers, wrong ones included (reported 2026-11-25: every reply repeated
+  // the balance "1. Rp 10.143.197"). Facts are rebuilt for every question, and follow-ups are resolved before
+  // retrieval (resolveFollowUpPrompt), so only the previous question goes in, as context, never past answers.
   const historyForPrompt = getTrimmedHistoryForPrompt(userPrompt, state);
-  const { activeTurns, summaryText } = manageContextWindow(historyForPrompt);
-  const compactSummary = mode === 'chat' && summaryText ? trimCollapsedText(summaryText, MAX_LOCAL_SUMMARY_CHARS) : null;
-  const effectiveSystemPrompt = compactSummary ? `${systemPrompt}\n\n${compactSummary}` : systemPrompt;
+  manageContextWindow(historyForPrompt);
+  const previousQuestion = [...historyForPrompt].reverse().find((msg) => msg.role === 'user')?.text;
+  const effectiveSystemPrompt =
+    previousQuestion && resolveFollowUpPrompt(userPrompt, [previousQuestion]) !== userPrompt
+      ? `${systemPrompt}\n\nThe user's previous question was: "${trimCollapsedText(previousQuestion, MAX_LOCAL_SUMMARY_CHARS)}"`
+      : systemPrompt;
 
-  const historyMessages: ExternalChatMessage[] = activeTurns.map((msg) => ({
-    role: msg.role === 'user' ? 'user' : 'assistant',
-    content: msg.text,
-  }));
-
-  return fitMessagesWithinCharBudget(
-    effectiveSystemPrompt,
-    historyMessages,
-    userPrompt,
-    QWEN_MODEL_MAX_PROMPT_CHARS,
-  );
+  return fitMessagesWithinCharBudget(effectiveSystemPrompt, [], userPrompt, QWEN_MODEL_MAX_PROMPT_CHARS);
 }
 
 export function buildPromptForMode(userPrompt: string, mode: LocalAiMode, state: ReturnType<typeof useAIStore.getState>, retrievedContext?: RetrievedContextItem[]) {

@@ -374,7 +374,7 @@ describe('GenerationService', () => {
       ]);
       const service = getGenerationService();
       await service.startGeneration({ prompt: 'Whats my most spending category', mode: 'chat' });
-      expect(spy).toHaveBeenCalledWith('Whats my most spending category');
+      expect(spy).toHaveBeenCalledWith('Whats my most spending category', { previousUserPrompts: [] });
       const args = adapter.completion.mock.calls[0][1];
       expect(args.messages[0]).toMatchObject({ role: 'system', content: expect.stringContaining('Top categories: Food & Dining Rp 1.100.000') });
       spy.mockRestore();

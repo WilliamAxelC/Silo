@@ -189,8 +189,10 @@ describe('AI Agent & Context Engine', () => {
       const prompt = buildPromptForMode('What is my balance?', 'chat', useAIStore.getState());
 
       expect(prompt).toContain('<|im_start|>system\nCustom local system prompt<|im_end|>');
-      expect(prompt).toContain('<|im_start|>user\nHello<|im_end|>');
-      expect(prompt).toContain('<|im_start|>assistant\nHi there<|im_end|>');
+      // Regression 2026-11-25: the 0.8B model copied earlier answers ("1. Rp 10.143.197" for every question),
+      // so local prompts carry only the current question and its freshly built facts.
+      expect(prompt).not.toContain('<|im_start|>user\nHello<|im_end|>');
+      expect(prompt).not.toContain('<|im_start|>assistant\nHi there<|im_end|>');
       expect(prompt).toContain('<|im_start|>user\nWhat is my balance?<|im_end|>');
       expect(prompt.endsWith('<|im_start|>assistant\n<think>\n\n</think>\n\n')).toBe(true);
     });
@@ -578,7 +580,7 @@ describe('AI Agent & Context Engine', () => {
       const items = buildRetrievedContext('What was my biggest expense this month?', { db: testDb, now: NOW });
       const text = joinFacts(items);
       // TechFix Service (1,200,000 on Nov 3) beats Gojek/Hero/Nasi Padang AND ignores the 2,000,000 transfer!
-      expect(text).toContain('Biggest expense: TechFix Service Rp 1.200.000 (03/11)');
+      expect(text).toContain('Biggest expense: TechFix Service Rp 1.200.000 (03/11, category Bills)');
       expect(text).not.toContain('Transfer to Main Wallet');
       // Must NOT falsely FTS-match "month" on Monthly Salary
       expect(items.some((i) => i.kind === 'keyword-match')).toBe(false);
@@ -588,8 +590,10 @@ describe('AI Agent & Context Engine', () => {
       const items = buildRetrievedContext('What is my income vs spending?', { db: testDb, now: NOW });
       const text = joinFacts(items);
       // Nov spent = 1,200k + 650k + 450k + 350k + 150k = 2,800,000; income = 5,000,000; net = +2,200,000; 6 non-transfer txns
-      expect(text).toContain('Summary: Spent Rp 2.800.000, Income Rp 5.000.000, Net +Rp 2.200.000 (6 txns)');
-      expect(text).toContain('Top categories: Bills Rp 1.200.000, Food & Dining Rp 1.100.000, Transport Rp 350.000');
+      expect(text).toContain('Summary: Spent Rp 2.800.000, Income Rp 5.000.000, Net +Rp 2.200.000 saved (6 txns)');
+      expect(text).toContain('Top spending categories: 1. Bills Rp 1.200.000, 2. Food & Dining Rp 1.100.000, 3. Transport Rp 350.000');
+      // "income vs spending" compares two totals, not two periods.
+      expect(text).not.toContain('Last month');
       // Should NOT leak balance when not asked about balance
       expect(items.some((i) => i.kind === 'balance')).toBe(false);
     });
@@ -601,9 +605,10 @@ describe('AI Agent & Context Engine', () => {
       // Transport:     limit   300,000, spent   350,000, over by 50,000
       // Total:         limit 1,800,000, spent 1,450,000, remaining 350,000
       expect(text).toContain('Budgets (This month (Nov 2026)):');
-      expect(text).toContain('Total limit Rp 1.800.000, spent Rp 1.450.000, remaining Rp 350.000');
-      expect(text).toContain('Food & Dining: limit Rp 1.500.000, spent Rp 1.100.000, remaining Rp 400.000');
-      expect(text).toContain('Transport: limit Rp 300.000, spent Rp 350.000, over by Rp 50.000');
+      // What is left comes first: the 0.8B model read "over by" as a surplus (chat benchmark 2026-11-25).
+      expect(text).toContain('all budgets together Rp 350.000 left (limit Rp 1.800.000, spent Rp 1.450.000). Over budget: Transport. Within budget: Food & Dining.');
+      expect(text).toContain('Food & Dining: Rp 400.000 left (limit Rp 1.500.000, spent Rp 1.100.000)');
+      expect(text).toContain('Transport: nothing left, OVER budget by Rp 50.000 (limit Rp 300.000, spent Rp 350.000)');
     });
 
     it('distinguishes "how much money do I have left" (balance) vs "how much budget do I have left" (budgets)', () => {
@@ -653,7 +658,7 @@ describe('AI Agent & Context Engine', () => {
       // kemarin -> yesterday (Nov 11: Gojek 350k)
       const kemarinItems = buildRetrievedContext('Pengeluaran kemarin berapa?', { db: testDb, now: NOW });
       expect(joinFacts(kemarinItems)).toContain('Yesterday (11/11/2026)');
-      expect(joinFacts(kemarinItems)).toContain('Summary: Spent Rp 350.000, Income Rp 0, Net -Rp 350.000 (1 txn)');
+      expect(joinFacts(kemarinItems)).toContain('Summary: Spent Rp 350.000, Income Rp 0, Net -Rp 350.000 overspent (1 txn)');
 
       // sisa uang -> balance (NOT budget); sisa anggaran -> budget (NOT balance)
       const saldoItems = buildRetrievedContext('Berapa sisa uang saya?', { db: testDb, now: NOW });
@@ -662,7 +667,7 @@ describe('AI Agent & Context Engine', () => {
 
       const anggaranItems = buildRetrievedContext('Berapa sisa anggaran makan bulan ini?', { db: testDb, now: NOW });
       expect(anggaranItems.some((i) => i.kind === 'balance')).toBe(false);
-      expect(joinFacts(anggaranItems)).toContain('Food & Dining: limit Rp 1.500.000, spent Rp 1.100.000, remaining Rp 400.000');
+      expect(joinFacts(anggaranItems)).toContain('Food & Dining: Rp 400.000 left (limit Rp 1.500.000, spent Rp 1.100.000)');
 
       // pengeluaran terbesar -> biggest expense
       const terbesarItems = buildRetrievedContext('Pengeluaran terbesar bulan ini apa?', { db: testDb, now: NOW });
@@ -866,7 +871,8 @@ describe('AI Agent & Context Engine', () => {
       const budQuery = 'How much budget do I have left?';
       const budItems = buildRetrievedContext(budQuery, { db: testDb, now: NOW });
       expect(kindsOf(budItems)).toEqual(new Set(['budget']));
-      expect(promptTokensFor(budQuery, budItems).tokens).toBeLessThanOrEqual(165);
+      // +20 for the "Over budget: X. Within budget: Y." lead the 0.8B model needs (chat benchmark 2026-11-25).
+      expect(promptTokensFor(budQuery, budItems).tokens).toBeLessThanOrEqual(185);
 
       // Category-only: Period + Category only
       const catQuery = 'How much did I spend on food this month?';
@@ -1090,12 +1096,12 @@ describe('AI Agent & Context Engine', () => {
 
       const budgetItems = buildRetrievedContext('How much budget do I have left?', { db: testDb, now: NOW });
       const compact = buildCompactContextBlock(budgetItems, QWEN_MODEL_MAX_RAG_CONTEXT_CHARS);
-      expect(compact).toContain('Total limit Rp 5.100.000');
-      expect(compact).toContain('Bills: limit Rp 2.000.000');
-      expect(compact).toContain('Entertainment: limit Rp 500.000');
-      expect(compact).toContain('Food & Dining: limit Rp 1.500.000');
-      expect(compact).toContain('Groceries: limit Rp 800.000');
-      expect(compact).toContain('Transport: limit Rp 300.000');
+      expect(compact).toContain('limit Rp 5.100.000');
+      expect(compact).toMatch(/Bills: .*\(limit Rp 2\.000\.000,/);
+      expect(compact).toMatch(/Entertainment: .*\(limit Rp 500\.000,/);
+      expect(compact).toMatch(/Food & Dining: .*\(limit Rp 1\.500\.000,/);
+      expect(compact).toMatch(/Groceries: .*\(limit Rp 800\.000,/);
+      expect(compact).toMatch(/Transport: .*\(limit Rp 300\.000,/);
       expect(compact).not.toContain('…');
 
       // A single >260 char balance line with many wallets is also preserved within maxChars
@@ -1181,7 +1187,7 @@ describe('AI Agent & Context Engine', () => {
       (prompt) => {
         const facts = joinFacts(buildRetrievedContext(prompt, { db: testDb, now: NOW }));
         expect(facts).toMatch(/^Summary: Spent Rp/m);
-        expect(facts).toMatch(/Top categories/);
+        expect(facts).toMatch(/Top spending categories/);
         expect(facts).not.toMatch(/^Matching "(?:doing|analyse|hi|hello|help)"/m);
       },
     );
@@ -1223,8 +1229,8 @@ describe('AI Agent & Context Engine', () => {
       ];
       const chat = buildLocalMessagesForMode('Whats my most spending category', 'chat', useAIStore.getState(), facts);
       expect(chat[0].content).toContain('Top categories: Food & Dining Rp 1.100.000');
-      expect(chat[0].content).toMatch(/quote amounts exactly/);
-      expect(chat[0].content).toMatch(/never mention internet, network or server problems/);
+      expect(chat[0].content).toMatch(/Copy names and amounts exactly/);
+      expect(chat[0].content).toMatch(/Never mention internet, network or server problems/);
       expect(chat[0].content).not.toMatch(/switch to Grounded/i);
       const external = buildExternalMessagesForMode('Whats my most spending category', 'chat', useAIStore.getState(), facts);
       expect(external[0].content).toContain('Summary: Spent Rp 4.121.000');

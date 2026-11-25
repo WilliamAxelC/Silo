@@ -5,6 +5,7 @@ import {
   buildLocalMessagesForMode,
   buildPromptForMode,
   buildRetrievedContext,
+  finalizeLocalChatReply,
   buildExternalMessagesForMode,
 } from './agent';
 import {
@@ -251,7 +252,13 @@ function removeGeneratedControlTokens(value: string) {
  */
 function safeRetrieve(prompt: string) {
   try {
-    return buildRetrievedContext(prompt);
+    const history = useAIStore.getState().chatHistory ?? [];
+    const previousUserPrompts = history
+      .filter((msg) => msg.role === 'user' && msg.status !== 'streaming')
+      .map((msg) => msg.text);
+    // The current question is usually already in history; it is not a previous one.
+    if (previousUserPrompts[previousUserPrompts.length - 1] === prompt) previousUserPrompts.pop();
+    return buildRetrievedContext(prompt, { previousUserPrompts });
   } catch (error) {
     console.warn('Finance fact lookup failed:', error);
     return undefined;
@@ -609,6 +616,7 @@ class GenerationService {
         role: string;
         content?: string | Array<{ type: string; text?: string; image_url?: { url?: string } }>;
       }> | undefined;
+      let localChatMessages: ExternalChatMessage[] | undefined;
 
       if (params.imageUri) {
         preparedMessages = [
@@ -635,7 +643,8 @@ class GenerationService {
           { role: 'user', content: prompt },
         ];
       } else if (disableThinking) {
-        preparedMessages = await this.prepareLocalMessages({ userPrompt: prompt, mode });
+        localChatMessages = await this.prepareLocalMessages({ userPrompt: prompt, mode });
+        preparedMessages = localChatMessages;
       } else {
         preparedPrompt = await this.preparePrompt({ userPrompt: prompt, mode });
       }
@@ -722,7 +731,12 @@ class GenerationService {
       });
 
       const latestRuntimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
-      const cleanedText = sanitizeGeneratedText(result.text);
+      const sanitizedText = sanitizeGeneratedText(result.text);
+      // Chat replies built from the user's records never show amounts the records do not contain.
+      const cleanedText =
+        localChatMessages && result.stopReason !== 'cancelled'
+          ? finalizeLocalChatReply(sanitizedText.trim(), localChatMessages, mode)
+          : sanitizedText;
       store.setRuntimeInfo(latestRuntimeInfo);
       store.setRuntimeModelLoaded(Boolean(latestRuntimeInfo.isModelLoaded), latestRuntimeInfo);
       store.setRuntimeHealth(result.stopReason !== 'error');

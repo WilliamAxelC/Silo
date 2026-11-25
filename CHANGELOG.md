@@ -4,6 +4,18 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+### Fixed
+- Silo AI: "What is my most spent category" (and "most spending", "where is my money going") now gets your real
+  top categories; before, the offline model got no category facts and repeated your balance or made up a list.
+- Silo AI no longer repeats its earlier answers: each question gets fresh facts, and short follow-ups like
+  "And last month?" or "What category was that?" keep the earlier topic.
+- Silo AI never shows amounts that are not in your records; such a reply is replaced by the facts themselves.
+- Silo AI reads over-budget categories correctly (it used to call "over by Rp 41.000" money left).
+### Changed
+- Silo AI answers more questions from your records: this month vs last month, "Compare October and November",
+  which store you spent most at, average per day, coffee or subscriptions across merchants, "Bali trip".
+### Added
+- Chat benchmark for the offline AI (50 questions over 3 months of sample data); see bench/chat/README.md.
 
 ## [1.3.5] - 2026-11-25
 ### Changed
