@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.6] - 2026-11-25
 ### Fixed
 - Silo AI: "What is my most spent category" (and "most spending", "where is my money going") now gets your real
   top categories; before, the offline model got no category facts and repeated your balance or made up a list.
