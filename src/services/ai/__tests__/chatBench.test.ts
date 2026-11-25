@@ -107,6 +107,10 @@ describe('chat benchmark: retrieval puts the answer in the prompt', () => {
     // The real 0.8B reply, five times out of five, with Transport and Shopping over budget.
     const finalized = finalizeLocalChatReply('Tidak ada anggaran yang kelewatan bulan ini.', messages);
     expect(finalized).toContain('Answer: Yes (Ya), over budget on Transport and Shopping.');
+    // Names a within-budget one as over (seen on the emulator with Entertainment).
+    expect(finalizeLocalChatReply('Yes, you are over budget on Transport and Food & Dining.', messages)).toContain(
+      'Answer: Yes (Ya), over budget on Transport and Shopping.',
+    );
     const right = 'Ya, anggaran Transport dan Shopping melebihi batas bulan ini.';
     expect(finalizeLocalChatReply(right, messages)).toBe(right);
   });

@@ -2991,9 +2991,14 @@ export function finalizeLocalChatReply(reply: string, messages: ExternalChatMess
   // A reply to "am I over budget?" must name a budget that is over; the 0.8B model answered "Tidak ada" with
   // Transport and Shopping over (chat benchmark 2026-11-25).
   const overVerdict = context.match(/Answer: Yes \(Ya\), over budget on ([^\n]+)\./);
+  // Naming a within-budget one is the other mistake it makes ("over budget on Bills and Entertainment" with
+  // Rp 30.000 left on Entertainment, emulator check 2026-11-25); the facts are shown instead.
+  const withinBudget = context.match(/Within budget: ([^\n]+?)\. All budgets together/)?.[1].split(', ') ?? [];
+  const lowerText = text.toLowerCase();
   const contradictsVerdict =
     overVerdict !== null &&
-    !overVerdict[1].split(' and ').some((name) => text.toLowerCase().includes(name.trim().toLowerCase()));
+    (!overVerdict[1].split(' and ').some((name) => lowerText.includes(name.trim().toLowerCase())) ||
+      withinBudget.some((name) => lowerText.includes(name.trim().toLowerCase())));
   if (!contradictsVerdict && findUngroundedAmounts(text, context).length === 0) return text;
 
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
