@@ -4,6 +4,10 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+### Added
+- Split Bill: Remove split on the expense page (trash button next to Split) and on the split page; saving a split
+  with everyone taken off offers the same. The expense stays; if repayments were logged as income, Silo asks
+  whether to delete that income too (the All Splits trash button asks the same now).
 
 ## [1.3.7] - 2026-11-25
 ### Changed

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Alert, Text } from 'react-native';
 
 import { SplitBillEditorScreen } from '../SplitBillEditorScreen';
 import { useSplitsStore } from '../../features/splits/store';
@@ -8,11 +8,12 @@ import { useTransactionStore } from '../../store/useTransactionStore';
 
 const ReactTestRenderer = require('react-test-renderer');
 const mockNavigate = jest.fn();
+const mockGoBack = jest.fn();
 
 jest.mock('@react-navigation/native', () => {
   const React = require('react');
   return {
-    useNavigation: () => ({ navigate: mockNavigate, goBack: jest.fn() }),
+    useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
     useRoute: () => ({ params: { transactionId: 100 } }),
     useFocusEffect: (cb: any) => {
       React.useEffect(() => cb(), [cb]);
@@ -62,6 +63,7 @@ const texts = (r: any) =>
 
 function setup(splits: any[]) {
   const markSplitSettled = jest.fn(async () => {});
+  const deleteBillSplits = jest.fn(async () => {});
   useSplitsStore.setState({
     contacts: [{ id: 1, name: 'Valen', phone: '+60147671545', deviceContactId: null, createdAt: 1, updatedAt: 1 }],
     splits,
@@ -71,12 +73,13 @@ function setup(splits: any[]) {
     load: jest.fn(),
     ensureLoaded: jest.fn(),
     markSplitSettled,
+    deleteBillSplits,
   } as any);
   let r: any;
   ReactTestRenderer.act(() => {
     r = ReactTestRenderer.create(<SplitBillEditorScreen />);
   });
-  return { r, markSplitSettled };
+  return { r, markSplitSettled, deleteBillSplits };
 }
 
 // Reported 2026-11-24: the per-expense split page only had sharing and setup; to see the result or mark
@@ -128,6 +131,47 @@ describe('SplitBillEditorScreen', () => {
     expect(r.root.findAllByProps({ testID: 'split-result' })).toHaveLength(0);
     expect(r.root.findAllByProps({ testID: 'split-setup-toggle' })).toHaveLength(0);
     expect(r.root.findAllByProps({ accessibilityLabel: 'Save split' }).length).toBeGreaterThan(0);
+    ReactTestRenderer.act(() => r.unmount());
+  });
+  // Requested 2026-11-25: a split could only be removed from the small trash icon in All Splits (More).
+  it('regression: Remove split on the split page asks, removes the split and goes back', () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { r, deleteBillSplits } = setup([split({})]);
+    ReactTestRenderer.act(() => r.root.findByProps({ testID: 'split-remove' }).props.onPress());
+    const [title, , buttons] = alert.mock.calls[0] as any;
+    expect(title).toBe('Remove split?');
+    expect(buttons.map((b: any) => b.text)).toEqual(['Cancel', 'Remove']);
+    expect(deleteBillSplits).not.toHaveBeenCalled();
+    ReactTestRenderer.act(() => buttons[1].onPress());
+    expect(deleteBillSplits).toHaveBeenCalledWith(100, { deleteRepayments: false });
+    expect(mockGoBack).toHaveBeenCalled();
+    alert.mockRestore();
+    ReactTestRenderer.act(() => r.unmount());
+  });
+
+  it('asks whether to delete logged repayment income too', () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { r, deleteBillSplits } = setup([split({ isSettled: true, repaymentTransactionId: 900 })]);
+    ReactTestRenderer.act(() => r.root.findByProps({ testID: 'split-remove' }).props.onPress());
+    const [, message, buttons] = alert.mock.calls[0] as any;
+    expect(message).toContain('1 repayment was logged as income');
+    expect(buttons.map((b: any) => b.text)).toEqual(['Cancel', 'Keep income', 'Delete income too']);
+    ReactTestRenderer.act(() => buttons[2].onPress());
+    expect(deleteBillSplits).toHaveBeenCalledWith(100, { deleteRepayments: true });
+    alert.mockRestore();
+    ReactTestRenderer.act(() => r.unmount());
+  });
+
+  it('saving a split with everyone taken off offers to remove it', () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { r } = setup([split({})]);
+    ReactTestRenderer.act(() => r.root.findByProps({ testID: 'split-setup-toggle' }).props.onPress());
+    ReactTestRenderer.act(() => r.root.findByProps({ accessibilityLabel: 'Remove Valen' }).props.onPress());
+    ReactTestRenderer.act(() => {
+      void r.root.findByProps({ accessibilityLabel: 'Save split' }).props.onPress();
+    });
+    expect(alert.mock.calls[0][0]).toBe('Remove split?');
+    alert.mockRestore();
     ReactTestRenderer.act(() => r.unmount());
   });
 });

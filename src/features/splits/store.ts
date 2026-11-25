@@ -399,7 +399,8 @@ interface SplitsState {
       entries: ReadonlyArray<SaveBillSplitEntryInput>;
     }
   ) => void;
-  deleteBillSplits: (transactionId: number) => void;
+  /** Stops splitting a bill. The expense stays; logged repayment income is deleted only when asked. */
+  deleteBillSplits: (transactionId: number, options?: { deleteRepayments?: boolean }) => Promise<void>;
   pruneTransaction: (transactionId: number) => void;
 
   markSplitSettled: (splitId: number, options: { logRepayment: boolean; walletId?: number }) => Promise<void>;
@@ -587,9 +588,20 @@ export const useSplitsStore = create<SplitsState>((set, get) => ({
     set({ splits: readSplits() });
   },
 
-  deleteBillSplits: (transactionId) => {
+  deleteBillSplits: async (transactionId, options) => {
+    const repaymentIds = expoDb
+      .getAllSync<{ repayment_transaction_id: number }>(
+        'SELECT repayment_transaction_id FROM shared_splits WHERE transaction_id = ? AND repayment_transaction_id IS NOT NULL;',
+        [transactionId]
+      )
+      .map((row) => row.repayment_transaction_id);
     expoDb.runSync('DELETE FROM shared_splits WHERE transaction_id = ?;', [transactionId]);
     set({ splits: readSplits() });
+    if (options?.deleteRepayments) {
+      for (const id of repaymentIds) {
+        await useTransactionStore.getState().deleteTransaction(id);
+      }
+    }
   },
 
   pruneTransaction: (transactionId) => {

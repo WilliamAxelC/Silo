@@ -31,6 +31,7 @@ import {
   openWhatsAppMessage,
   shareMessageWithIntent,
 } from '../features/splits/messaging';
+import { confirmRemoveSplit } from '../features/splits/confirmRemoveSplit';
 import { useSplitsStore } from '../features/splits/store';
 import { useSplitPaidToggle } from '../features/splits/useSplitPaidToggle';
 import type { SiloContact, SplitBreakdown, SplitMode } from '../features/splits/types';
@@ -125,6 +126,7 @@ export const SplitBillEditorScreen = () => {
   const defaultCountryCode = useSplitsStore((s) => s.defaultCountryCode);
   const ensureLoaded = useSplitsStore((s) => s.ensureLoaded);
   const saveBillSplits = useSplitsStore((s) => s.saveBillSplits);
+  const deleteBillSplits = useSplitsStore((s) => s.deleteBillSplits);
 
   const tx = useMemo(
     () => transactionsList.find((t) => t.id === transactionId) ?? loadTransactionFallback(transactionId),
@@ -377,6 +379,11 @@ export const SplitBillEditorScreen = () => {
   const handleSave = async () => {
     if (!tx) return;
     if (participants.length === 0) {
+      // Everyone taken off a saved split: that means stop splitting it.
+      if (existingSplits.length > 0) {
+        handleRemoveSplit();
+        return;
+      }
       Alert.alert('Add people first', 'Select at least one contact or person to split this bill with.');
       return;
     }
@@ -443,6 +450,14 @@ export const SplitBillEditorScreen = () => {
       entries,
     });
     setSetupOpen(false);
+  };
+
+  const handleRemoveSplit = () => {
+    if (!tx) return;
+    confirmRemoveSplit(tx.merchantName, existingSplits, (options) => {
+      void deleteBillSplits(tx.id, options);
+      navigation.goBack();
+    });
   };
 
   const money = (amount: number) => formatDisplayCurrency(amount, billCurrency, useThousandsSeparator);
@@ -668,6 +683,21 @@ export const SplitBillEditorScreen = () => {
                 {setupOpen ? 'Hide split setup' : 'Edit split'}
               </Text>
               <Ionicons name={setupOpen ? 'chevron-up' : 'chevron-down'} size={18} color={theme.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+
+          {existingSplits.length > 0 && !setupOpen ? (
+            <TouchableOpacity
+              style={[styles.setupToggle, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              onPress={handleRemoveSplit}
+              accessibilityRole="button"
+              accessibilityLabel="Remove split"
+              testID="split-remove"
+            >
+              <Ionicons name="trash-outline" size={18} color={theme.expense} />
+              <Text style={{ color: theme.expense, fontWeight: '700', fontSize: theme.scaleFont(14), flex: 1 }}>
+                Remove split
+              </Text>
             </TouchableOpacity>
           ) : null}
 

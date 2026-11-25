@@ -192,6 +192,46 @@ describe('useSplitsStore', () => {
     expect(useSplitsStore.getState().splits.every((s) => !s.isSettled)).toBe(true);
   });
 
+  // Requested 2026-11-25: removing a split bill. The expense stays; logged repayment income goes only if asked.
+  it('regression: removing a split keeps the expense and keeps repayment income unless asked', async () => {
+    const budi = useSplitsStore.getState().addContact({ name: 'Budi', phone: '0812' })!;
+    const sari = useSplitsStore.getState().addContact({ name: 'Sari', phone: '0899' })!;
+    const seed = (id: number) => {
+      db.runSync(
+        `INSERT INTO transactions (id, wallet_id, merchant_name, total_amount, type, date) VALUES (?, 1, 'Dinner', -90000, 'expense', 1000);`,
+        [id]
+      );
+      useSplitsStore.getState().saveBillSplits(id, {
+        mode: 'equal',
+        currency: 'IDR',
+        entries: [
+          { contactId: budi.id, personName: 'Budi', phone: '0812', amountOwed: 30000, breakdown: null },
+          { contactId: sari.id, personName: 'Sari', phone: '0899', amountOwed: 30000, breakdown: null },
+        ],
+      });
+    };
+    const settleBudi = async (id: number) => {
+      const entry = useSplitsStore.getState().splits.find((s) => s.transactionId === id && s.contactId === budi.id)!;
+      await useSplitsStore.getState().markSplitSettled(entry.id, { logRepayment: true });
+      return useSplitsStore.getState().splits.find((s) => s.id === entry.id)!.repaymentTransactionId!;
+    };
+
+    seed(30);
+    const keptRepayment = await settleBudi(30);
+    await useSplitsStore.getState().deleteBillSplits(30);
+    expect(useSplitsStore.getState().splits.filter((s) => s.transactionId === 30)).toHaveLength(0);
+    expect(db.getFirstSync('SELECT id FROM transactions WHERE id = 30;')).not.toBeNull();
+    expect(db.getFirstSync('SELECT id FROM transactions WHERE id = ?;', [keptRepayment])).not.toBeNull();
+
+    seed(31);
+    const deletedRepayment = await settleBudi(31);
+    await useSplitsStore.getState().deleteBillSplits(31, { deleteRepayments: true });
+    expect(useSplitsStore.getState().splits).toHaveLength(0);
+    expect(db.getFirstSync('SELECT id FROM transactions WHERE id = 31;')).not.toBeNull();
+    expect(db.getFirstSync('SELECT id FROM transactions WHERE id = ?;', [deletedRepayment])).toBeNull();
+    expect(db.getFirstSync('SELECT id FROM transactions WHERE id = ?;', [keptRepayment])).not.toBeNull();
+  });
+
   it('groups splits by bill and by unpaid person across bills', async () => {
     const budi = useSplitsStore.getState().addContact({ name: 'Budi', phone: '0812' })!;
     db.runSync(

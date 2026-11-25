@@ -87,6 +87,7 @@ import { consumeTrustedSharedImage } from '../services/ocr/normalizeImage';
 import { ReceiptItemsEditor } from '../components/ReceiptItemsEditor';
 import { CategorySelectorModal } from '../components/CategorySelectorModal';
 import { SourceSelectorModal } from '../components/SourceSelectorModal';
+import { confirmRemoveSplit } from '../features/splits/confirmRemoveSplit';
 import { useSplitsStore } from '../features/splits/store';
 
 export { parseReceiptLineItemsText, serializeReceiptLineItems };
@@ -114,6 +115,15 @@ export const AddTransactionScreen = () => {
     () => (editingId ? splits.filter((s) => s.transactionId === editingId).length : 0),
     [editingId, splits]
   );
+  const deleteBillSplits = useSplitsStore((s) => s.deleteBillSplits);
+  const handleRemoveSplit = () => {
+    if (!editingId) return;
+    confirmRemoveSplit(
+      title.trim() || 'this expense',
+      splits.filter((s) => s.transactionId === editingId),
+      (options) => void deleteBillSplits(editingId, options)
+    );
+  };
   const editingSplitUnpaid = useMemo(
     () => (editingId ? splits.filter((s) => s.transactionId === editingId && !s.isSettled).length : 0),
     [editingId, splits]
@@ -2042,8 +2052,9 @@ export const AddTransactionScreen = () => {
           {/* Secondary Actions (Split Bill, Template / Duplicate & Delete) */}
           <View style={styles.secondaryStack}>
             {editingId && type === 'expense' ? (
+              <View style={styles.secondaryActionRow}>
               <TouchableOpacity
-                style={[styles.templateSaveButton, { borderColor: theme.primary, backgroundColor: theme.primaryMuted }]}
+                style={[styles.templateSaveButton, { flex: 1, borderColor: theme.primary, backgroundColor: theme.primaryMuted }]}
                 onPress={() => navigation.navigate('SplitBillEditor', { transactionId: editingId })}
                 disabled={isSaving}
                 accessibilityRole="button"
@@ -2069,6 +2080,19 @@ export const AddTransactionScreen = () => {
                       : 'Split · everyone paid'}
                 </Text>
               </TouchableOpacity>
+              {editingSplitCount > 0 ? (
+                <TouchableOpacity
+                  style={[styles.templateSaveButton, { width: 48, paddingHorizontal: 0, borderColor: theme.expense, backgroundColor: theme.surface }]}
+                  onPress={handleRemoveSplit}
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove split"
+                  testID="expense-remove-split"
+                >
+                  <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                </TouchableOpacity>
+              ) : null}
+              </View>
             ) : null}
             {editingId ? (
               <View style={styles.secondaryActionRow}>

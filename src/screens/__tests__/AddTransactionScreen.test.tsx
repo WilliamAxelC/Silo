@@ -8,6 +8,7 @@ import { useReceiptQueueStore } from '../../store/useReceiptQueueStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import * as templateService from '../../services/templates';
 import * as recurringService from '../../services/recurring';
+import { useSplitsStore } from '../../features/splits/store';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -556,6 +557,56 @@ describe('AddTransactionScreen', () => {
       renderer = ReactTestRenderer.create(<AddTransactionScreen />);
     });
     expect(renderer.root.findByProps({ placeholder: '0' }).props.value).toBe('15.75');
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  // Requested 2026-11-25: remove a split from the expense page, not only from All Splits.
+  it('regression: a split expense has Remove split, which asks first and keeps the expense', () => {
+    useTransactionStore.setState({
+      transactionsList: [
+        { id: 99, walletId: 1, merchantName: 'Wingstop', totalAmount: -74000, type: 'expense', category: 'Food & Dining', date: Date.now(), note: '', lineItemsText: '', imageUri: null },
+      ],
+    } as any);
+    const deleteBillSplits = jest.fn(async () => {});
+    const deleteTransaction = jest.fn();
+    useTransactionStore.setState({ deleteTransaction } as any);
+    useSplitsStore.setState({
+      splits: [{ id: 5, transactionId: 99, personName: 'Valen', amountOwed: 37000, isSettled: false, repaymentTransactionId: null }],
+      loaded: true,
+      ensureLoaded: jest.fn(),
+      deleteBillSplits,
+    } as any);
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockRouteParams.transactionId = 99;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => renderer.root.findByProps({ testID: 'expense-remove-split' }).props.onPress());
+    const [title, message, buttons] = alert.mock.calls[0] as any;
+    expect(title).toBe('Remove split?');
+    expect(message).toContain('Wingstop');
+    ReactTestRenderer.act(() => buttons.find((b: any) => b.text === 'Remove').onPress());
+    expect(deleteBillSplits).toHaveBeenCalledWith(99, { deleteRepayments: false });
+    expect(deleteTransaction).not.toHaveBeenCalled();
+    alert.mockRestore();
+    ReactTestRenderer.act(() => renderer.unmount());
+    useSplitsStore.setState({ splits: [] } as any);
+  });
+
+  it('an expense without a split has no Remove split button', () => {
+    useTransactionStore.setState({
+      transactionsList: [
+        { id: 99, walletId: 1, merchantName: 'Wingstop', totalAmount: -74000, type: 'expense', category: 'Food & Dining', date: Date.now(), note: '', lineItemsText: '', imageUri: null },
+      ],
+    } as any);
+    useSplitsStore.setState({ splits: [], loaded: true, ensureLoaded: jest.fn() } as any);
+    mockRouteParams.transactionId = 99;
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    expect(renderer.root.findAllByProps({ testID: 'expense-remove-split' })).toHaveLength(0);
     ReactTestRenderer.act(() => renderer.unmount());
   });
 

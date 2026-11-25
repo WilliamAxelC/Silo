@@ -17,11 +17,12 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 922 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 940 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased.
+- Unreleased on `feat/multi-currency`: Remove split on the expense page and split page (CHANGELOG
+  [Unreleased]). Tested (940 jest), not built or published; next release would be 1.3.8 (versionCode 15).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.

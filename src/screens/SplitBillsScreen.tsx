@@ -25,6 +25,7 @@ import {
   openWhatsAppMessage,
   shareMessageWithIntent,
 } from '../features/splits/messaging';
+import { confirmRemoveSplit } from '../features/splits/confirmRemoveSplit';
 import {
   getTransactionSplitCounts,
   groupSplitsByBill,
@@ -166,14 +167,8 @@ export const SplitBillsScreen = () => {
   };
 
   const handleDeleteBill = (transactionId: number, merchantName: string) => {
-    Alert.alert('Remove split?', `Remove split tracking for "${merchantName}"? The expense transaction itself stays.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => deleteBillSplits(transactionId),
-      },
-    ]);
+    const entries = splits.filter((e) => e.transactionId === transactionId);
+    confirmRemoveSplit(merchantName, entries, (options) => void deleteBillSplits(transactionId, options));
   };
 
   const sendWhatsApp = async (message: string, phone?: string | null) => {
