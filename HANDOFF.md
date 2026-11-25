@@ -1,10 +1,11 @@
 # Silo handoff
 
 ## Last updated
-2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8 commits not pushed yet). `prod` = `v1.3.8` @ `e3311db`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8 and 1.3.9 not pushed yet). `prod` = `v1.3.9` @ `3f75720`.
 
 ## Current state
-- **Live:** 1.3.8 (versionCode 15, sha256 `179f2da2…0eab`): Remove split on the expense page (trash next to
+- **Live:** 1.3.9 (versionCode 16, sha256 `26614d5b…ca65`): 57 currencies with a searchable picker (More…) for
+  home currency, accounts and budgets; TWD and a few others without decimals. Before that 1.3.8 (versionCode 15): Remove split on the expense page (trash next to
   Split) and the split page; logged repayment income is kept unless the user picks Delete income too.
   Before that 1.3.7 (versionCode 14): one Silo AI mode, worked-out numbers for advice and
   planning, guard retry. Before that 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
@@ -23,9 +24,8 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Unreleased: 57 currencies with a searchable picker (`components/CurrencyPickerModal.tsx`, helpers in
-  `features/currency/currencies.ts`). Tested (945 jest), not built. Not pushed to GitHub yet: the 1.3.8 commits,
-  `prod` and tag `v1.3.8` (scan, then push).
+- Nothing unreleased. Not pushed to GitHub yet: the 1.3.8 and 1.3.9 commits, `prod` and tags `v1.3.8`, `v1.3.9`
+  (scan for secrets, then push).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
