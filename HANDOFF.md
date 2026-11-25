@@ -1,10 +1,12 @@
 # Silo handoff
 
 ## Last updated
-2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency`, pushed. `prod` = `v1.3.7` @ `6f643bf`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8 commits not pushed yet). `prod` = `v1.3.8` @ `e3311db`.
 
 ## Current state
-- **Live:** 1.3.7 (versionCode 14, sha256 `47dbc886…5c7a`): one Silo AI mode, worked-out numbers for advice and
+- **Live:** 1.3.8 (versionCode 15, sha256 `179f2da2…0eab`): Remove split on the expense page (trash next to
+  Split) and the split page; logged repayment income is kept unless the user picks Delete income too.
+  Before that 1.3.7 (versionCode 14): one Silo AI mode, worked-out numbers for advice and
   planning, guard retry. Before that 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
   apk sha256 `ff8bf0a4…408d`. 1.3.6: offline AI chat fixes (most spent category, follow-ups, no past answers in the
   prompt, reply guard against invented amounts and wrong over-budget answers) plus the chat benchmark
@@ -21,8 +23,7 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Unreleased on `feat/multi-currency`: Remove split on the expense page and split page (CHANGELOG
-  [Unreleased]). Tested (940 jest), not built or published; next release would be 1.3.8 (versionCode 15).
+- Nothing unreleased. Not pushed to GitHub yet: the 1.3.8 commits, `prod` and tag `v1.3.8` (scan, then push).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
@@ -44,7 +45,8 @@
 - Build: `git bundle create <scratch>/silo.bundle HEAD feat/multi-currency`, scp to `agent@10.20.20.194:~/silo-build/silo.bundle`,
   then `bash ~/silo-build/uxpass_build.sh` (arm64 `apks/head.apk` + x86_64 `apks/emu-x86_64.apk`, ~15 min).
   A quick emulator-only rebuild: `cd ~/silo-build/app && git fetch ../silo.bundle feat/multi-currency && git checkout -f FETCH_HEAD && bash ~/silo-build/build_emu.sh`.
-- Emulator: `~/silo-build/sdk/platform-tools/adb -s emulator-5554` (ai-renderer).
+- Emulator: `~/silo-build/sdk/platform-tools/adb -s emulator-5554` (ai-renderer). `~/silo-build/ui.sh dump` lists
+  on-screen text/labels; `~/silo-build/ui.sh '<regex>'` taps the first match (uiautomator).
 - Publish: copy files to docker-host `/home/agent/orca/learnings/projects-cuang-dev/html/projects/silo/`, then
   `docker cp` into `projects-cuang-nginx:/usr/share/nginx/html/projects/silo/`; remove the old APK; verify the live sha.
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
