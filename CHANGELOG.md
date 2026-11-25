@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.9] - 2026-11-25
 ### Added
 - 37 more currencies (57 in all), including CAD, MOP, KHR, BRL, MXN, ZAR, SEK, PLN and TRY, each with its symbol.
   A "More…" button opens a searchable list wherever you pick a currency: home currency (Settings and first
