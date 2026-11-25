@@ -9,9 +9,10 @@ then with a made-up category list ("Transport: Rp 15.20").
 - **Dataset** (`src/services/ai/chatBench/fixture.ts`): three months (Sep 1 to Nov 25 2026) of a salaried
   Jakarta user: 3 accounts (cash, BCA, GoPay), salary and a freelance payment, rent, utilities, Netflix, weekly
   groceries, weekday lunches, coffee, GoFood, Gojek/Grab, fuel, a Bali trip, a new phone, 3 monthly budgets
-  (Shopping and Transport over budget in November). Seeded into real SQLite with Silo's own migrations.
+  (Shopping and Transport over budget in November) plus a large Bills budget, so all budgets together are
+  under while two are over. That trap fooled the model on the 1.3.6 emulator check. Seeded into real SQLite with Silo's own migrations.
   Expected answers are computed in plain JS from the seed list, not through the app's SQL.
-- **Questions** (`src/services/ai/chatBench/cases.ts`), 50 cases in 6 tiers: `typical` (one fact, as people
+- **Questions** (`src/services/ai/chatBench/cases.ts`), 51 cases in 6 tiers: `typical` (one fact, as people
   type it, typos included), `hard` (comparisons, averages, synonyms like "coffee" or "subscriptions"), `abstract`
   ("Am I doing okay?", "Can I afford a 5 million laptop?"), `followup` (earlier turns in history, including the
   exact screenshot conversation), `indonesian`, `offtopic` (weather, things the user never bought, "hi").
@@ -58,10 +59,12 @@ Latency is on the 20-core bench host, not a phone; compare runs with each other 
 | Run | typical | hard | abstract | follow-up | Indonesian | off-topic | **Shown pass** | Invented amounts shown | Median latency |
 |---|---|---|---|---|---|---|---|---|---|
 | 0.8B, 1.3.5 code (baseline) | 88.9% | 41.7% | 61.9% | 41.7% | 80.0% | 58.3% | **66.7%** | 25 | 2.30s |
-| 0.8B, after this work | 100% | 100% | 81.0% | 91.7% | 100% | 100% | **96.7%** | 0 | 1.10s |
-| 2B, after this work | 94.4% | 100% | 100% | 100% | 100% | 100% | **98.0%** | 0 | 2.59s |
+| 0.8B, 1.3.6 (51 cases, 153 answers) | 100% | 100% | 81.0% | 91.7% | 100% | 100% | **96.7%** | 0 | 1.11s |
+| 2B, 1.3.6 before the budget-trap cases (50 cases) | 94.4% | 100% | 100% | 100% | 100% | 100% | **98.0%** | 0 | 2.59s |
 
-Remaining 0.8B misses are judgement questions ("Was buying the new phone a bad idea?" answered without its cost)
+The 0.8B model answers "Ada anggaran yang kelewatan?" with "Tidak ada" even with an explicit "Answer: Yes"
+fact, so the reply guard also replaces replies that name none of the over-budget categories. Remaining 0.8B
+misses are judgement questions ("Was buying the new phone a bad idea?" answered without its cost)
 and one follow-up that named the expense but not its category. The 2B model handles judgement questions well.
 
 What moved the score (in order of effect): fixing retrieval so the answer is in the prompt (the top-categories

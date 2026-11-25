@@ -802,6 +802,16 @@ const STOP_WORDS = new Set([
   'thing',
   'things',
   'stuff',
+  // Over-budget words ("Ada anggaran yang kelewatan?") are a budget question, not a merchant name.
+  'kelewatan',
+  'kelebihan',
+  'lewat',
+  'melebihi',
+  'melewati',
+  'jebol',
+  'overbudget',
+  'exceeded',
+  'exceed',
 ]);
 
 /**
@@ -2120,13 +2130,29 @@ export function buildRetrievedContext(
         const withinRows = rowsToEmit.filter((r) => !overRows.includes(r));
         const overPart =
           overRows.length > 0
-            ? ` Over budget: ${overRows.map((r) => r.category).join(', ')}.${withinRows.length > 0 ? ` Within budget: ${withinRows.map((r) => r.category).join(', ')}.` : ''}`
-            : ' All within budget.';
+            ? ` OVER budget (melebihi anggaran): ${overRows.map((r) => r.category).join(', ')}.${withinRows.length > 0 ? ` Within budget: ${withinRows.map((r) => r.category).join(', ')}.` : ''}`
+            : ' None over budget (tidak ada yang melebihi anggaran).';
+        // A yes/no "am I over budget?" gets its answer spelled out: in Indonesian the 0.8B model echoed the question
+        // ("Tidak ada anggaran yang kelewatan") despite the OVER line (chat benchmark 2026-11-25).
+        if (/\b(?:over|exceed\w*|overbudget|kelewat\w*|melebihi|melewati|lewat|jebol|kelebihan|boros)\b/i.test(userPrompt)) {
+          budgetItems.push({
+            id: 'budgets-verdict',
+            kind: 'budget',
+            label: 'Over budget?',
+            content:
+              overRows.length > 0
+                ? `Answer: Yes (Ya), over budget on ${overRows.map((r) => r.category).join(' and ')}.`
+                : 'Answer: No (Tidak), every budget is within its limit.',
+            score: 956,
+          });
+        }
         budgetItems.push({
           id: 'budgets-summary',
           kind: 'budget',
           label: 'Budgets',
-          content: `Budgets (${budgetPeriodLabel}${accountPart}): all budgets together ${sumRemText} (limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}).${overPart}`,
+          // Verdict first: led by "all budgets together Rp 1.129.000 left", the model answered "not over budget"
+          // while Bills was over (emulator check of 1.3.6, 2026-11-25).
+          content: `Budgets (${budgetPeriodLabel}${accountPart}):${overPart} All budgets together: ${sumRemText} (limit ${formatCurrency(sumLimit)}, spent ${formatCurrency(sumSpent)}).`,
           score: 955,
         });
         rowsToEmit.forEach((row, idx) => {
@@ -2962,7 +2988,13 @@ export function findUngroundedAmounts(reply: string, context: string): number[] 
 export function finalizeLocalChatReply(reply: string, messages: ExternalChatMessage[], mode: LocalAiMode = 'chat'): string {
   const text = replaceFalseConnectivityClaim(reply, mode);
   const context = messages.map((m) => m.content).join('\n');
-  if (findUngroundedAmounts(text, context).length === 0) return text;
+  // A reply to "am I over budget?" must name a budget that is over; the 0.8B model answered "Tidak ada" with
+  // Transport and Shopping over (chat benchmark 2026-11-25).
+  const overVerdict = context.match(/Answer: Yes \(Ya\), over budget on ([^\n]+)\./);
+  const contradictsVerdict =
+    overVerdict !== null &&
+    !overVerdict[1].split(' and ').some((name) => text.toLowerCase().includes(name.trim().toLowerCase()));
+  if (!contradictsVerdict && findUngroundedAmounts(text, context).length === 0) return text;
 
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
   const factsStart = [CHAT_FACTS_HEADING, 'Grounded local facts:']

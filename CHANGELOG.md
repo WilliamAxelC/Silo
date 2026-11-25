@@ -12,7 +12,8 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 - Silo AI no longer repeats its earlier answers: each question gets fresh facts, and short follow-ups like
   "And last month?" or "What category was that?" keep the earlier topic.
 - Silo AI never shows amounts that are not in your records; such a reply is replaced by the facts themselves.
-- Silo AI reads over-budget categories correctly (it used to call "over by Rp 41.000" money left).
+- Silo AI reads over-budget categories correctly: it used to call "over by Rp 41.000" money left, and to say
+  "not over budget" when one budget was over but all budgets together were not.
 ### Changed
 - Silo AI answers more questions from your records: this month vs last month, "Compare October and November",
   which store you spent most at, average per day, coffee or subscriptions across merchants, "Bali trip".

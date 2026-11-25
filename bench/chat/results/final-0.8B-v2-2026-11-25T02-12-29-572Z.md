@@ -1,18 +1,18 @@
-# Chat benchmark: final-0.8B
+# Chat benchmark: final-0.8B-v2
 
-150 answers (3 per case). "Raw" is the model's text; "shown" is after the app's reply guard.
+153 answers (3 per case). "Raw" is the model's text; "shown" is after the app's reply guard.
 
 | Tier | Raw pass | Shown pass | Raw invented amounts | Shown invented amounts |
 |---|---|---|---|---|
-| typical | 53/54 (98.1%) | 54/54 (100.0%) | 1 | 0 |
+| typical | 54/54 (100.0%) | 54/54 (100.0%) | 0 | 0 |
 | hard | 35/36 (97.2%) | 36/36 (100.0%) | 1 | 0 |
 | abstract | 14/21 (66.7%) | 17/21 (81.0%) | 3 | 0 |
 | followup | 11/12 (91.7%) | 11/12 (91.7%) | 0 | 0 |
-| indonesian | 12/15 (80.0%) | 15/15 (100.0%) | 3 | 0 |
+| indonesian | 12/18 (66.7%) | 18/18 (100.0%) | 3 | 0 |
 | offtopic | 12/12 (100.0%) | 12/12 (100.0%) | 0 | 0 |
-| **overall** | 137/150 (91.3%) | 145/150 (96.7%) | 8 | 0 |
+| **overall** | 138/153 (90.2%) | 148/153 (96.7%) | 7 | 0 |
 
-Median latency 1.10s on the bench host.
+Median latency 1.11s on the bench host.
 
 ## Failures (shown answer)
 

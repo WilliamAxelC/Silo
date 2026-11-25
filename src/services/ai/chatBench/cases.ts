@@ -148,8 +148,9 @@ export const BENCH_CASES: BenchCase[] = [
     tier: 'typical',
     prompt: 'Am I over budget on anything?',
     expect: [['Shopping']],
-    forbid: ['over budget on your Food', 'over budget on Food', 'Food & Dining budget by'],
-    needsFacts: ['Over budget: Transport', 'Shopping', BENCH_TRUTH.shoppingOver],
+    forbid: ['over budget on your Food', 'over budget on Food', 'Food & Dining budget by', 'not over budget', 'no, you'],
+    needsFacts: ['OVER budget (melebihi anggaran): Transport, Shopping', BENCH_TRUTH.shoppingOver],
+    note: 'All budgets together are under; Transport and Shopping are over (emulator check 2026-11-25).',
   },
   { id: 'income-this-month', tier: 'typical', prompt: 'How much did I earn this month?', expect: [[incomeThis]] },
   {
@@ -358,6 +359,14 @@ export const BENCH_CASES: BenchCase[] = [
     tier: 'indonesian',
     prompt: 'Pengeluaran terbesar bulan ini apa?',
     expect: [[biggestThis.merchant], [BENCH_TRUTH.biggestThis.amount]],
+  },
+  {
+    id: 'id-over-budget',
+    tier: 'indonesian',
+    prompt: 'Ada anggaran yang kelewatan bulan ini?',
+    expect: [['Shopping', 'Transport']],
+    needsFacts: ['OVER budget (melebihi anggaran): Transport, Shopping'],
+    forbid: ['tidak ada'],
   },
   { id: 'id-makan-bulan-lalu', tier: 'indonesian', prompt: 'Berapa pengeluaran makan bulan lalu?', expect: [[foodLast]] },
   {

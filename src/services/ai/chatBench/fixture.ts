@@ -45,6 +45,9 @@ export const BENCH_BUDGETS: SeedBudget[] = [
   { name: 'Food & Dining', amount: 2_500_000, categories: ['Food & Dining'] },
   { name: 'Transport', amount: 600_000, categories: ['Transport'] },
   { name: 'Shopping', amount: 1_000_000, categories: ['Shopping'] },
+  // Large enough that all budgets together are under while Shopping and Transport are over: the model answered
+  // "not over budget" in that situation on the 1.3.6 emulator check.
+  { name: 'Bills', amount: 9_000_000, categories: ['Bills'] },
 ];
 
 const at = (month1: number, day: number, hour = 12, minute = 0) =>

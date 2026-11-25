@@ -606,7 +606,8 @@ describe('AI Agent & Context Engine', () => {
       // Total:         limit 1,800,000, spent 1,450,000, remaining 350,000
       expect(text).toContain('Budgets (This month (Nov 2026)):');
       // What is left comes first: the 0.8B model read "over by" as a surplus (chat benchmark 2026-11-25).
-      expect(text).toContain('all budgets together Rp 350.000 left (limit Rp 1.800.000, spent Rp 1.450.000). Over budget: Transport. Within budget: Food & Dining.');
+      // Verdict first: the model answered "not over budget" when the line led with the total left (2026-11-25).
+      expect(text).toContain('Budgets (This month (Nov 2026)): OVER budget (melebihi anggaran): Transport. Within budget: Food & Dining. All budgets together: Rp 350.000 left (limit Rp 1.800.000, spent Rp 1.450.000).');
       expect(text).toContain('Food & Dining: Rp 400.000 left (limit Rp 1.500.000, spent Rp 1.100.000)');
       expect(text).toContain('Transport: nothing left, OVER budget by Rp 50.000 (limit Rp 300.000, spent Rp 350.000)');
     });
@@ -871,7 +872,7 @@ describe('AI Agent & Context Engine', () => {
       const budQuery = 'How much budget do I have left?';
       const budItems = buildRetrievedContext(budQuery, { db: testDb, now: NOW });
       expect(kindsOf(budItems)).toEqual(new Set(['budget']));
-      // +20 for the "Over budget: X. Within budget: Y." lead the 0.8B model needs (chat benchmark 2026-11-25).
+      // +20 for the "OVER budget: X. Within budget: Y." lead the 0.8B model needs (chat benchmark 2026-11-25).
       expect(promptTokensFor(budQuery, budItems).tokens).toBeLessThanOrEqual(185);
 
       // Category-only: Period + Category only

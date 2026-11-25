@@ -101,6 +101,16 @@ describe('chat benchmark: retrieval puts the answer in the prompt', () => {
     expect(resolveFollowUpPrompt('And last month?', [])).toBe('And last month?');
   });
 
+  it('a reply that denies an over-budget verdict is replaced by the facts', () => {
+    const benchCase = BENCH_CASES.find((c) => c.id === 'id-over-budget')!;
+    const messages = buildBenchMessages(db, benchCase, store());
+    // The real 0.8B reply, five times out of five, with Transport and Shopping over budget.
+    const finalized = finalizeLocalChatReply('Tidak ada anggaran yang kelewatan bulan ini.', messages);
+    expect(finalized).toContain('Answer: Yes (Ya), over budget on Transport and Shopping.');
+    const right = 'Ya, anggaran Transport dan Shopping melebihi batas bulan ini.';
+    expect(finalizeLocalChatReply(right, messages)).toBe(right);
+  });
+
   it('a grounded reply passes through the guard unchanged', () => {
     const benchCase = BENCH_CASES.find((c) => c.id === 'biggest-expense')!;
     const messages = buildBenchMessages(db, benchCase, store());
