@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency`, pushed to GitHub (origin/feat/multi-currency). `prod` = `v1.3.6` @ `49bfcca`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (origin is 2 commits + this handoff behind). `prod` = `v1.3.6` @ `49bfcca`.
 
 ## Current state
 - **Live:** 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
@@ -20,12 +20,18 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased.
+- **1.3.7 built, not published** (feat/multi-currency @ 6f643bf, local only, not pushed): one Silo AI mode (the Grounded /
+  Chat toggle and `useAIStore.selectedMode` are gone), worked-out numbers for advice and planning
+  (`detectPlanningIntent` in agent.ts), one guard retry at temperature 0.1 before the facts fallback, a verdict for
+  "can I still ... budget?". Benchmark: 97.7% over 177 answers, advice 29.2% -> 87.5% (`bench/chat/README.md`).
+  APKs on ai-renderer: `~/silo-build/apks/head.apk` (arm64, release key) and `emu-x86_64.apk`; emulator 5554 runs it.
+  Waiting on the user to say publish (and push).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
-- AI chat: remaining 0.8B misses are judgement questions ("was buying X a bad idea?"); the 2B model scored 98%
-  (2.6s vs 1.1s on the bench host). On the x86 emulator replies take 25-70s; that is the emulator, not phones.
+- Publish 1.3.7 (same steps as 1.3.6: version.json notes, index.html, docker cp, remove the old APK), tag, push.
+- AI chat: Qwen thinking mode was tested and does not work (loops until the 2048-token context is full); keep it off.
+  Remaining 0.8B misses: Indonesian advice, "make me a budget" often ends in the facts fallback on real data. On the x86 emulator replies take 25-70s; that is the emulator, not phones.
 - Watch real Split Bill use.
 - Receipt reading: build a private eval set from the user's own receipts (bench/data, gitignored) and measure ML Kit on a
   real phone; the rule-based fallback is ~74% on totals (benchmark), ceiling ~89%.
