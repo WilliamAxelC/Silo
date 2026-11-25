@@ -12,9 +12,11 @@ then with a made-up category list ("Transport: Rp 15.20").
   (Shopping and Transport over budget in November) plus a large Bills budget, so all budgets together are
   under while two are over. That trap fooled the model on the 1.3.6 emulator check. Seeded into real SQLite with Silo's own migrations.
   Expected answers are computed in plain JS from the seed list, not through the app's SQL.
-- **Questions** (`src/services/ai/chatBench/cases.ts`), 51 cases in 6 tiers: `typical` (one fact, as people
+- **Questions** (`src/services/ai/chatBench/cases.ts`), 59 cases in 7 tiers: `typical` (one fact, as people
   type it, typos included), `hard` (comparisons, averages, synonyms like "coffee" or "subscriptions"), `abstract`
-  ("Am I doing okay?", "Can I afford a 5 million laptop?"), `followup` (earlier turns in history, including the
+  ("Am I doing okay?", "Can I afford a 5 million laptop?"), `advice` (planning that needs worked-out numbers:
+  "How can I save 20% of my income?", "Make me a budget for next month", "How long to save 10 million?"; the reply
+  must be the model's own, not the facts fallback), `followup` (earlier turns in history, including the
   exact screenshot conversation), `indonesian`, `offtopic` (weather, things the user never bought, "hi").
 - **Scoring** (`src/services/ai/chatBench/score.ts`): an answer passes when it states the expected facts
   (amounts matched numerically, so "Rp 4.899.000", "4,899,000" and "4.9 juta" all count), avoids forbidden ones,
@@ -60,6 +62,7 @@ Latency is on the 20-core bench host, not a phone; compare runs with each other 
 |---|---|---|---|---|---|---|---|---|---|
 | 0.8B, 1.3.5 code (baseline) | 88.9% | 41.7% | 61.9% | 41.7% | 80.0% | 58.3% | **66.7%** | 25 | 2.30s |
 | 0.8B, 1.3.6 (51 cases, 153 answers) | 100% | 100% | 81.0% | 91.7% | 100% | 100% | **96.7%** | 0 | 1.11s |
+| 0.8B, 1.3.7 (59 cases, 177 answers) | 100% | 100% | 95.2% | 100% | 100% | 100% | **97.7%** | 0 | 1.64s |
 | 2B, 1.3.6 before the budget-trap cases (50 cases) | 94.4% | 100% | 100% | 100% | 100% | 100% | **98.0%** | 0 | 2.59s |
 
 The 0.8B model answers "Ada anggaran yang kelewatan?" with "Tidak ada" even with an explicit "Answer: Yes"
@@ -72,6 +75,21 @@ pattern never matched "category"; comparisons, top merchants, averages, merchant
 earlier answers from the local prompt (the model copied them), putting the answer first in budget facts
 ("nothing left, OVER budget by"), and the reply guard. Quoting a canned refusal in the system prompt made the
 model refuse real questions (-9 points); keep off-topic instructions descriptive.
+
+1.3.7 adds an `advice` column (not in the table above): 29.2% on 1.3.6, 87.5% on 1.3.7. The facts fallback
+dropped from 15 to 7 of 177 answers with the guard retry.
+
+### Advice and planning (1.3.7)
+
+- Retrieval works the numbers out (`detectPlanningIntent` in `agent.ts`): a share of income or of a named category
+  ("20%", "half"), months to a savings goal, months of spending the balance covers, and a suggested budget for
+  next month (this month's spending rounded to Rp 50.000, over-budget categories cut to their limit). They arrive
+  as a "Worked out" fact. Left to itself the model said "5.05 years" to save 10 million at Rp 1.970.500 a month.
+- When the guard rejects a reply, the app retries once at temperature 0.1 with "write amounts exactly as they
+  appear in the facts", and shows the facts only if the retry fails too.
+- **Thinking mode does not work here.** With Qwen thinking on, 0.8B and 2B both loop ("Wait, let's check the
+  math again") until the 2048-token context is full and never answer: 0/45 (0.8B, 700 tokens, 22s each), 0/4
+  (2B, 1800 tokens, 98s each). The app keeps thinking off; `SILO_CHAT_BENCH_THINKING=1` reruns the experiment.
 
 ## Adding a case
 

@@ -21,7 +21,7 @@ import {
   BENCH_BUDGETS,
 } from './fixture';
 
-export type BenchTier = 'typical' | 'hard' | 'abstract' | 'followup' | 'indonesian' | 'offtopic';
+export type BenchTier = 'typical' | 'hard' | 'abstract' | 'advice' | 'followup' | 'indonesian' | 'offtopic';
 export type BenchTerm = string | number;
 
 export interface BenchCase {
@@ -33,6 +33,11 @@ export interface BenchCase {
   forbid?: BenchTerm[];
   /** Facts (amounts or names) that retrieval must put in front of the model. Defaults to the numbers in `expect`. */
   needsFacts?: BenchTerm[];
+  /**
+   * Advice and planning: the answer must be the model's own reply. The guard's facts-only fallback ("I couldn't put
+   * that into words reliably ...") is safe but does not answer "how can I ...?", so it fails these cases.
+   */
+  needsOwnAnswer?: boolean;
   /** The answer should say plainly that nothing matched / it does not know (checked with NO_DATA_PHRASES). */
   expectNoData?: boolean;
   note?: string;
@@ -297,6 +302,76 @@ export const BENCH_CASES: BenchCase[] = [
     tier: 'abstract',
     prompt: 'Give me a summary of this month',
     expect: [[spentThis], [incomeThis]],
+  },
+
+  // ----- Advice and planning: the questions an LLM is there for. The reply must be its own, grounded. -----
+  {
+    id: 'save-20pct',
+    tier: 'advice',
+    prompt: 'How can I save 20% of my income?',
+    // The target (20% of income) or the gap to it (what to spend less) both answer it.
+    expect: [
+      [Math.round(incomeThis * 0.2), Math.round(incomeThis * 0.2) - BENCH_TRUTH.netThis],
+      ['Shopping', 'Food', 'Bills', 'GoFood', 'coffee', 'cut', 'reduce', 'spend'],
+    ],
+    needsFacts: [Math.round(incomeThis * 0.2), BENCH_TRUTH.netThis],
+    needsOwnAnswer: true,
+    note: 'Quick-question chip; on 1.3.6 the guard replaced the reply with the facts dump (phone, 2026-11-25).',
+  },
+  {
+    id: 'cut-food-half',
+    tier: 'advice',
+    prompt: 'If I cut my food spending in half, how much would I save?',
+    expect: [[Math.round(foodThis / 2)]],
+    needsFacts: [Math.round(foodThis / 2)],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'save-10m-how-long',
+    tier: 'advice',
+    prompt: 'How long would it take me to save 10 million?',
+    expect: [[`${Math.ceil(10_000_000 / BENCH_TRUTH.netThis)} months`, `${(10_000_000 / BENCH_TRUTH.netThis).toFixed(1)} months`]],
+    needsFacts: [BENCH_TRUTH.netThis, `${(10_000_000 / BENCH_TRUTH.netThis).toFixed(1)} months`],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'emergency-months',
+    tier: 'advice',
+    prompt: 'How many months of expenses could my savings cover?',
+    expect: [[`${(BENCH_TRUTH.totalBalance / spentThis).toFixed(1)} month`, `${Math.floor(BENCH_TRUTH.totalBalance / spentThis)} month`]],
+    needsFacts: [BENCH_TRUTH.totalBalance, `${(BENCH_TRUTH.totalBalance / spentThis).toFixed(1)} month`],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'budget-plan',
+    tier: 'advice',
+    prompt: 'Make me a budget for next month',
+    expect: [['Food & Dining', 'Food'], ['Bills', 'Groceries', 'Transport', 'Shopping']],
+    needsFacts: ['Food & Dining', 'Groceries', 'Transport'],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'food-too-high',
+    tier: 'advice',
+    prompt: 'Is my food spending too high?',
+    expect: [[foodThis, BENCH_TRUTH.foodRemaining, 2_500_000]],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'shopping-tips',
+    tier: 'advice',
+    prompt: 'I keep overspending on shopping, any tips?',
+    expect: [['Shopping'], [shoppingThis, BENCH_TRUTH.shoppingOver, 1_000_000, 'Erafone', 'phone', 'budget']],
+    needsFacts: ['Shopping', BENCH_TRUTH.shoppingOver],
+    needsOwnAnswer: true,
+  },
+  {
+    id: 'id-nabung',
+    tier: 'advice',
+    prompt: 'Gimana caranya biar bisa nabung lebih banyak?',
+    expect: [['Shopping', 'Bills', 'Food', 'makan', 'belanja', 'GoFood', 'kopi']],
+    needsFacts: [topCatThis.category],
+    needsOwnAnswer: true,
   },
 
   // ----- Follow-ups: the earlier turns are in chat history -----

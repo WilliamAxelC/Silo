@@ -5,6 +5,19 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-11-25
+### Changed
+- Silo AI has one mode: the Grounded / Chat toggle is gone. Both modes read your records and needed the same
+  model; Silo AI now answers from your records and gives advice in the same chat.
+- Silo AI answers planning questions with numbers worked out from your records: "How can I save 20% of my
+  income?", "If I cut food in half...", "How long to save 10 million?", "How many months could my savings
+  cover?", "Make me a budget for next month".
+### Fixed
+- Silo AI no longer refuses advice ("I don't have that in my Silo records" for "any tips?").
+- When Silo AI's answer contains a number that isn't in your records, it tries once more before showing the plain
+  facts; the plain facts now start with a short note instead of a raw list.
+- "Can I still ... without going over my budget?" answers No when that budget is already over.
+
 ## [1.3.6] - 2026-11-25
 ### Fixed
 - Silo AI: "What is my most spent category" (and "most spending", "where is my money going") now gets your real

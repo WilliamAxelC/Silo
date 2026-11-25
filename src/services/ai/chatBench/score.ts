@@ -53,7 +53,7 @@ function termHit(term: BenchTerm, answer: string, amounts: ParsedAmount[]) {
 
 export interface BenchScore {
   pass: boolean;
-  checks: { facts: boolean; forbid: boolean; grounded: boolean; noData?: boolean };
+  checks: { facts: boolean; forbid: boolean; grounded: boolean; noData?: boolean; ownAnswer?: boolean };
   invented: number[];
   forbidHits: BenchTerm[];
 }
@@ -73,6 +73,7 @@ export function scoreAnswer(benchCase: BenchCase, answer: string, context: strin
     .map((a) => a.value);
 
   const checks: BenchScore['checks'] = { facts, forbid: forbidHits.length === 0, grounded: invented.length === 0 };
+  if (benchCase.needsOwnAnswer) checks.ownAnswer = !/^I couldn't put that into words reliably/.test(answer.trim());
   if (benchCase.expectNoData) {
     const low = answer.toLowerCase().replace(/’/g, "'");
     checks.noData = noDataPhrases.some((p) => low.includes(p));

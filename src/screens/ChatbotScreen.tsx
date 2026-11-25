@@ -158,8 +158,6 @@ export const ChatbotScreen = () => {
   const provisioning = useAIStore((state) => state.provisioning);
   const provisioningHydrated = useAIStore((state) => state.provisioningHydrated);
   const runtime = useAIStore((state) => state.runtime);
-  const selectedMode = useAIStore((state) => state.selectedMode);
-  const setSelectedMode = useAIStore((state) => state.setSelectedMode);
   const runtimeReady = useAIStore((state) => state.runtimeReady);
   const warmupPending = useAIStore((state) => state.warmupPending);
   const localModelDisplayName = useAIStore((state) => state.localModelDisplayName);
@@ -169,7 +167,6 @@ export const ChatbotScreen = () => {
   const flatListRef = useRef<FlatList<Message>>(null);
   const initialMessage = route.params?.initialMessage || '';
   const [inputText, setInputText] = useState(initialMessage);
-  const [chatRuntimeRequested, setChatRuntimeRequested] = useState(selectedMode === 'chat');
   const [isScreenFocused, setIsScreenFocused] = useState(false);
   const pendingAssistantMessageIdRef = useRef<string | null>(null);
   const chatHistoryLengthRef = useRef(chatHistory.length);
@@ -269,10 +266,11 @@ export const ChatbotScreen = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  const aiMode = selectedMode;
+  // One mode since 1.3.7: Grounded and Chat got the same facts and needed the same model; the toggle only
+  // confused (user feedback 2026-11-25). Chat answers from the user's records and can also give advice.
+  const aiMode: LocalAiMode = 'chat';
   const {
     runtimePhaseActive,
-    canRunGroundedQueries,
     canRunNativeChat,
     hasUsableLocalInferenceBackend,
     localInferenceStatusMessage,
@@ -282,7 +280,7 @@ export const ChatbotScreen = () => {
     hasUsableLocalInferenceBackend &&
     !provisioningHydrated &&
     provisioning.status === 'not-installed';
-  const canSendMessage = aiMode === 'rag' ? canRunGroundedQueries : canRunNativeChat;
+  const canSendMessage = canRunNativeChat;
   const canStartOrRetryProvisioning =
     aiInferenceMode === 'local' &&
     hasUsableLocalInferenceBackend &&
@@ -344,12 +342,6 @@ export const ChatbotScreen = () => {
       chatRuntimePreloadService.clearRequest();
     }
   }, [aiInferenceMode, chatRuntimePreloadService, isScreenFocused]);
-
-  useEffect(() => {
-    if (isScreenFocused && selectedMode === 'chat' && aiInferenceMode === 'local') {
-      setChatRuntimeRequested(true);
-    }
-  }, [aiInferenceMode, isScreenFocused, selectedMode]);
 
   useEffect(() => {
     const activeStartedAt = runtime.activePhaseStartedAt;
@@ -567,12 +559,12 @@ export const ChatbotScreen = () => {
     try {
       const responseText = await generationService.startGeneration({
         prompt: userQuery,
-        mode: aiMode as LocalAiMode,
+        mode: aiMode,
         disableThinking: true,
       });
       const durationMs = Date.now() - startedAt;
       updateChatMessage(assistantMessageId, {
-        text: replaceFalseConnectivityClaim(responseText, aiMode as LocalAiMode),
+        text: replaceFalseConnectivityClaim(responseText, aiMode),
         status: 'complete',
         createdAt: new Date(startedAt).toISOString(),
       });
@@ -644,7 +636,7 @@ export const ChatbotScreen = () => {
     [handleCopyToClipboard]
   );
 
-  const showChatRuntimeGate = aiMode === 'chat' && chatRuntimeRequested && (!canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning);
+  const showChatRuntimeGate = !canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning;
   const isNotInstalled = !isCheckingLocalProvisioning && provisioning.status === 'not-installed';
   const chatRuntimeActionLabel = isNotInstalled ? 'Set Up AI Model' : canStartOrRetryProvisioning ? 'Retry chat setup' : 'Preparing chatbot';
   const statusMetaLabel = elapsedSeconds > 0 ? `${formatElapsed(elapsedSeconds)} elapsed` : null;
@@ -841,31 +833,6 @@ export const ChatbotScreen = () => {
           </View>
         )}
 
-        {/* Mode Toggle: Grounded vs Chat */}
-        <View style={[styles.toggleContainer, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          <TouchableOpacity
-            style={[styles.toggleBtn, aiMode === 'rag' && { backgroundColor: theme.primary }]}
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-            onPress={() => setSelectedMode('rag')}
-            accessibilityRole="button"
-            accessibilityLabel="Switch to Grounded mode"
-          >
-            <Text style={[styles.toggleText, { color: aiMode === 'rag' ? theme.onPrimary : theme.textMuted }]}>Grounded</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleBtn, aiMode === 'chat' && { backgroundColor: theme.primary }]}
-            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
-            onPress={() => {
-              setChatRuntimeRequested(true);
-              setSelectedMode('chat');
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Switch to Chat mode"
-          >
-            <Text style={[styles.toggleText, { color: aiMode === 'chat' ? theme.onPrimary : theme.textMuted }]}>Chat</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Chat History List */}
         <FlatList
           ref={flatListRef}
@@ -918,7 +885,7 @@ export const ChatbotScreen = () => {
                     <>
                       <Ionicons name="sparkles-outline" size={22} color={theme.primary} />
                       <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
-                        Download the local AI model in Settings to use offline Chat mode.
+                        Download the local AI model in Settings to use Silo AI offline.
                       </Text>
                       <TouchableOpacity
                         style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
@@ -948,7 +915,7 @@ export const ChatbotScreen = () => {
                     <>
                       <Ionicons name="settings-outline" size={22} color={theme.primary} />
                       <Text style={[styles.chatGateText, { color: theme.textMuted }]}>
-                        Configure an external API URL and model in Settings to use Chat mode.
+                        Configure an external API URL and model in Settings to use Silo AI.
                       </Text>
                       <TouchableOpacity
                         style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
@@ -991,9 +958,7 @@ export const ChatbotScreen = () => {
                 <Text style={[styles.placeholderText, { color: theme.textMuted }]}>
                   {canSendMessage
                     ? 'Ask anything about your personal finances or tap a quick question:'
-                    : aiMode === 'rag'
-                    ? 'Grounded queries are answered from records stored on this device only.'
-                    : 'Chat mode is disabled because on-device generation is unavailable.'}
+                    : 'Silo AI needs the on-device model. Set it up in Settings to chat.'}
                 </Text>
 
                 {/* Interactive Quick Suggestion Pills */}
@@ -1061,12 +1026,10 @@ export const ChatbotScreen = () => {
                 : showChatRuntimeGate && isNotInstalled
                 ? 'Set up the AI model in Settings to chat'
                 : showChatRuntimeGate
-                ? 'Chat mode unavailable right now'
+                ? 'Silo AI unavailable right now'
                 : canSendMessage
                 ? 'Ask about your finances or spending...'
-                : aiMode === 'rag'
-                ? 'Ask a grounded query about your records...'
-                : 'Chat mode unavailable on this build'
+                : 'Silo AI is unavailable on this build'
             }
             value={inputText}
             onChangeText={setInputText}
@@ -1165,9 +1128,6 @@ const styles = StyleSheet.create({
   errorBannerText: { flex: 1, fontSize: 12, fontWeight: '600' },
   retryPill: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, minHeight: 32 },
   retryPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  toggleContainer: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1 },
-  toggleBtn: { flex: 1, minHeight: 38, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
-  toggleText: { fontSize: 13, fontWeight: '700' },
   chatArea: { flex: 1 },
   emptyStateWrap: { marginTop: 20, gap: 14 },
   chatGateCard: { borderWidth: 1, borderRadius: 18, padding: 16, alignItems: 'center', gap: 10 },

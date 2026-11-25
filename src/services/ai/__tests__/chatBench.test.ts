@@ -8,7 +8,7 @@ import { useAIStore } from '../../../store/useAIStore';
 import { idr } from '../chatBench/fixture';
 import { BENCH_CASES, BENCH_TRUTH, type BenchCase, type BenchTerm } from '../chatBench/cases';
 import { buildBenchMessages, openBenchDb } from '../chatBench/harness';
-import { finalizeLocalChatReply, resolveFollowUpPrompt } from '../agent';
+import { detectPlanningIntent, finalizeLocalChatReply, parsePromptAmount, resolveFollowUpPrompt } from '../agent';
 
 jest.mock('../../../store/useSettingsStore', () => ({
   useSettingsStore: { getState: jest.fn() },
@@ -88,6 +88,26 @@ describe('chat benchmark: retrieval puts the answer in the prompt', () => {
     expect(finalized).toContain(idr(BENCH_TRUTH.topCatThis.total));
   });
 
+  it('planning questions are recognised and their amounts parsed', () => {
+    expect(detectPlanningIntent('How can I save 20% of my income?')).toMatchObject({ share: 0.2, shareLabel: '20%', tips: true });
+    expect(detectPlanningIntent('If I cut my food spending in half, how much would I save?')).toMatchObject({ share: 0.5 });
+    expect(detectPlanningIntent('How long would it take me to save 10 million?').goalAmount).toBe(10_000_000);
+    expect(detectPlanningIntent('Berapa lama nabung 5 juta?').goalAmount).toBe(5_000_000);
+    expect(detectPlanningIntent('How many months of expenses could my savings cover?').coverage).toBe(true);
+    expect(detectPlanningIntent('Make me a budget for next month').plan).toBe(true);
+    expect(detectPlanningIntent('What is my total balance?')).toEqual({
+      share: null,
+      shareLabel: null,
+      goalAmount: null,
+      coverage: false,
+      plan: false,
+      tips: false,
+    });
+    expect(parsePromptAmount('Rp 2.500.000 or 500k')).toBe(2_500_000);
+    expect(parsePromptAmount('save for a trip in 2027')).toBeNull();
+    expect(parsePromptAmount('save 2000k by 2027')).toBe(2_000_000);
+  });
+
   it('follow-ups keep the earlier topic; full questions stand alone', () => {
     expect(resolveFollowUpPrompt('And last month?', ['How much did I spend on food this month?'])).toBe(
       'How much did I spend on food. And last month?',
@@ -112,6 +132,17 @@ describe('chat benchmark: retrieval puts the answer in the prompt', () => {
       'Answer: Yes (Ya), over budget on Transport and Shopping.',
     );
     const right = 'Ya, anggaran Transport dan Shopping melebihi batas bulan ini.';
+    expect(finalizeLocalChatReply(right, messages)).toBe(right);
+  });
+
+  it('a "yes" to "can I still ...?" on an over-budget category is replaced', () => {
+    const benchCase = BENCH_CASES.find((c) => c.id === 'transport-budget-left')!;
+    const messages = buildBenchMessages(db, benchCase, store());
+    expect(messages[0].content).toContain('Answer: No (Tidak), Transport is already OVER budget by Rp 41.000');
+    // Real 0.8B reply from the benchmark.
+    const wrong = 'Yes, you can still take Grab rides this month, as your transport budget remains within limits.';
+    expect(finalizeLocalChatReply(wrong, messages)).toMatch(/^I couldn't put that into words reliably/);
+    const right = 'No, Transport is already over budget by Rp 41.000, so there is nothing left for Grab rides.';
     expect(finalizeLocalChatReply(right, messages)).toBe(right);
   });
 

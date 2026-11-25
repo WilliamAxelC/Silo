@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useAIStore } from '../../../store/useAIStore';
-import { finalizeLocalChatReply } from '../agent';
+import { buildGuardRetryMessages, checkLocalChatReply, GUARD_RETRY_TEMPERATURE } from '../agent';
 import {
   QWEN_MODEL_DEFAULT_TEMPERATURE,
   QWEN_MODEL_DEFAULT_TOP_P,
@@ -36,18 +36,21 @@ const URL_ENV = process.env.SILO_CHAT_BENCH_URL;
 const SAMPLES = Number(process.env.SILO_CHAT_BENCH_SAMPLES ?? 3);
 const LABEL = process.env.SILO_CHAT_BENCH_LABEL ?? 'run';
 const ONLY = process.env.SILO_CHAT_BENCH_ONLY?.split(',');
+/** Let the model think before answering (Qwen thinking mode), with room for the thoughts. */
+const THINKING = process.env.SILO_CHAT_BENCH_THINKING === '1';
+const THINKING_MAX_TOKENS = Number(process.env.SILO_CHAT_BENCH_THINKING_TOKENS ?? 700);
 const RESULTS_DIR = join(__dirname, '../../../../bench/chat/results');
 
-function chat(messages: unknown, seed: number): Promise<string> {
+function chat(messages: unknown, seed: number, temperature = QWEN_MODEL_DEFAULT_TEMPERATURE): Promise<{ text: string; tokens: number }> {
   const url = new URL('/v1/chat/completions', URL_ENV);
   const body = JSON.stringify({
     messages,
-    temperature: QWEN_MODEL_DEFAULT_TEMPERATURE,
+    temperature,
     top_p: QWEN_MODEL_DEFAULT_TOP_P,
-    max_tokens: QWEN_MODEL_MAX_OUTPUT_TOKENS,
+    max_tokens: THINKING ? THINKING_MAX_TOKENS : QWEN_MODEL_MAX_OUTPUT_TOKENS,
     stop: [...QWEN_MODEL_STOP_TOKENS],
     seed,
-    chat_template_kwargs: { enable_thinking: false },
+    chat_template_kwargs: { enable_thinking: THINKING },
   });
   return new Promise((resolve, reject) => {
     const req = request(
@@ -58,8 +61,11 @@ function chat(messages: unknown, seed: number): Promise<string> {
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           try {
-            const text: string = JSON.parse(data).choices[0].message.content ?? '';
-            resolve(text.replace(/<think>[\s\S]*?<\/think>/g, '').trim());
+            const body = JSON.parse(data);
+            const text: string = body.choices[0].message.content ?? '';
+            // Unfinished thinking (ran out of tokens) leaves no answer at all.
+            const answer = text.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<think>[\s\S]*$/, '').trim();
+            resolve({ text: answer, tokens: Number(body.usage?.completion_tokens ?? 0) });
           } catch (err) {
             reject(new Error(`bad llama-server reply: ${data.slice(0, 200)}`));
           }
@@ -85,15 +91,23 @@ describeIfServer('chat benchmark against a real model', () => {
       });
       const db = openBenchDb();
       const store = useAIStore.getState() as any;
-      const rows: Array<{ id: string; tier: BenchTier; sample: number; prompt: string; raw: string; final: string; secs: number; rawScore: BenchScore; finalScore: BenchScore }> = [];
+      const rows: Array<{ id: string; tier: BenchTier; sample: number; prompt: string; raw: string; final: string; secs: number; tokens: number; retried: boolean; rawScore: BenchScore; finalScore: BenchScore }> = [];
 
       for (const benchCase of BENCH_CASES.filter((c) => !ONLY || ONLY.includes(c.id))) {
         const messages = buildBenchMessages(db, benchCase, store);
         const context = messages.map((m) => m.content).join('\n');
         for (let sample = 0; sample < SAMPLES; sample += 1) {
           const started = Date.now();
-          const raw = await chat(messages, 1000 + sample);
-          const final = finalizeLocalChatReply(raw, messages);
+          const { text: raw, tokens } = await chat(messages, 1000 + sample);
+          // Same as generationService: a rejected reply gets one stricter retry, then the facts are shown.
+          const check = checkLocalChatReply(raw, messages);
+          let final = check.text;
+          let retried = false;
+          if (!check.ok) {
+            retried = true;
+            const retry = checkLocalChatReply((await chat(buildGuardRetryMessages(messages), 2000 + sample, GUARD_RETRY_TEMPERATURE)).text, messages);
+            if (retry.ok) final = retry.text;
+          }
           rows.push({
             id: benchCase.id,
             tier: benchCase.tier,
@@ -102,6 +116,8 @@ describeIfServer('chat benchmark against a real model', () => {
             raw,
             final,
             secs: (Date.now() - started) / 1000,
+            tokens,
+            retried,
             rawScore: scoreAnswer(benchCase, raw, context, NO_DATA_PHRASES),
             finalScore: scoreAnswer(benchCase, final, context, NO_DATA_PHRASES),
           });
@@ -122,6 +138,8 @@ describeIfServer('chat benchmark against a real model', () => {
         ...tiers.map((tier) => line(tier, rows.filter((r) => r.tier === tier))),
         line('**overall**', rows),
         '',
+        `Guard retries: ${rows.filter((r) => r.retried).length}; facts shown instead of an answer: ${rows.filter((r) => r.final.startsWith("I couldn't put that into words")).length}. ` +
+        `Median output ${[...rows.map((r) => r.tokens)].sort((a, b) => a - b)[Math.floor(rows.length / 2)]} tokens${THINKING ? ' (thinking on)' : ''}. ` +
         `Median latency ${rows.map((r) => r.secs).sort((a, b) => a - b)[Math.floor(rows.length / 2)]?.toFixed(2)}s on the bench host.`,
         '',
         '## Failures (shown answer)',

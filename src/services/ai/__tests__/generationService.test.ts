@@ -380,6 +380,42 @@ describe('GenerationService', () => {
       spy.mockRestore();
     });
 
+    // Phone screenshot 2026-11-25: "How can I save 20% of my income?" showed the raw facts because the model
+    // worked out its own amount. A rejected reply now gets one stricter, cooler retry before falling back.
+    it('regression: retries once at low temperature when the reply invents an amount, then shows the retry', async () => {
+      const agent = require('../agent');
+      const spy = jest.spyOn(agent, 'buildRetrievedContext').mockReturnValue([
+        { id: 'sum', kind: 'summary', label: 'Summary', content: 'Summary: Spent Rp 11.000, Income Rp 11.964.353', score: 1 },
+      ]);
+      adapter.completion
+        .mockResolvedValueOnce({ requestId: 'r1', text: 'Save Rp 2.392.871 a month.', stopReason: 'stop' })
+        .mockResolvedValueOnce({ requestId: 'r2', text: 'Your income is Rp 11.964.353; keep spending low.', stopReason: 'stop' });
+      const service = getGenerationService();
+      const text = await service.startGeneration({ prompt: 'How can I save 20% of my income?', mode: 'chat' });
+      expect(adapter.completion).toHaveBeenCalledTimes(2);
+      const retryArgs = adapter.completion.mock.calls[1][1];
+      expect(retryArgs.temperature).toBe(0.1);
+      expect(retryArgs.messages[0].content).toContain('write amounts exactly as they appear in the facts');
+      expect(text).toBe('Your income is Rp 11.964.353; keep spending low.');
+      spy.mockRestore();
+    });
+
+    it('shows the facts when the retry invents an amount too', async () => {
+      const agent = require('../agent');
+      const spy = jest.spyOn(agent, 'buildRetrievedContext').mockReturnValue([
+        { id: 'sum', kind: 'summary', label: 'Summary', content: 'Summary: Spent Rp 11.000, Income Rp 11.964.353', score: 1 },
+      ]);
+      adapter.completion
+        .mockResolvedValueOnce({ requestId: 'r1', text: 'Save Rp 2.392.871 a month.', stopReason: 'stop' })
+        .mockResolvedValueOnce({ requestId: 'r2', text: 'Save Rp 2.400.000.', stopReason: 'stop' });
+      const service = getGenerationService();
+      const text = await service.startGeneration({ prompt: 'How can I save 20% of my income?', mode: 'chat' });
+      expect(text).toMatch(/^I couldn't put that into words reliably/);
+      expect(text).toContain('Summary: Spent Rp 11.000, Income Rp 11.964.353');
+      expect(text).not.toContain('2.400.000');
+      spy.mockRestore();
+    });
+
     it('disables Qwen thinking by default and sends structured messages in both local chat and grounded (rag) modes', async () => {
       const service = getGenerationService();
 

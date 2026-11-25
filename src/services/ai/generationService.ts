@@ -5,7 +5,9 @@ import {
   buildLocalMessagesForMode,
   buildPromptForMode,
   buildRetrievedContext,
-  finalizeLocalChatReply,
+  buildGuardRetryMessages,
+  checkLocalChatReply,
+  GUARD_RETRY_TEMPERATURE,
   buildExternalMessagesForMode,
 } from './agent';
 import {
@@ -730,13 +732,32 @@ class GenerationService {
         },
       });
 
-      const latestRuntimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
       const sanitizedText = sanitizeGeneratedText(result.text);
-      // Chat replies built from the user's records never show amounts the records do not contain.
-      const cleanedText =
-        localChatMessages && result.stopReason !== 'cancelled'
-          ? finalizeLocalChatReply(sanitizedText.trim(), localChatMessages, mode)
-          : sanitizedText;
+      // Chat replies built from the user's records never show amounts the records do not contain. A rejected
+      // reply gets one stricter retry before the facts themselves are shown (chat benchmark 2026-11-25).
+      let cleanedText = sanitizedText;
+      if (localChatMessages && result.stopReason !== 'cancelled') {
+        const check = checkLocalChatReply(sanitizedText.trim(), localChatMessages, mode);
+        cleanedText = check.text;
+        if (!check.ok && useAIStore.getState().runtime.activeGenerationRequestId === activeRequestId) {
+          store.setStreamingResponseText('');
+          store.setActiveStatusLabel('Checking the numbers...');
+          this.setState({ generationStatus: 'Checking the numbers...' });
+          const retry = await this.llamaRnAdapter.completion(activeRequestId, {
+            messages: buildGuardRetryMessages(localChatMessages),
+            maxTokens: maxTokens ?? QWEN_MODEL_MAX_OUTPUT_TOKENS,
+            temperature: GUARD_RETRY_TEMPERATURE,
+            topP: topP ?? QWEN_MODEL_DEFAULT_TOP_P,
+            stop: effectiveStop,
+            disableThinking,
+          });
+          if (retry.stopReason !== 'cancelled' && retry.stopReason !== 'error') {
+            const retryCheck = checkLocalChatReply(sanitizeGeneratedText(retry.text).trim(), localChatMessages, mode);
+            if (retryCheck.ok) cleanedText = retryCheck.text;
+          }
+        }
+      }
+      const latestRuntimeInfo = await this.llamaRnAdapter.getRuntimeInfo();
       store.setRuntimeInfo(latestRuntimeInfo);
       store.setRuntimeModelLoaded(Boolean(latestRuntimeInfo.isModelLoaded), latestRuntimeInfo);
       store.setRuntimeHealth(result.stopReason !== 'error');

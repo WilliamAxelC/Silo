@@ -802,6 +802,34 @@ const STOP_WORDS = new Set([
   'thing',
   'things',
   'stuff',
+  // Advice and planning filler (chat benchmark advice tier).
+  'if',
+  'half',
+  'quarter',
+  'third',
+  'tips',
+  'tip',
+  'any',
+  'keep',
+  'overspending',
+  'overspend',
+  'plan',
+  'cover',
+  'emergency',
+  'fund',
+  'long',
+  'reach',
+  'would',
+  'gimana',
+  'caranya',
+  'biar',
+  'lebih',
+  'hemat',
+  'nabung',
+  'menabung',
+  'saran',
+  'percent',
+  'persen',
   // Over-budget words ("Ada anggaran yang kelewatan?") are a budget question, not a merchant name.
   'kelewatan',
   'kelebihan',
@@ -1952,6 +1980,82 @@ function queryKeywordMatches(
   };
 }
 
+export interface PlanningIntent {
+  /** "save 20% of my income", "cut food in half": the share asked about, 0-1. */
+  share: number | null;
+  shareLabel: string | null;
+  /** "how long to save 10 million": the goal amount. */
+  goalAmount: number | null;
+  /** "how many months of expenses could my savings cover", "dana darurat" */
+  coverage: boolean;
+  /** "make me a budget for next month" */
+  plan: boolean;
+  /** "how can I save more", "any tips", "cut back" */
+  tips: boolean;
+}
+
+const WORD_SHARES: Array<[RegExp, number, string]> = [
+  [/\b(?:half|separuh|setengah(?:nya)?)\b/i, 0.5, 'Half'],
+  [/\b(?:quarter|seperempat)\b/i, 0.25, 'A quarter'],
+  [/\b(?:a\s+third|sepertiga)\b/i, 1 / 3, 'A third'],
+];
+
+/** Amount named in a question: "10 million", "10 juta", "10jt", "Rp 10.000.000", "500k". */
+export function parsePromptAmount(prompt: string): number | null {
+  let best: number | null = null;
+  for (const m of prompt.matchAll(/(\d+(?:[.,]\d+)*)\s*(juta|jt|million|mil|m|ribu|rb|k|thousand)?\b/gi)) {
+    const raw = m[1];
+    const scale = (m[2] ?? '').toLowerCase();
+    let value = /^\d{1,3}(?:[.,]\d{3})+$/.test(raw) ? Number(raw.replace(/[.,]/g, '')) : Number(raw.replace(',', '.'));
+    if (['juta', 'jt', 'million', 'mil', 'm'].includes(scale)) value *= 1_000_000;
+    else if (['ribu', 'rb', 'k', 'thousand'].includes(scale)) value *= 1_000;
+    const isYear = !scale && /^(?:19|20)\d{2}$/.test(raw);
+    if (!isYear && Number.isFinite(value) && value >= 1000 && (best === null || value > best)) best = value;
+  }
+  return best;
+}
+
+/**
+ * Advice and planning questions need numbers the small model gets wrong when it works them out itself
+ * ("5.05 years" to save 10 million at Rp 1.970.500 a month, chat benchmark 2026-11-25), so retrieval computes them.
+ */
+export function detectPlanningIntent(prompt: string): PlanningIntent {
+  const pct = prompt.match(/(\d{1,3}(?:[.,]\d+)?)\s*(?:%|percent|persen)/i);
+  let share: number | null = null;
+  let shareLabel: string | null = null;
+  if (pct) {
+    const value = Number(pct[1].replace(',', '.'));
+    if (value > 0 && value <= 100) {
+      share = value / 100;
+      shareLabel = `${pct[1]}%`;
+    }
+  } else {
+    const word = WORD_SHARES.find(([re]) => re.test(prompt));
+    if (word) {
+      share = word[1];
+      shareLabel = word[2];
+    }
+  }
+  const asksDuration = /\b(?:how\s+long|how\s+many\s+(?:months|weeks|years)|when\s+(?:can|will|could)\s+i|berapa\s+lama|kapan)\b/i.test(prompt);
+  const goalAmount =
+    asksDuration && /\b(?:save|saving|reach|collect|afford|buy|nabung|menabung|tabung|kumpul\w*|beli)\b/i.test(prompt)
+      ? parsePromptAmount(prompt)
+      : null;
+  const coverage =
+    /\b(?:emergency(?:\s+fund)?|months?\s+of\s+(?:expenses|spending|living)|(?:savings|money|balance)\s+(?:could\s+|would\s+|will\s+)?(?:cover|last)|dana\s+darurat|bertahan\s+berapa)\b/i.test(
+      prompt,
+    );
+  const plan =
+    /\b(?:make|create|plan|build|suggest|set\s+up|draft|buat\w*|bikin\w*|susun\w*|rencana\w*)\b[^?.!]*\b(?:budget|anggaran|spending\s+plan)\b|\bbudget\s+(?:for|plan)\s+next\b|\banggaran\s+bulan\s+depan\b/i.test(
+      prompt,
+    );
+  const tips =
+    /\b(?:tips?|advice|advise|suggest\w*|recommend\w*|how\s+(?:can|do|should)\s+i\s+(?:save|spend\s+less|cut|reduce|stop)|save\s+more|spend\s+less|cut\s+back|reduce|overspend\w*|hemat|nabung|menabung|saran|caranya|gimana\s+cara)\b/i.test(
+      prompt,
+    );
+  return { share, shareLabel, goalAmount, coverage, plan, tips };
+}
+
 export function buildRetrievedContext(
   userPrompt: string,
   options?: BuildRetrievedContextOptions,
@@ -2013,9 +2117,16 @@ export function buildRetrievedContext(
     parsed.asksFinancialHealth ||
     asksExplicitOverview ||
     (!hasSpecificIntent && !asksUnscopedSpending);
+  const planning = detectPlanningIntent(userPrompt);
+  const asksPlanning = planning.share !== null || planning.goalAmount !== null || planning.coverage || planning.plan || planning.tips;
+  if (asksPlanning) {
+    includeSummary = includeSummary || !hasCategoryIntent || planning.plan;
+    includeTopCategories = includeTopCategories || planning.plan || (planning.tips && !hasCategoryIntent);
+  }
   const includeBiggest = parsed.asksBiggest;
-  const includeBudgets = parsed.asksBudget;
-  const includeBalance = parsed.asksBalance || parsed.asksFinancialHealth;
+  // A plan or tips about a named category ("overspending on shopping") need the budgets too.
+  const includeBudgets = parsed.asksBudget || planning.plan || (planning.tips && hasCategoryIntent);
+  const includeBalance = parsed.asksBalance || parsed.asksFinancialHealth || planning.coverage;
   const comparePeriod = parsed.comparePeriod;
   const includeRecent = parsed.wantsRecent;
 
@@ -2038,6 +2149,8 @@ export function buildRetrievedContext(
     !/\b(spend|spent|spending|expense|expenses|pengeluaran|merchant|top|terbanyak|terbesar)\b/i.test(userPrompt);
 
   const items: RetrievedContextItem[] = [];
+  const budgetLimitByCategory = new Map<string, number>();
+  let topCategoryTotals: Array<{ category: string; total: number }> = [];
 
   // 1. Budgets (queried first when asked so pure category-budget queries know if a matching budget exists)
   let matchedAllNamedCategoryBudgets = false;
@@ -2077,6 +2190,9 @@ export function buildRetrievedContext(
         }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null && row.limit_amount > 0);
+    budgetRows.forEach((row) => {
+      if (row.categories.length === 1) budgetLimitByCategory.set(row.categories[0].toLowerCase(), row.limit_amount);
+    });
 
     if (budgetRows.length > 0) {
       const namedCatSet = new Set(parsed.categories.map((c) => c.name.toLowerCase()));
@@ -2111,6 +2227,19 @@ export function buildRetrievedContext(
 
       const accountPart = account ? `, Account: ${account.name}` : '';
       if (rowsToEmit.length === 1) {
+        // "Can I still take Grab rides without blowing my transport budget?" got "Yes" with Transport over budget
+        // once advice answers stopped refusing (chat benchmark 2026-11-25): spell the verdict out.
+        const only = rowsToEmit[0];
+        const onlyOver = (Number(only.spent ?? 0) || 0) - (Number(only.limit_amount ?? 0) || 0);
+        if (onlyOver > 0 && /\b(?:can|could|still|afford|enough|without|blow\w*|bisa|masih|cukup|boleh)\b/i.test(userPrompt)) {
+          budgetItems.push({
+            id: 'budgets-verdict',
+            kind: 'budget',
+            label: 'Budget left?',
+            content: `Answer: No (Tidak), ${only.category} is already OVER budget by ${formatCurrency(onlyOver)}; nothing is left to spend.`,
+            score: 956,
+          });
+        }
         budgetItems.push({
           id: 'budgets-summary',
           kind: 'budget',
@@ -2180,6 +2309,7 @@ export function buildRetrievedContext(
 
   // 2. Named category breakdown (only when categories were asked)
   const categoryItems: RetrievedContextItem[] = [];
+  const categoryTotalsByName = new Map<string, number>();
   const opportunisticKeywords: string[] = [];
   if (includeCategories) {
     for (const catMatch of parsed.categories) {
@@ -2202,6 +2332,7 @@ export function buildRetrievedContext(
         catParams,
       );
       const catTotal = Number(catSumRows[0]?.total ?? 0) || 0;
+      categoryTotalsByName.set(catMatch.name, catTotal);
       const catCount = Number(catSumRows[0]?.count ?? 0) || 0;
 
       let merchantsSuffix = '';
@@ -2491,9 +2622,10 @@ export function buildRetrievedContext(
        WHERE t.type != 'transfer' AND t.total_amount < 0 AND t.date >= ? AND t.date < ?${walletFilterJoinSql}
        GROUP BY COALESCE(NULLIF(TRIM(i.category), ''), 'Uncategorized')
        ORDER BY total DESC
-       LIMIT 3`,
+       LIMIT ${planning.plan ? 6 : 3}`,
       periodParams,
     );
+    topCategoryTotals = topCategoryRows.map((row) => ({ category: row.category ?? 'Uncategorized', total: Number(row.total ?? 0) || 0 }));
     if (topCategoryRows.length > 0) {
       const topStr = topCategoryRows
         .map((row, idx) => `${idx + 1}. ${row.category} ${formatCurrency(row.total ?? 0)}`)
@@ -2536,6 +2668,82 @@ export function buildRetrievedContext(
           : 'Top merchants by spending: none in this period.',
       score: 946,
     });
+  }
+
+  // 5c. Worked-out numbers for advice and planning questions (detectPlanningIntent).
+  if (planning.share !== null || planning.goalAmount !== null || planning.coverage || planning.plan) {
+    const totalsRows = safeQuery<{ spent?: number | null; income?: number | null }>(
+      db,
+      `SELECT
+         COALESCE(SUM(CASE WHEN total_amount < 0 THEN ABS(total_amount) ELSE 0 END), 0) AS spent,
+         COALESCE(SUM(CASE WHEN total_amount > 0 THEN total_amount ELSE 0 END), 0) AS income
+       FROM transactions
+       WHERE type != 'transfer' AND date >= ? AND date < ?${walletFilterSql}`,
+      periodParams,
+    );
+    const spentTotal = Number(totalsRows[0]?.spent ?? 0) || 0;
+    const incomeTotal = Number(totalsRows[0]?.income ?? 0) || 0;
+    const netTotal = incomeTotal - spentTotal;
+    const lines: string[] = [];
+
+    if (planning.share !== null && planning.shareLabel) {
+      const named = parsed.categories.find((c) => c.type === 'expense' && categoryTotalsByName.has(c.name));
+      if (named) {
+        const base = categoryTotalsByName.get(named.name) ?? 0;
+        const part = Math.round(base * planning.share);
+        lines.push(
+          `${planning.shareLabel} of ${named.name} spending (${formatCurrency(base)}) is ${formatCurrency(part)}, so cutting ${planning.shareLabel.toLowerCase()} of it saves ${formatCurrency(part)} a month.`,
+        );
+      } else if (incomeTotal > 0) {
+        const target = Math.round(incomeTotal * planning.share);
+        const savedPct = ((netTotal / incomeTotal) * 100).toFixed(1);
+        const gap = target - netTotal;
+        lines.push(
+          `${planning.shareLabel} of income (${formatCurrency(incomeTotal)}) is ${formatCurrency(target)}. Saved so far: ${formatCurrency(netTotal)} (${savedPct}% of income). ` +
+            (gap > 0
+              ? `To save ${planning.shareLabel}, spend ${formatCurrency(gap)} less.`
+              : `That already meets ${planning.shareLabel}, with ${formatCurrency(-gap)} to spare.`),
+        );
+      }
+    }
+
+    if (planning.goalAmount !== null) {
+      lines.push(
+        netTotal > 0
+          ? `Saving ${formatCurrency(planning.goalAmount)} at ${formatCurrency(netTotal)} saved per month takes about ${(planning.goalAmount / netTotal).toFixed(1)} months.`
+          : `Saving ${formatCurrency(planning.goalAmount)}: nothing was saved this period (net ${formatSignedCurrency(netTotal)}), so it is not reachable at this rate.`,
+      );
+    }
+
+    if (planning.coverage && spentTotal > 0) {
+      const wallets = loadWalletsWithBalances(db);
+      const balance = wallets.length > 0 ? wallets.reduce((sum, w) => sum + w.balance, 0) : getTotalBalance(db);
+      lines.push(
+        `Total balance ${formatCurrency(balance)} covers about ${(balance / spentTotal).toFixed(1)} months of spending at ${formatCurrency(spentTotal)} a month.`,
+      );
+    }
+
+    if (planning.plan && topCategoryTotals.length > 0) {
+      // This period's spending per category, rounded to Rp 50.000, with over-budget ones cut to their limit.
+      const round = (n: number) => Math.max(50_000, Math.round(n / 50_000) * 50_000);
+      const planRows = topCategoryTotals.map(({ category, total }) => {
+        const limit = budgetLimitByCategory.get(category.toLowerCase());
+        const capped = limit !== undefined && total > limit;
+        return { category, amount: capped ? limit : round(total), capped };
+      });
+      const planTotal = planRows.reduce((sum, row) => sum + row.amount, 0);
+      const left = incomeTotal - planTotal;
+      lines.push(
+        `Suggested budget for next month (this month's spending, over-budget ones cut to their limit): ` +
+          planRows.map((row) => `${row.category} ${formatCurrency(row.amount)}${row.capped ? ' (cut to its budget)' : ''}`).join(', ') +
+          `. Total ${formatCurrency(planTotal)}` +
+          (incomeTotal > 0 ? `, leaving ${formatCurrency(left)} of ${formatCurrency(incomeTotal)} income for savings and other costs.` : '.'),
+      );
+    }
+
+    if (lines.length > 0) {
+      items.push({ id: 'planning', kind: 'summary', label: 'Worked out', content: `Worked out (use these numbers as the answer): ${lines.join(' ')}`, score: 958 });
+    }
   }
 
   // 6. Biggest single expense (only when asked)
@@ -2798,8 +3006,9 @@ const DEFAULT_LOCAL_SYSTEM_PROMPT =
   'You are Silo AI, a friendly personal finance assistant inside the Silo app on this phone. Amounts are in Rupiah (Rp). ' +
   "For questions about the user's money, answer the question directly in the first sentence using the facts from their Silo records below. " +
   'Copy names and amounts exactly as written; never invent, round or recalculate categories, merchants, balances or amounts. ' +
-  "If the facts do not answer the question, say you don't have that in their Silo records. " +
-  'For general money questions, give one or two practical tips that fit their numbers. ' +
+  'If a "Worked out" line is in the facts, it is the answer: use its numbers. ' +
+  'For advice or planning (saving, budgets, tips, "how can I"), never refuse: give two or three concrete tips that name their biggest categories and use amounts from the facts. ' +
+  "If the facts do not cover a question about a specific record, say you don't have that in their Silo records. " +
   'If the question has nothing to do with money or Silo (like the weather), say briefly that you only help with money matters. ' +
   'Reply in 1-4 short sentences, in the language of the question. Never mention internet, network or server problems.';
 const CHAT_FACTS_HEADING = "Facts from the user's Silo records (use when relevant):";
@@ -2985,21 +3194,30 @@ export function findUngroundedAmounts(reply: string, context: string): number[] 
  * records (reported 2026-11-25: "Transport: Rp 15.20 (1 transaction)" next to a made-up category list). A
  * reply with any such amount is replaced by the facts it was given, so Silo never shows invented money.
  */
-export function finalizeLocalChatReply(reply: string, messages: ExternalChatMessage[], mode: LocalAiMode = 'chat'): string {
+export interface LocalChatReplyCheck {
+  /** false when the reply had invented amounts or denied an over-budget verdict; `text` is then the facts. */
+  ok: boolean;
+  text: string;
+}
+
+const GUARD_FALLBACK_INTRO = "I couldn't put that into words reliably, so here are the numbers from your Silo records:";
+
+export function checkLocalChatReply(reply: string, messages: ExternalChatMessage[], mode: LocalAiMode = 'chat'): LocalChatReplyCheck {
   const text = replaceFalseConnectivityClaim(reply, mode);
   const context = messages.map((m) => m.content).join('\n');
-  // A reply to "am I over budget?" must name a budget that is over; the 0.8B model answered "Tidak ada" with
-  // Transport and Shopping over (chat benchmark 2026-11-25).
+  // A reply to "am I over budget?" must name a budget that is over, and no budget that is within its limit;
+  // the 0.8B model answered "Tidak ada" with Transport and Shopping over, and called Entertainment over with
+  // Rp 30.000 left (chat benchmark and emulator check, 2026-11-25).
   const overVerdict = context.match(/Answer: Yes \(Ya\), over budget on ([^\n]+)\./);
-  // Naming a within-budget one is the other mistake it makes ("over budget on Bills and Entertainment" with
-  // Rp 30.000 left on Entertainment, emulator check 2026-11-25); the facts are shown instead.
   const withinBudget = context.match(/Within budget: ([^\n]+?)\. All budgets together/)?.[1].split(', ') ?? [];
   const lowerText = text.toLowerCase();
+  const noRoomVerdict = /Answer: No \(Tidak\), .+ is already OVER budget/.test(context);
   const contradictsVerdict =
-    overVerdict !== null &&
-    (!overVerdict[1].split(' and ').some((name) => lowerText.includes(name.trim().toLowerCase())) ||
-      withinBudget.some((name) => lowerText.includes(name.trim().toLowerCase())));
-  if (!contradictsVerdict && findUngroundedAmounts(text, context).length === 0) return text;
+    (overVerdict !== null &&
+      (!overVerdict[1].split(' and ').some((name) => lowerText.includes(name.trim().toLowerCase())) ||
+        withinBudget.some((name) => lowerText.includes(name.trim().toLowerCase())))) ||
+    (noRoomVerdict && /^\W*(?:yes|ya|iya|bisa)\b/i.test(text));
+  if (!contradictsVerdict && findUngroundedAmounts(text, context).length === 0) return { ok: true, text };
 
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
   const factsStart = [CHAT_FACTS_HEADING, 'Grounded local facts:']
@@ -3010,13 +3228,38 @@ export function finalizeLocalChatReply(reply: string, messages: ExternalChatMess
         .slice(factsStart.idx + factsStart.heading.length)
         .split(/\n\n/)[0]
         .split('\n')
-        .map((line) => line.trim())
+        .map((line) => line.replace(/^Worked out \(use these numbers as the answer\): /, '').trim())
         .filter((line) => line.length > 0)
     : [];
   if (facts.length === 0) {
-    return "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"";
+    return {
+      ok: false,
+      text: "I couldn't find records in Silo that answer that. Try naming a period, account, category or merchant, for example \"How much did I spend on food this month?\"",
+    };
   }
-  return `Here is what your Silo records show:\n${facts.join('\n')}`;
+  return { ok: false, text: `${GUARD_FALLBACK_INTRO}\n${facts.join('\n')}` };
+}
+
+/**
+ * Last step for every local chat reply. The small model sometimes writes amounts that are not in the user's
+ * records (reported 2026-11-25: "Transport: Rp 15.20 (1 transaction)" next to a made-up category list). A
+ * reply with any such amount is replaced by the facts it was given, so Silo never shows invented money.
+ */
+export function finalizeLocalChatReply(reply: string, messages: ExternalChatMessage[], mode: LocalAiMode = 'chat'): string {
+  return checkLocalChatReply(reply, messages, mode).text;
+}
+
+/** Sampling and prompt for the one retry after a rejected reply (temperature 0.1 instead of 0.3). */
+export const GUARD_RETRY_TEMPERATURE = 0.1;
+export function buildGuardRetryMessages(messages: ExternalChatMessage[]): ExternalChatMessage[] {
+  return messages.map((m, idx) =>
+    idx === 0 && m.role === 'system'
+      ? {
+          ...m,
+          content: `${m.content}\n\nIMPORTANT: write amounts exactly as they appear in the facts above. Do not calculate, round or invent any other amount.`,
+        }
+      : m,
+  );
 }
 
 function buildGroundedSystemPrompt(retrievedContext: RetrievedContextItem[], customSystemPrompt: string) {

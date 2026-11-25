@@ -154,7 +154,6 @@ describe('ChatbotScreen', () => {
     runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
     useAIStore.setState({
       chatHistory: [],
-      selectedMode: 'rag',
       runtimeReady: false,
       warmupPending: false,
       provisioningHydrated: true,
@@ -177,8 +176,8 @@ describe('ChatbotScreen', () => {
     const setupTexts = setupBtn.findAllByType(Text).map((t: any) => t.props.children);
     expect(setupTexts).toContain('Set up');
 
-    const firstSuggestion = renderer.root.findByProps({ accessibilityLabel: 'What is my total balance?' });
-    expect(firstSuggestion.props.accessibilityRole).toBe('button');
+    // Without the model nothing can answer, so the quick questions wait until it is set up.
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'What is my total balance?' })).toHaveLength(0);
 
     ReactTestRenderer.act(() => {
       renderer.unmount();
@@ -186,8 +185,6 @@ describe('ChatbotScreen', () => {
   });
 
   it('shows setup guidance instead of a loading message when the model is not installed in Chat mode', () => {
-    useAIStore.setState({ selectedMode: 'chat' });
-
     let renderer: any;
     ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(<ChatbotScreen />);
@@ -223,7 +220,6 @@ describe('ChatbotScreen', () => {
     };
 
     useAIStore.setState({
-      selectedMode: 'chat',
       provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
       runtime,
       runtimeReady: false,
@@ -253,7 +249,7 @@ describe('ChatbotScreen', () => {
     });
   });
 
-  it('starts preloading on mount in Grounded mode, avoids unloading when toggling modes, and cleans up on screen leave', () => {
+  it('has one mode (no Grounded/Chat toggle), preloads on mount and cleans up on screen leave', () => {
     let renderer: any;
     ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(<ChatbotScreen />);
@@ -262,21 +258,10 @@ describe('ChatbotScreen', () => {
     expect(mockCancelScheduledUnload).toHaveBeenCalledTimes(1);
     expect(mockRequestPreload).toHaveBeenCalledTimes(1);
     expect(mockScheduleModelUnload).not.toHaveBeenCalled();
-
-    const chatToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Chat mode' });
-    const ragToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Grounded mode' });
-
-    ReactTestRenderer.act(() => {
-      chatToggle.props.onPress();
-    });
-    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
-    expect(mockScheduleModelUnload).not.toHaveBeenCalled();
-
-    ReactTestRenderer.act(() => {
-      ragToggle.props.onPress();
-    });
-    expect(mockRequestPreload).toHaveBeenCalledTimes(1);
-    expect(mockScheduleModelUnload).not.toHaveBeenCalled();
+    // Merged 2026-11-25: both modes saw the same facts and needed the same model.
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Switch to Grounded mode' })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ accessibilityLabel: 'Switch to Chat mode' })).toHaveLength(0);
+    expect(collectText(renderer)).not.toContain('Grounded');
 
     ReactTestRenderer.act(() => {
       renderer.unmount();
@@ -285,7 +270,7 @@ describe('ChatbotScreen', () => {
     expect(mockScheduleModelUnload).toHaveBeenCalledWith(30000);
   });
 
-  it('passes disableThinking: true when sending messages in both Grounded and Chat modes', async () => {
+  it('sends quick questions and typed messages in chat mode with thinking off', async () => {
     const runtime = createInitialRuntimeSnapshot();
     runtime.availability = { available: true, reason: 'android-supported', message: 'Ready' };
     runtime.modelLoaded = true;
@@ -294,7 +279,6 @@ describe('ChatbotScreen', () => {
     mockStartGeneration.mockResolvedValue('Done');
 
     useAIStore.setState({
-      selectedMode: 'rag',
       provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
       runtime,
       runtimeReady: true,
@@ -310,15 +294,11 @@ describe('ChatbotScreen', () => {
       await ReactTestRenderer.act(async () => {
         await ragSuggestion.props.onPress();
       });
+      // Thinking stays off: Qwen 0.8B and 2B think past the 2048-token context without answering (bench 2026-11-25).
       expect(mockStartGeneration).toHaveBeenLastCalledWith({
         prompt: 'What is my total balance?',
-        mode: 'rag',
+        mode: 'chat',
         disableThinking: true,
-      });
-
-      const chatToggle = renderer.root.findByProps({ accessibilityLabel: 'Switch to Chat mode' });
-      ReactTestRenderer.act(() => {
-        chatToggle.props.onPress();
       });
 
       const input = renderer.root.findByType(TextInput);
@@ -352,7 +332,6 @@ describe('ChatbotScreen', () => {
     };
 
     useAIStore.setState({
-      selectedMode: 'chat',
       provisioning: {
         ...createInitialProvisioningSnapshot(),
         status: 'failed',
@@ -394,7 +373,6 @@ describe('ChatbotScreen', () => {
     };
 
     useAIStore.setState({
-      selectedMode: 'chat',
       provisioning: { ...createInitialProvisioningSnapshot(), status: 'ready', progress: 1 },
       runtime,
       runtimeReady: true,
@@ -464,7 +442,6 @@ describe('ChatbotScreen', () => {
       externalApiModel: '',
     });
     useAIStore.setState({
-      selectedMode: 'chat',
       chatHistory: [
         { id: 'u1', role: 'user', text: 'Hello' },
         { id: 'a1', role: 'ai', text: 'Hi there!' },
@@ -506,7 +483,6 @@ describe('ChatbotScreen', () => {
     );
 
     useAIStore.setState({
-      selectedMode: 'chat',
       provisioningHydrated: false,
       provisioning: { ...createInitialProvisioningSnapshot(), status: 'not-installed' },
     });

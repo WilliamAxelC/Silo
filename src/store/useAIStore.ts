@@ -250,7 +250,6 @@ export function getAIRuntimeAvailability(
 export interface AIStoreState {
   localModelId: string;
   localModelDisplayName: string;
-  selectedMode: 'rag' | 'chat';
   chatHistory: Message[];
   provisioning: AIProvisioningSnapshot;
   storageHealth: AIStorageHealthSnapshot;
@@ -262,7 +261,6 @@ export interface AIStoreState {
   warmupPending: boolean;
   provisioningHydrated: boolean;
   setLocalModelTarget: (localModelId: string, localModelDisplayName: string) => void;
-  setSelectedMode: (mode: 'rag' | 'chat') => void;
   updateStorageHealth: (health: Partial<AIStorageHealthSnapshot>) => void;
   updateMemoryTelemetry: (telemetry: Partial<AIMemoryTelemetrySnapshot>) => void;
   updateContextWindow: (context: Partial<AIContextWindowSnapshot>) => void;
@@ -353,7 +351,6 @@ export const createInitialContextWindowSnapshot = (): AIContextWindowSnapshot =>
 export const useAIStore = create<AIStoreState>((set) => ({
   localModelId: 'qwen3.5-0.8b',
   localModelDisplayName: 'Qwen 3.5 0.8B',
-  selectedMode: 'rag',
   chatHistory: [],
   provisioning: createInitialProvisioningSnapshot(),
   storageHealth: createInitialStorageHealthSnapshot(),
@@ -373,7 +370,6 @@ export const useAIStore = create<AIStoreState>((set) => ({
         version: localModelId,
       },
     })),
-  setSelectedMode: (selectedMode) => set({ selectedMode }),
   addChatMessage: (msg) =>
     set((state) => ({
       chatHistory: [
