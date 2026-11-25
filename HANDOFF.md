@@ -1,10 +1,11 @@
 # Silo handoff
 
 ## Last updated
-2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (origin is 2 commits + this handoff behind). `prod` = `v1.3.6` @ `49bfcca`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency`, pushed. `prod` = `v1.3.7` @ `6f643bf`.
 
 ## Current state
-- **Live:** 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
+- **Live:** 1.3.7 (versionCode 14, sha256 `47dbc886…5c7a`): one Silo AI mode, worked-out numbers for advice and
+  planning, guard retry. Before that 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
   apk sha256 `ff8bf0a4…408d`. 1.3.6: offline AI chat fixes (most spent category, follow-ups, no past answers in the
   prompt, reply guard against invented amounts and wrong over-budget answers) plus the chat benchmark
   (`bench/chat/README.md`). 1.3.5: the split page shows the result with Mark paid / share per person, the setup folds away, and Cashflow
@@ -20,16 +21,11 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- **1.3.7 built, not published** (feat/multi-currency @ 6f643bf, local only, not pushed): one Silo AI mode (the Grounded /
-  Chat toggle and `useAIStore.selectedMode` are gone), worked-out numbers for advice and planning
-  (`detectPlanningIntent` in agent.ts), one guard retry at temperature 0.1 before the facts fallback, a verdict for
-  "can I still ... budget?". Benchmark: 97.7% over 177 answers, advice 29.2% -> 87.5% (`bench/chat/README.md`).
-  APKs on ai-renderer: `~/silo-build/apks/head.apk` (arm64, release key) and `emu-x86_64.apk`; emulator 5554 runs it.
-  Waiting on the user to say publish (and push).
+- Nothing unreleased.
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
-- Publish 1.3.7 (same steps as 1.3.6: version.json notes, index.html, docker cp, remove the old APK), tag, push.
+- The user is fine with Silo AI as a somewhat useful gimmick (2026-11-25): no more AI tuning unless they report a problem.
 - AI chat: Qwen thinking mode was tested and does not work (loops until the 2048-token context is full); keep it off.
   Remaining 0.8B misses: Indonesian advice, "make me a budget" often ends in the facts fallback on real data. On the x86 emulator replies take 25-70s; that is the emulator, not phones.
 - Watch real Split Bill use.
