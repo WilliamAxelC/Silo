@@ -33,13 +33,14 @@ import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { getActiveModelConfig } from '../services/ai/config';
 import { getModelLifecycleManager } from '../services/ai/modelLifecycle';
 import { useAIStore } from '../store/useAIStore';
+import { CurrencyPickerModal } from './CurrencyPickerModal';
+import { quickCurrencyChoices } from '../features/currency/currencies';
 import { useGoalsStore } from '../features/goals/goals';
 import { useSplitsStore } from '../features/splits/store';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
 
-const WELCOME_CURRENCY_OPTIONS = ['IDR', 'USD', 'EUR', 'GBP', 'SGD', 'JPY'] as const;
 
 /**
  * Whether first launch should offer the on-device AI model: the phone can run it and it is not already
@@ -80,6 +81,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
   const [startingBalance, setStartingBalance] = useState('');
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = useState(false);
   /** 'model' is the second step: offer the on-device AI model download. */
   const [step, setStep] = useState<'basics' | 'model'>('basics');
   const wifiOnly = useSettingsStore((s) => s.aiWifiOnlyDownload);
@@ -345,7 +347,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
 
             <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(13) }]}>Currency</Text>
             <View style={styles.chipRow}>
-              {WELCOME_CURRENCY_OPTIONS.map((code) => {
+              {quickCurrencyChoices([currentCurrency], selectedCurrency).map((code) => {
                 const selected = selectedCurrency === code;
                 return (
                   <TouchableOpacity
@@ -373,7 +375,22 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
                   </TouchableOpacity>
                 );
               })}
+              <TouchableOpacity
+                style={[styles.chip, { backgroundColor: theme.background, borderColor: theme.border }]}
+                onPress={() => setCurrencyPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="More currencies"
+              >
+                <Text style={[styles.chipText, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>More…</Text>
+              </TouchableOpacity>
             </View>
+            <CurrencyPickerModal
+              visible={currencyPickerVisible}
+              selected={selectedCurrency}
+              preferred={[currentCurrency]}
+              onSelect={(code) => handleSelectCurrency(code)}
+              onClose={() => setCurrencyPickerVisible(false)}
+            />
 
             <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(13) }]}>
               Starting balance ({defaultWallet?.name ?? 'Main Wallet'})

@@ -4,6 +4,14 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+### Added
+- 37 more currencies (57 in all), including CAD, MOP, KHR, BRL, MXN, ZAR, SEK, PLN and TRY, each with its symbol.
+  A "More…" button opens a searchable list wherever you pick a currency: home currency (Settings and first
+  launch), accounts and budgets. Settings and first launch used to offer only IDR, USD, EUR, GBP, SGD and JPY;
+  TWD is now one of the quick choices.
+### Changed
+- TWD (and KHR, LAK, MMK, CLP, COP, ISK, HUF) amounts are written without decimals, like everyday prices
+  (NT$ 1.200, not NT$ 1.200,00).
 
 ## [1.3.8] - 2026-11-25
 ### Added

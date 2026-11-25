@@ -29,7 +29,8 @@ import type { Wallet, WalletType } from '../features/transactions/types';
 import { DEFAULT_WALLET_ID } from '../features/transactions/constants';
 import { WALLET_TYPE_META } from '../components/AccountPickerModal';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
-import { SUPPORTED_CURRENCIES, walletCurrencyOf } from '../features/currency/currencies';
+import { quickCurrencyChoices, walletCurrencyOf } from '../features/currency/currencies';
+import { CurrencyPickerModal } from '../components/CurrencyPickerModal';
 import { refreshDailyRates, walletHomeRate } from '../services/fx/rates';
 import { useAppTheme } from '../theme/useAppTheme';
 
@@ -56,6 +57,7 @@ export const AccountsScreen = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'Accounts'>>();
   const editWalletId = route.params?.editWalletId;
   const [showArchived, setShowArchived] = useState(false);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = useState(false);
 
   const active = wallets.filter((w) => w.isActive);
   const archived = wallets.filter((w) => !w.isActive);
@@ -98,6 +100,8 @@ export const AccountsScreen = () => {
   const money = (n: number, code: string = currencyCode) => formatDisplayCurrency(n, code, useThousands);
   const emptyDraft: Draft = { id: null, name: '', type: 'bank', openingBalance: '', openingNegative: false, currency: currencyCode };
   const draftCurrency = draft?.currency ?? currencyCode;
+  const pickDraftCurrency = (code: string) =>
+    setDraft((d) => (d ? { ...d, currency: code, openingBalance: formatAmountInput(d.openingBalance, code) } : d));
 
   const editingWallet = draft?.id != null ? wallets.find((w) => w.id === draft.id) ?? null : null;
   const editingWalletHasHistory = Boolean(
@@ -367,7 +371,7 @@ export const AccountsScreen = () => {
 
               <Text style={[styles.label, { color: theme.text, fontSize: theme.scaleFont(12) }]}>Currency</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                {[currencyCode, ...SUPPORTED_CURRENCIES.map((c) => c.code).filter((c) => c !== currencyCode)].map((code) => {
+                {quickCurrencyChoices([currencyCode, ...wallets.map((w) => w.currency)], draftCurrency).map((code) => {
                   const selected = draftCurrency === code;
                   const locked = editingWalletHasHistory && !selected;
                   return (
@@ -382,11 +386,7 @@ export const AccountsScreen = () => {
                           opacity: locked ? 0.4 : 1,
                         },
                       ]}
-                      onPress={() =>
-                        setDraft((d) =>
-                          d ? { ...d, currency: code, openingBalance: formatAmountInput(d.openingBalance, code) } : d
-                        )
-                      }
+                      onPress={() => pickDraftCurrency(code)}
                       accessibilityRole="button"
                       accessibilityLabel={`Account currency ${code}${code === currencyCode ? ' (home)' : ''}`}
                       accessibilityState={{ selected, disabled: locked }}
@@ -403,7 +403,25 @@ export const AccountsScreen = () => {
                     </TouchableOpacity>
                   );
                 })}
+                {!editingWalletHasHistory ? (
+                  <TouchableOpacity
+                    style={[styles.chip, { borderColor: theme.border, backgroundColor: 'transparent' }]}
+                    onPress={() => setCurrencyPickerVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="More currencies"
+                  >
+                    <Text style={[styles.chipText, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>More…</Text>
+                  </TouchableOpacity>
+                ) : null}
               </ScrollView>
+              <CurrencyPickerModal
+                visible={currencyPickerVisible}
+                title="Account currency"
+                selected={draftCurrency}
+                preferred={[currencyCode, ...wallets.map((w) => w.currency)]}
+                onSelect={pickDraftCurrency}
+                onClose={() => setCurrencyPickerVisible(false)}
+              />
               {editingWalletHasHistory ? (
                 <Text style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>
                   Currency is fixed once an account has transactions.

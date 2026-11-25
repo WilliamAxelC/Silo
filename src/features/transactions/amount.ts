@@ -1,4 +1,5 @@
-const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'JPY', 'KRW', 'VND']);
+// Currencies written without minor units in everyday prices (TWD receipts say NT$120, not NT$120.00).
+const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'JPY', 'KRW', 'VND', 'TWD', 'KHR', 'LAK', 'MMK', 'CLP', 'COP', 'ISK', 'HUF']);
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   IDR: 'Rp',
@@ -21,6 +22,43 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   CHF: 'CHF',
   SAR: 'SAR',
   AED: 'AED',
+  CAD: 'C$',
+  MOP: 'MOP$',
+  BND: 'B$',
+  KHR: '៛',
+  LAK: '₭',
+  MMK: 'MMK',
+  BDT: '৳',
+  PKR: 'PKR',
+  LKR: 'LKR',
+  NPR: 'NPR',
+  MVR: 'MVR',
+  MNT: '₮',
+  QAR: 'QAR',
+  TRY: '₺',
+  ILS: '₪',
+  EGP: 'E£',
+  ZAR: 'R',
+  NGN: '₦',
+  KES: 'KSh',
+  BRL: 'R$',
+  MXN: 'MX$',
+  ARS: 'ARS',
+  CLP: 'CLP',
+  COP: 'COP',
+  PEN: 'S/',
+  SEK: 'SEK',
+  NOK: 'NOK',
+  DKK: 'DKK',
+  ISK: 'ISK',
+  PLN: 'zł',
+  CZK: 'Kč',
+  HUF: 'Ft',
+  RON: 'lei',
+  RUB: '₽',
+  UAH: '₴',
+  KZT: '₸',
+  FJD: 'FJ$',
 };
 
 /**

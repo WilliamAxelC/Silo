@@ -81,6 +81,8 @@ import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 import { useGoalsStore } from '../features/goals/goals';
 import { useSplitsStore } from '../features/splits/store';
 import { DriveSyncSection } from '../components/DriveSyncSection';
+import { CurrencyPickerModal } from '../components/CurrencyPickerModal';
+import { currencyName, quickCurrencyChoices } from '../features/currency/currencies';
 import appConfig from '../../app.json';
 
 const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -89,7 +91,6 @@ const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicon
   { key: 'dark', label: 'Dark', icon: 'moon-outline' },
 ];
 
-const CURRENCY_OPTIONS = ['IDR', 'USD', 'EUR', 'GBP', 'SGD', 'JPY'];
 const DATE_FORMAT_OPTIONS = [
   { key: 'en-GB', label: 'DD/MM/YYYY (en-GB)' },
   { key: 'en-US', label: 'MM/DD/YYYY (en-US)' },
@@ -162,6 +163,7 @@ export const SettingsScreen = () => {
   const getCategoriesByType = useTransactionStore((s) => s.getCategoriesByType);
 
   const [isExporting, setIsExporting] = useState(false);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = useState(false);
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const activeModel = MODEL_CATALOG[activeModelId] ?? MODEL_CATALOG[DEFAULT_APP_SETTINGS.activeModelId];
   const formatGb = (bytes: number) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
@@ -1181,11 +1183,11 @@ export const SettingsScreen = () => {
                 <Text style={[styles.rowText, { color: theme.text }, textScale]}>Currency</Text>
               </View>
               <Text style={[styles.inlineValue, { color: theme.textMuted }, captionScale]}>
-                Selected: {currencyCode}
+                {currencyName(currencyCode)}
               </Text>
             </View>
             <View style={styles.optionRowCompact}>
-              {CURRENCY_OPTIONS.map((option) => {
+              {quickCurrencyChoices([currencyCode], currencyCode).map((option) => {
                 const isSelected = currencyCode === option;
                 return (
                   <TouchableOpacity
@@ -1213,7 +1215,23 @@ export const SettingsScreen = () => {
                   </TouchableOpacity>
                 );
               })}
+              <TouchableOpacity
+                style={[styles.optionChip, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={() => setCurrencyPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="More currencies"
+              >
+                <Text style={[styles.optionChipText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>More…</Text>
+              </TouchableOpacity>
             </View>
+            <CurrencyPickerModal
+              visible={currencyPickerVisible}
+              title="Home currency"
+              selected={currencyCode}
+              preferred={[currencyCode]}
+              onSelect={(code) => handleCurrencySelect(code)}
+              onClose={() => setCurrencyPickerVisible(false)}
+            />
           </View>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />

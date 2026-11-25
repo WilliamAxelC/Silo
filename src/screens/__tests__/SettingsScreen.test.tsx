@@ -777,6 +777,40 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     alertSpy.mockRestore();
   });
 
+  // Requested 2026-11-25: TWD (and more) as the home currency; Settings only offered IDR, USD, EUR, GBP, SGD, JPY.
+  it('regression: More opens a searchable list and TWD can become the home currency', async () => {
+    ReactTestRenderer.act(() => {
+      useSettingsStore.setState({ currencyCode: 'IDR' });
+      useTransactionStore.setState({ transactionsList: [], wallets: [] } as any);
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Select TWD currency' })).toBeTruthy();
+
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'More currencies' }).props.onPress();
+    });
+    await ReactTestRenderer.act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: 'Search currencies' }).props.onChangeText('real');
+    });
+    const brl = renderer.root.findByProps({ accessibilityLabel: 'BRL, Brazilian Real' });
+    await ReactTestRenderer.act(async () => {
+      brl.props.onPress();
+    });
+    expect(alertSpy).toHaveBeenCalledWith('Change display currency?', expect.any(String), expect.any(Array));
+    const confirmBtn = (alertSpy.mock.calls[0][2] as any[]).find((b) => b.text === 'Use BRL');
+    await ReactTestRenderer.act(async () => {
+      confirmBtn.onPress();
+      await Promise.resolve();
+    });
+    expect(useSettingsStore.getState().currencyCode).toBe('BRL');
+    // The picked currency now has a chip of its own.
+    expect(renderer.root.findByProps({ accessibilityLabel: 'Select BRL currency' })).toBeTruthy();
+    alertSpy.mockRestore();
+  });
+
   it('with history, asks for an exchange rate and keeps past amounts in their currency instead of relabelling', async () => {
     ReactTestRenderer.act(() => {
       useSettingsStore.setState({ currencyCode: 'IDR' });

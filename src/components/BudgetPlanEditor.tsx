@@ -17,7 +17,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import type { BudgetPlan, BudgetUnit } from '../features/budgets/engine';
 import type { BudgetPlanInput } from '../features/budgets/plans';
 import { validateBudgetPlan } from '../features/budgets/plans';
-import { SUPPORTED_CURRENCIES } from '../features/currency/currencies';
+import { quickCurrencyChoices } from '../features/currency/currencies';
+import { CurrencyPickerModal } from './CurrencyPickerModal';
 import { formatAmountForInput, formatAmountInput, getCurrencySymbol, parseSignedAmount } from '../features/transactions/amount';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
@@ -67,12 +68,17 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
   const [selectedTags, setSelectedTags] = useState<string[]>(plan?.tags ?? []);
   const [picker, setPicker] = useState<'start' | 'end' | null>(null);
 
-  // Currencies people are likely to budget in come first: home, then foreign accounts, then the rest.
-  const currencyOptions = useMemo(() => {
-    const preferred = [homeCurrency, ...wallets.map((w) => w.currency).filter((c): c is string => Boolean(c))];
-    const rest = SUPPORTED_CURRENCIES.map((c) => c.code);
-    return Array.from(new Set([...preferred, ...rest]));
-  }, [homeCurrency, wallets]);
+  // Currencies people are likely to budget in come first: home, then foreign accounts, then common ones.
+  const preferredCurrencies = useMemo(
+    () => [homeCurrency, ...wallets.map((w) => w.currency).filter((c): c is string => Boolean(c))],
+    [homeCurrency, wallets]
+  );
+  const currencyOptions = useMemo(() => quickCurrencyChoices(preferredCurrencies, currency), [preferredCurrencies, currency]);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = useState(false);
+  const pickCurrency = (code: string) => {
+    setAmountText((t) => (t ? formatAmountForInput(Math.abs(parseSignedAmount(t, undefined, currency)), code) : t));
+    setCurrency(code);
+  };
 
   const toggle = <T,>(list: T[], value: T, set: (next: T[]) => void) =>
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -183,10 +189,7 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
                 <TouchableOpacity
                   key={code}
                   style={chipStyle(currency === code)}
-                  onPress={() => {
-                    setAmountText((t) => (t ? formatAmountForInput(Math.abs(parseSignedAmount(t, undefined, currency)), code) : t));
-                    setCurrency(code);
-                  }}
+                  onPress={() => pickCurrency(code)}
                   accessibilityRole="button"
                   accessibilityLabel={`Budget currency ${code}`}
                   accessibilityState={{ selected: currency === code }}
@@ -194,7 +197,23 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
                   <Text style={chipText(currency === code)}>{code}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity
+                style={chipStyle(false)}
+                onPress={() => setCurrencyPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="More currencies"
+              >
+                <Text style={chipText(false)}>More…</Text>
+              </TouchableOpacity>
             </ScrollView>
+            <CurrencyPickerModal
+              visible={currencyPickerVisible}
+              title="Budget currency"
+              selected={currency}
+              preferred={preferredCurrencies}
+              onSelect={pickCurrency}
+              onClose={() => setCurrencyPickerVisible(false)}
+            />
 
             {label('Period')}
             {segmented(
