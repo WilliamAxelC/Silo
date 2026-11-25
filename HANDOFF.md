@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (handoff commit after `e18e247`). `prod` = `v1.3.6` @ `e18e247`.
+2026-11-25 by Claude Code (Opus 5.5). Branch `feat/multi-currency`, pushed to GitHub (origin/feat/multi-currency). `prod` = `v1.3.6` @ `49bfcca`.
 
 ## Current state
 - **Live:** 1.3.6 (versionCode 13) at https://cuang.dev/projects/silo/, signed with Silo's private key,
@@ -32,7 +32,6 @@
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
 
 ## Waiting on the user
-- Whether to push branches to GitHub (never approved; everything is local).
 - Optional: a dedicated contact alias (silo@cuang.dev as a Zoho alias) instead of william@cuang.dev.
 
 ## Build, test, deploy
@@ -48,6 +47,10 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
+- **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.6 were pushed
+  2026-11-25. Never commit infrastructure weaknesses, tokens or personal data, HANDOFF.md included; private
+  notes go in Claude memory. History was rewritten once before that push (HANDOFF.md only); local
+  `backup/pre-scrub-1.3.6` and tag `backup/v1.3.6-pre-scrub` hold the old commits: never push them.
 - `android/` is gitignored, but `android/app/build.gradle` and 3 other files are tracked. `git add` with an ignored
   path aborts the whole add, so add them with `git add -f` separately and check `git log` before bundling.
 - Release signing: `plugins/withReleaseSigning.js` plus `SILO_RELEASE_SIGNING` on the build box (key in
