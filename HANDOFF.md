@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed up to `v1.3.10`; the 1.3.11 commits, tag `v1.3.11` and `prod` move are local only). `prod` = `v1.3.11` @ `636aff9`.
+2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-26 with `prod` and tags up to `v1.3.11`). `prod` = `v1.3.11` @ `636aff9`.
 
 ## Current state
 - **Live:** 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
@@ -29,8 +29,7 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased. Not pushed to GitHub yet: the 1.3.11 commits (`275f614..636aff9` plus this handoff), tag
-  `v1.3.11` and `prod` (ask the user before pushing).
+- Nothing unreleased or unpushed.
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
@@ -73,7 +72,7 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
-- **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.10 are pushed
+- **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.11 are pushed
   (last 2026-11-26). Never commit infrastructure weaknesses, tokens or personal data, HANDOFF.md included; private
   notes go in Claude memory. History was rewritten once before that push (HANDOFF.md only); local
   `backup/pre-scrub-1.3.6` and tag `backup/v1.3.6-pre-scrub` hold the old commits: never push them.
