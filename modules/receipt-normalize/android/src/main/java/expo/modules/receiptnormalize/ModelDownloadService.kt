@@ -38,6 +38,8 @@ class ModelDownloadService : Service() {
   /** Set by pause/cancel/timeout; the worker stops at the next buffer and reports it. */
   @Volatile private var stopRequest: String? = null
   @Volatile private var stopReason: String? = null
+  /** The open transfer, closed on pause/cancel so a read stuck on a stalled connection returns at once. */
+  @Volatile private var activeConnection: HttpURLConnection? = null
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,7 +66,7 @@ class ModelDownloadService : Service() {
         begin(next, restart = intent.getBooleanExtra(EXTRA_RESTART, false))
       }
       ACTION_PAUSE -> {
-        requestStop(intent.getStringExtra(EXTRA_ID), STATUS_PAUSED, intent.getStringExtra(EXTRA_REASON) ?: "Paused.")
+        requestStop(intent.getStringExtra(EXTRA_ID), STATUS_PAUSED, intent.getStringExtra(EXTRA_REASON) ?: DEFAULT_PAUSE_REASON)
         stopIfIdle()
       }
       ACTION_CANCEL -> {
@@ -120,6 +122,9 @@ class ModelDownloadService : Service() {
     if (id == null || job?.id != id || worker?.isAlive != true) return
     stopReason = reason
     stopRequest = kind
+    // A stalled read would otherwise only notice after the 30 s read timeout. Closing the socket can do network
+    // I/O (TLS close), so not on the main thread.
+    activeConnection?.let { connection -> Thread { runCatching { connection.disconnect() } }.start() }
   }
 
   private fun stopIfIdle() {
@@ -164,6 +169,8 @@ class ModelDownloadService : Service() {
       val before = file.length()
       val retryMessage: String = try {
         total = transfer(job, file, total)
+        // A pause/cancel that closed the socket can look like a clean end of stream.
+        if (stopRequest != null) return finishStopped(job, file)
         val expected = total
         if (expected == null || expected <= 0 || file.length() >= expected) break
         "Connection lost, retrying"
@@ -228,6 +235,7 @@ class ModelDownloadService : Service() {
     var offset = file.length()
     if (knownTotal != null && knownTotal > 0 && offset >= knownTotal) throw HttpStatusException(416)
     val connection = open(job.url, offset)
+    activeConnection = connection
     try {
       val status = connection.responseCode
       if (status == 416) throw HttpStatusException(416)
@@ -273,6 +281,7 @@ class ModelDownloadService : Service() {
       }
       return total
     } finally {
+      activeConnection = null
       connection.disconnect()
     }
   }
@@ -439,9 +448,15 @@ class ModelDownloadService : Service() {
     val total = job.totalBytes
     val percent = if (total != null && total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
     val sizeText = if (total != null && total > 0) "${megabytes(downloaded)} of ${megabytes(total)} MB" else "${megabytes(downloaded)} MB"
+    // "Downloading X" -> "X paused"; the reason (no Wi-Fi, Android's time limit, ...) goes under the size.
+    val title = job.title.removePrefix("Downloading ").let { name -> "${name.replaceFirstChar { it.uppercase() }} paused" }
+    val detail = reason?.takeIf { it != DEFAULT_PAUSE_REASON }
+    val text = if (detail != null) "$sizeText · $detail" else "$sizeText · Tap Resume to continue."
     return baseBuilder(job)
+      .setContentTitle(title)
       .setSmallIcon(android.R.drawable.stat_sys_download_done)
-      .setContentText(reason?.let { "$it ($sizeText)" } ?: "Paused · $sizeText")
+      .setContentText(text)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(text))
       .setSubText("$percent%")
       .setProgress(100, percent, false)
       .setOngoing(false)
@@ -559,6 +574,7 @@ class ModelDownloadService : Service() {
     const val EXTRA_JOB = "job"
     const val EXTRA_RESTART = "restart"
     const val EXTRA_REASON = "reason"
+    private const val DEFAULT_PAUSE_REASON = "Paused."
 
     const val STATUS_DOWNLOADING = "downloading"
     const val STATUS_WAITING = "waiting"
