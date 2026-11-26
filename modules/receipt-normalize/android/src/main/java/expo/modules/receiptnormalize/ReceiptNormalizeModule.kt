@@ -21,7 +21,23 @@ class ReceiptNormalizeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ReceiptNormalize")
 
-    Events("onShareReceived")
+    Events("onShareReceived", "onModelDownload")
+
+    OnCreate {
+      ModelDownloadEvents.listener = { state -> sendEvent("onModelDownload", state) }
+    }
+
+    OnDestroy {
+      ModelDownloadEvents.listener = null
+    }
+
+    OnActivityEntersForeground {
+      ModelDownloadEvents.appInForeground = true
+    }
+
+    OnActivityEntersBackground {
+      ModelDownloadEvents.appInForeground = false
+    }
 
     OnNewIntent { intent ->
       if (isImageShare(intent)) {
@@ -118,6 +134,64 @@ class ReceiptNormalizeModule : Module() {
       }
     }
 
+    // ---- AI model downloads (foreground service with a progress notification) ---------------------
+
+    // Starts (or re-attaches to) a model download. The file must be inside Silo's files directory.
+    // Returns false when Android refuses to start a foreground service (e.g. Silo is in the background).
+    Function("startModelDownload") { options: Map<String, Any?> ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      val url = options["url"] as? String ?: throw IllegalArgumentException("url is required")
+      if (!url.startsWith("https://")) throw IllegalArgumentException("Only HTTPS downloads are allowed")
+      val file = localFile(options["path"] as? String) ?: throw IllegalArgumentException("path is required")
+      if (!file.canonicalPath.startsWith(context.filesDir.canonicalPath + File.separator)) {
+        throw IllegalArgumentException("Downloads must go into Silo's files directory")
+      }
+      val job = ModelDownloadService.Job(
+        id = options["id"] as? String ?: throw IllegalArgumentException("id is required"),
+        url = url,
+        path = file.absolutePath,
+        title = options["title"] as? String ?: "Downloading",
+        doneTitle = options["doneTitle"] as? String,
+        totalBytes = (options["totalBytes"] as? Number)?.toLong()?.takeIf { it > 0 },
+        sha256 = (options["sha256"] as? String)?.takeIf { it.isNotBlank() },
+        wifiOnly = options["wifiOnly"] as? Boolean ?: false,
+        pausable = options["pausable"] as? Boolean ?: true,
+      )
+      val intent = Intent(context, ModelDownloadService::class.java)
+        .setAction(ModelDownloadService.ACTION_START)
+        .putExtra(ModelDownloadService.EXTRA_JOB, job.toJson())
+        .putExtra(ModelDownloadService.EXTRA_RESTART, options["restart"] as? Boolean ?: false)
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+        true
+      } catch (error: Exception) {
+        false
+      }
+    }
+
+    Function("pauseModelDownload") { id: String ->
+      sendModelDownloadAction(ModelDownloadService.ACTION_PAUSE, id)
+    }
+
+    Function("cancelModelDownload") { id: String ->
+      sendModelDownloadAction(ModelDownloadService.ACTION_CANCEL, id)
+    }
+
+    // Last known state of a download, also after Silo was killed. "active" is true while bytes are moving.
+    Function("getModelDownload") { id: String ->
+      val context = appContext.reactContext ?: return@Function null
+      val state = ModelDownloadService.readState(context, id) ?: return@Function null
+      state + ("active" to (ModelDownloadEvents.activeId == id))
+    }
+
+    // Removes a finished or paused download's notification (e.g. once the app has handled it on screen).
+    Function("dismissModelDownloadNotification") {
+      val context = appContext.reactContext ?: return@Function false
+      if (ModelDownloadEvents.activeId != null) return@Function false
+      ModelDownloadService.notificationManager(context).cancel(ModelDownloadService.NOTIFICATION_ID)
+      true
+    }
+
     Function("stopBackgroundWork") {
       val context = appContext.reactContext ?: return@Function false
       try {
@@ -126,6 +200,23 @@ class ReceiptNormalizeModule : Module() {
         context.stopService(Intent(context, ReceiptWorkService::class.java))
       }
       true
+    }
+  }
+
+  private fun localFile(uri: String?): File? {
+    if (uri.isNullOrBlank()) return null
+    val parsed = Uri.parse(uri)
+    val path = if (parsed.scheme == "file") parsed.path else if (parsed.scheme == null) uri else null
+    return path?.let { File(it) }
+  }
+
+  private fun sendModelDownloadAction(action: String, id: String): Boolean {
+    val context = appContext.reactContext ?: return false
+    return try {
+      context.startService(Intent(context, ModelDownloadService::class.java).setAction(action).putExtra(ModelDownloadService.EXTRA_ID, id))
+      true
+    } catch (_: Exception) {
+      false
     }
   }
 

@@ -4,6 +4,11 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+### Changed
+- AI model downloads keep going with Silo in the background or closed, with a progress bar in the notification
+  (Pause / Cancel, and Resume / Cancel when paused). An interrupted download continues from where it stopped
+  instead of starting over, waits for the connection (or Wi-Fi) to come back, and is checked against the model's
+  SHA-256 before it is installed. Silo asks for notification permission the first time a download starts.
 
 ## [1.3.10] - 2026-11-26
 ### Fixed

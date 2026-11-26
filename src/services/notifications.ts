@@ -155,6 +155,32 @@ export async function requestDailyReminderPermissionStatus(): Promise<ReminderPe
 }
 
 /**
+ * Asks for notification permission (Android 13+) when the user starts an AI model download, so the download's
+ * progress notification can show. Asks only if Android has never been asked; a "no" is respected.
+ * Never throws.
+ */
+export async function requestDownloadNotificationPermission(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  const Notifications = getNotificationsModule();
+  if (!Notifications || typeof Notifications.getPermissionsAsync !== 'function') {
+    return;
+  }
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    if (isPermissionGranted(current) || current.status !== 'undetermined' || current.canAskAgain === false) {
+      return;
+    }
+    if (typeof Notifications.requestPermissionsAsync === 'function') {
+      await Notifications.requestPermissionsAsync();
+    }
+  } catch {
+    // Notifications unavailable: the download still runs, just without a visible notification.
+  }
+}
+
+/**
  * Checks notification permission and asks the OS only if not yet granted.
  * Call only in response to the user explicitly turning on the daily reminder switch.
  */

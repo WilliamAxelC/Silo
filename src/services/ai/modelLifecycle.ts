@@ -10,6 +10,14 @@ import {
 } from './config';
 
 import { getLlamaRnAdapter } from './llamaRnAdapter';
+import {
+  NATIVE_RESUME_DATA,
+  cancelNativeModelDownload,
+  createNativeDownloadResumable,
+  getNativeModelDownload,
+  isNativeModelDownloadAvailable,
+  type NativeDownloadState,
+} from './nativeModelDownload';
 import { recordMemoryTelemetry } from './hardware';
 import {
   LocalInferenceException,
@@ -25,6 +33,7 @@ import {
   useAIStore,
 } from '../../store/useAIStore';
 import { useSettingsStore, waitForSettingsLoaded } from '../../store/useSettingsStore';
+import { requestDownloadNotificationPermission } from '../notifications';
 import { DEFAULT_APP_SETTINGS, MODEL_CATALOG, type VisionProjectorConfig } from '../../features/transactions/constants';
 
 type DownloadProgress = {
@@ -202,6 +211,9 @@ const getManifestFile = () => `${getAiRootDirectory()}model-manifest.json`;
 const getTransferManifestFile = () => `${getAiRootDirectory()}download-manifest.json`;
 const getActiveModelDirectory = () => `${getAiModelsDirectory()}${getActiveModelConfig().version}/`;
 const getTempDownloadPath = () => `${getAiTempDirectory()}${getActiveModelConfig().fileName}.part`;
+const MODEL_DOWNLOAD_ID = 'model';
+/** With the native download service the partial file is the resume point, so a download can always resume. */
+const persistableResumeData = () => (isNativeModelDownloadAvailable() ? NATIVE_RESUME_DATA : null);
 
 /** Absolute file:// URI where the active catalog model is (or will be) installed. Single source of truth. */
 export function getActiveModelFileUri(): string {
@@ -484,32 +496,41 @@ function initiateProjectorDownload(
 ): Promise<void> {
   const tempPath = getTempProjectorPath();
   const backgroundSessionType = FileSystemModule.FileSystemSessionType?.BACKGROUND ?? 1;
-
-  const resumable = downloadResumableFactory(
-    projector.url,
-    tempPath,
-    {
-      sessionType: backgroundSessionType,
-    },
-    (progress) => {
-      const fraction = progress.totalBytesExpectedToWrite > 0
-        ? progress.totalBytesWritten / progress.totalBytesExpectedToWrite
-        : 0;
-      for (const listener of projectorProgressListeners) {
-        try {
-          listener(fraction);
-        } catch {
-          // ignore callback error
-        }
+  const onProgress = (progress: DownloadProgress) => {
+    const fraction = progress.totalBytesExpectedToWrite > 0
+      ? progress.totalBytesWritten / progress.totalBytesExpectedToWrite
+      : 0;
+    for (const listener of projectorProgressListeners) {
+      try {
+        listener(fraction);
+      } catch {
+        // ignore callback error
       }
-    },
-  );
+    }
+  };
+
+  const resumable: DownloadResumableLike = isNativeModelDownloadAvailable()
+    ? createNativeDownloadResumable(
+        projector.url,
+        tempPath,
+        {
+          id: 'projector',
+          title: 'Downloading Silo AI vision add-on',
+          doneTitle: 'Vision add-on downloaded',
+          totalBytes: projector.sizeBytes,
+          wifiOnly: useSettingsStore.getState().aiWifiOnlyDownload,
+          pausable: false,
+        },
+        onProgress,
+      )
+    : downloadResumableFactory(projector.url, tempPath, { sessionType: backgroundSessionType }, onProgress);
 
   inFlightProjectorResumable = resumable;
   return runVisionProjectorDownload(resumable, tempPath, projector);
 }
 
 export function downloadVisionProjector(onProgress?: (fraction: number) => void): Promise<void> {
+  void requestDownloadNotificationPermission();
   if (onProgress) {
     projectorProgressListeners.add(onProgress);
   }
@@ -895,6 +916,7 @@ export class QModelLifecycleManager {
   }
 
   async retryProvisioning() {
+    void requestDownloadNotificationPermission();
     const wasInitialized = this.initialized;
     await this.ensureInitialized();
     const current = useAIStore.getState().provisioning;
@@ -971,6 +993,7 @@ export class QModelLifecycleManager {
   }
 
   async resumeDownload() {
+    void requestDownloadNotificationPermission();
     await this.ensureInitialized();
     const wifiAllowed = await this.checkWifiRequirement();
     if (!wifiAllowed) {
@@ -1019,7 +1042,12 @@ export class QModelLifecycleManager {
     this.downloadResumable = null;
 
     try {
-      await resumable?.cancelAsync();
+      if (resumable) {
+        await resumable.cancelAsync();
+      } else if (isNativeModelDownloadAvailable()) {
+        // Paused: drop the notification (and partial file) the download service still shows.
+        cancelNativeModelDownload(MODEL_DOWNLOAD_ID);
+      }
       if (this.downloadToken !== cancelToken) {
         return;
       }
@@ -1243,7 +1271,7 @@ export class QModelLifecycleManager {
 
     await this.persistTransferManifest({
       status: 'queued',
-      resumeData: null,
+      resumeData: persistableResumeData(),
       sessionId,
       startedAt,
       downloadedBytes: 0,
@@ -1269,8 +1297,9 @@ export class QModelLifecycleManager {
       return;
     }
 
+    const useNative = isNativeModelDownloadAvailable();
     const downloadResumableFactory = FileSystemModule.createDownloadResumable;
-    if (!downloadResumableFactory) {
+    if (!useNative && !downloadResumableFactory) {
       throw new Error('Download API unavailable in current runtime. Use a custom dev client or production build.');
     }
 
@@ -1298,17 +1327,35 @@ export class QModelLifecycleManager {
     const startedAt = _manifest?.startedAt ?? useAIStore.getState().provisioning.transfer.startedAt ?? nowIso();
     const backgroundSessionType = FileSystemModule.FileSystemSessionType?.BACKGROUND ?? 1;
 
-    this.downloadResumable = downloadResumableFactory(
-      getActiveModelConfig().downloadUrl,
-      getTempDownloadPath(),
-      {
-        sessionType: backgroundSessionType,
-      },
-      (progress) => {
-        void this.handleProgressUpdate(progress, sessionId, startedAt, token);
-      },
-      _resumeData ?? undefined,
-    );
+    const onProgress = (progress: DownloadProgress) => {
+      void this.handleProgressUpdate(progress, sessionId, startedAt, token);
+    };
+    const config = getActiveModelConfig();
+    this.downloadResumable = useNative
+      ? createNativeDownloadResumable(
+          config.downloadUrl,
+          getTempDownloadPath(),
+          {
+            id: MODEL_DOWNLOAD_ID,
+            title: 'Downloading Silo AI model',
+            doneTitle: 'Silo AI model downloaded',
+            totalBytes: config.sizeBytes,
+            sha256: config.sha256,
+            wifiOnly: useSettingsStore.getState().aiWifiOnlyDownload,
+            pausable: true,
+            onExternalStop: (state) => this.handleExternalStop(state, token),
+          },
+          onProgress,
+        )
+      : downloadResumableFactory!(
+          config.downloadUrl,
+          getTempDownloadPath(),
+          {
+            sessionType: backgroundSessionType,
+          },
+          onProgress,
+          _resumeData && _resumeData !== NATIVE_RESUME_DATA ? _resumeData : undefined,
+        );
 
     this.log(
       'info',
@@ -1375,6 +1422,48 @@ export class QModelLifecycleManager {
     }
   }
 
+  /** Paused or cancelled from the notification (or paused by Android / a long loss of connection). */
+  private handleExternalStop(state: NativeDownloadState, token: number) {
+    if (this.downloadToken !== token) {
+      return;
+    }
+    const stopToken = ++this.downloadToken;
+    this.downloadResumable = null;
+    this.inFlightDownloadPromise = null;
+
+    if (state.status === 'cancelled') {
+      void this.resetProvisioningArtifacts().then(() => {
+        if (this.downloadToken === stopToken) {
+          this.log('warn', 'download-cancelled', 'Model download cancelled from the notification.');
+        }
+      });
+      return;
+    }
+
+    const reason = state.message || 'Model download paused.';
+    const totalBytes = state.totalBytes ?? useAIStore.getState().provisioning.totalBytes;
+    const progress = totalBytes ? Math.min(1, state.downloadedBytes / totalBytes) : useAIStore.getState().provisioning.progress;
+    useAIStore.getState().updateTransfer({ resumeData: NATIVE_RESUME_DATA });
+    this.updateProvisioning({
+      status: 'paused',
+      canResume: true,
+      pausedReason: reason,
+      lastError: null,
+      downloadedBytes: state.downloadedBytes,
+      totalBytes,
+      progress,
+    });
+    void this.persistTransferManifest({
+      status: 'paused',
+      resumeData: NATIVE_RESUME_DATA,
+      pausedReason: reason,
+      downloadedBytes: state.downloadedBytes,
+      totalBytes,
+      progress,
+      updatedAt: nowIso(),
+    });
+  }
+
   private async handleProgressUpdate(progress: DownloadProgress, sessionId: string, startedAt: string, token: number) {
     if (this.downloadToken !== token) {
       return;
@@ -1425,7 +1514,7 @@ export class QModelLifecycleManager {
         progress: percent,
         lastProgressAt: timestamp,
         bytesPerSecond,
-        resumeData: null,
+        resumeData: persistableResumeData(),
         updatedAt: timestamp,
       });
       if (this.downloadToken !== token) {
@@ -1942,6 +2031,23 @@ export class QModelLifecycleManager {
       return;
     }
 
+    const nativeState = isNativeModelDownloadAvailable() ? getNativeModelDownload(MODEL_DOWNLOAD_ID) : null;
+    const nativeMovedOn =
+      transferManifest.status === 'paused' &&
+      nativeState !== null &&
+      (nativeState.active === true || nativeState.status === 'done');
+    if (nativeMovedOn) {
+      // Resumed from the notification while Silo was closed: re-attach (or pick up the finished file).
+      transferManifest.status = 'downloading';
+      transferManifest.resumeData = NATIVE_RESUME_DATA;
+      transferManifest.pausedReason = null;
+      transferManifest.downloadedBytes = nativeState.downloadedBytes;
+      await writeTransferManifest(transferManifest);
+      if (isStale()) {
+        return;
+      }
+    }
+
     if (transferManifest.status === 'paused') {
       state.replaceProvisioning({
         status: 'paused',
@@ -1959,7 +2065,11 @@ export class QModelLifecycleManager {
       return;
     }
 
-    if ((transferManifest.status === 'downloading' || transferManifest.status === 'queued') && transferManifest.resumeData) {
+    // The native download service resumes from the partial file itself, so any interrupted download can continue.
+    if (
+      (transferManifest.status === 'downloading' || transferManifest.status === 'queued') &&
+      (transferManifest.resumeData || isNativeModelDownloadAvailable())
+    ) {
       state.replaceProvisioning({
         status: 'downloading',
         progress: transferManifest.progress,
@@ -2029,12 +2139,12 @@ export class QModelLifecycleManager {
         this.lifecycleGeneration !== generation ||
         this.downloadToken !== tokenBeforeRestore ||
         !liveManifest ||
-        !liveManifest.resumeData ||
+        !(liveManifest.resumeData || isNativeModelDownloadAvailable()) ||
         (liveManifest.status !== 'downloading' && liveManifest.status !== 'queued')
       ) {
         return;
       }
-      const transferManifest = liveManifest;
+      const transferManifest = { ...liveManifest, resumeData: liveManifest.resumeData ?? NATIVE_RESUME_DATA };
       this.log('info', 'resuming-background-workmanager-download', 'Restoring Android WorkManager background model download session.', {
         tempPath: transferManifest.tempPath,
         downloadedBytes: transferManifest.downloadedBytes,

@@ -10,5 +10,9 @@
       android:name="expo.modules.receiptnormalize.ReceiptWorkService"
       android:exported="false"
       android:foregroundServiceType="dataSync" />
+    <service
+      android:name="expo.modules.receiptnormalize.ModelDownloadService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
   </application>
 </manifest>
