@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.11] - 2026-11-26
 ### Changed
 - AI model downloads keep going with Silo in the background or closed, with a progress bar in the notification
   (Pause / Cancel, and Resume / Cancel when paused). An interrupted download continues from where it stopped
