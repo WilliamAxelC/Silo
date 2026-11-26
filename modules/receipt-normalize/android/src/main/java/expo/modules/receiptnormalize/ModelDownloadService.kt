@@ -235,7 +235,6 @@ class ModelDownloadService : Service() {
     var offset = file.length()
     if (knownTotal != null && knownTotal > 0 && offset >= knownTotal) throw HttpStatusException(416)
     val connection = open(job.url, offset)
-    activeConnection = connection
     try {
       val status = connection.responseCode
       if (status == 416) throw HttpStatusException(416)
@@ -291,6 +290,12 @@ class ModelDownloadService : Service() {
     var current = URL(url)
     repeat(MAX_REDIRECTS) {
       val connection = current.openConnection() as HttpURLConnection
+      // Registered before connecting: a pause while the TLS handshake or the response headers stall closes it too.
+      activeConnection = connection
+      if (stopRequest != null) {
+        connection.disconnect()
+        throw StoppedException()
+      }
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 20_000
       connection.readTimeout = 30_000
