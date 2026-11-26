@@ -2032,16 +2032,36 @@ export class QModelLifecycleManager {
     }
 
     const nativeState = isNativeModelDownloadAvailable() ? getNativeModelDownload(MODEL_DOWNLOAD_ID) : null;
+    // Resumed from the notification while Silo was closed: re-attach, pick up the finished file, or (when Android
+    // killed the service mid-download, so no pause was ever recorded) carry on from the partial file.
     const nativeMovedOn =
       transferManifest.status === 'paused' &&
       nativeState !== null &&
-      (nativeState.active === true || nativeState.status === 'done');
+      (nativeState.active === true ||
+        nativeState.status === 'done' ||
+        nativeState.status === 'downloading' ||
+        nativeState.status === 'waiting');
     if (nativeMovedOn) {
-      // Resumed from the notification while Silo was closed: re-attach (or pick up the finished file).
       transferManifest.status = 'downloading';
       transferManifest.resumeData = NATIVE_RESUME_DATA;
       transferManifest.pausedReason = null;
-      transferManifest.downloadedBytes = nativeState.downloadedBytes;
+    }
+    const nativeBytes = nativeState?.downloadedBytes ?? 0;
+    const nativeHasNewerBytes =
+      transferManifest.resumeData === NATIVE_RESUME_DATA &&
+      nativeBytes > 0 &&
+      nativeBytes !== transferManifest.downloadedBytes;
+    if (nativeHasNewerBytes && nativeState) {
+      // The service kept going (or paused) without Silo open: the partial file is the truth.
+      transferManifest.downloadedBytes = nativeBytes;
+      if (transferManifest.totalBytes) {
+        transferManifest.progress = Math.min(1, nativeBytes / transferManifest.totalBytes);
+      }
+      if (transferManifest.status === 'paused' && nativeState.status === 'paused' && nativeState.message) {
+        transferManifest.pausedReason = nativeState.message;
+      }
+    }
+    if (nativeMovedOn || nativeHasNewerBytes) {
       await writeTransferManifest(transferManifest);
       if (isStale()) {
         return;

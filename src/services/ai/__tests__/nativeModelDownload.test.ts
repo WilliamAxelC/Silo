@@ -437,6 +437,75 @@ describe('model lifecycle with the Android download service', () => {
     expect(useAIStore.getState().provisioning.status).toBe('downloading');
   });
 
+  it('regression: a download resumed from the notification and then killed carries on at launch instead of showing paused', async () => {
+    // Emulator, 2026-11-26: pause in the shade, swipe Silo away, Resume in the shade, Silo killed mid-download.
+    // The app's manifest still said "paused" at 332 MB; the service had reached 472 MB and never paused.
+    fsMock.getInfoAsync.mockImplementation(async (path: string) =>
+      path === TEMP_URI
+        ? { exists: true, size: 900_000, uri: TEMP_URI }
+        : { exists: false, uri: path },
+    );
+    mockTransferManifest(
+      persistedManifest({
+        status: 'paused',
+        resumeData: NATIVE_RESUME_DATA,
+        pausedReason: 'Paused.',
+      }),
+    );
+    fake.setState({
+      id: 'model',
+      status: 'downloading',
+      path: TEMP_URI,
+      downloadedBytes: 900_000,
+      totalBytes: EXPECTED_SIZE,
+      active: false,
+    });
+
+    const manager = new QModelLifecycleManager(createMockAdapter());
+    await manager.initialize();
+    await waitFor(() => fake.native.startModelDownload.mock.calls.length > 0, 'service restart');
+
+    expect(fake.native.startModelDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'model', restart: false }),
+    );
+    expect(useAIStore.getState().provisioning.status).toBe('downloading');
+    expect(useAIStore.getState().provisioning.downloadedBytes).toBe(900_000);
+  });
+
+  it('shows the real partial size for a download paused while Silo was closed', async () => {
+    fsMock.getInfoAsync.mockImplementation(async (path: string) =>
+      path === TEMP_URI
+        ? { exists: true, size: 800_000, uri: TEMP_URI }
+        : { exists: false, uri: path },
+    );
+    mockTransferManifest(
+      persistedManifest({
+        status: 'paused',
+        resumeData: NATIVE_RESUME_DATA,
+        pausedReason: 'Paused.',
+      }),
+    );
+    fake.setState({
+      id: 'model',
+      status: 'paused',
+      path: TEMP_URI,
+      downloadedBytes: 800_000,
+      totalBytes: EXPECTED_SIZE,
+      message: 'Paused: no Wi-Fi. Tap Resume to continue.',
+      active: false,
+    });
+
+    const manager = new QModelLifecycleManager(createMockAdapter());
+    await manager.initialize();
+
+    expect(fake.native.startModelDownload).not.toHaveBeenCalled();
+    const provisioning = useAIStore.getState().provisioning;
+    expect(provisioning.status).toBe('paused');
+    expect(provisioning.downloadedBytes).toBe(800_000);
+    expect(provisioning.progress).toBeCloseTo(800_000 / EXPECTED_SIZE);
+    expect(provisioning.pausedReason).toBe('Paused: no Wi-Fi. Tap Resume to continue.');
+  });
+
   it('keeps a paused download paused on launch when the service is idle', async () => {
     fsMock.getInfoAsync.mockImplementation(async (path: string) =>
       path === TEMP_URI
