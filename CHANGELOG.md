@@ -4,6 +4,10 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+### Fixed
+- Receipt items on FamilyMart-style receipts (name on one line, "13,000 X 1   13,000" on the next): Silo listed
+  the payment, TOTAL PAID and tax rows as items; it now reads the products, folds discounts into the item above
+  them, and the items add up to the total.
 
 ## [1.3.9] - 2026-11-25
 ### Added

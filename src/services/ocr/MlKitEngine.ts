@@ -187,7 +187,7 @@ export function parseReceiptTextHeuristic(rawText: string): {
   const extractedCategory = inferReceiptCategory(extractedMerchant, reconstructedText);
 
   // 5. Extract Line Items (excluding the merchant header row so branch codes like "ALFAMART 1024" never become items)
-  const extractedLineItems = extractLineItemsHeuristic(reconstructedText, extractedMerchant);
+  const extractedLineItems = extractQtyLineItems(lines) ?? extractLineItemsHeuristic(reconstructedText, extractedMerchant);
 
   return {
     extractedTotal,
@@ -284,6 +284,132 @@ export function splitQtyPriceColumns(name: string, lineTotal: number): { name: s
     return { name: baseName, note: `${qty} g × ${formatIdrThousands(unitPrice)}/kg` };
   }
   return { name, note: '' };
+}
+
+// "13,000 X 1" (unit price X qty), optionally followed by the line total on the same OCR line.
+const UNIT_X_QTY_REGEX = /^@?\s*(\d{1,3}(?:[.,]\d{3})+|\d{3,})\s*[xX×]\s*(\d{1,3})(?:\s+(-?\d{1,3}(?:[.,]\d{3})+))?$/;
+const SIGNED_AMOUNT_REGEX = /^(-)?\s*(?:Rp\.?\s*)?(\d{1,3}(?:[.,]\d{3})+|\d{4,})$/i;
+const NAME_WITH_AMOUNT_REGEX = /^(.*\p{L}.*?)\s+(-?\s*(?:Rp\.?\s*)?\d{1,3}(?:[.,]\d{3})+)$/u;
+const ITEMS_END_REGEX = /^(?:sub\s*total|subttl|grand\s*total|total|tl|ttl)\b/i;
+
+const toInt = (digits: string) => Number(digits.replace(/\D/g, ''));
+
+type QtySegment =
+  | { kind: 'qty'; unit: number; qty: number }
+  | { kind: 'amount'; value: number }
+  | { kind: 'text'; text: string };
+
+function qtyRowSegments(row: string): QtySegment[] {
+  const out: QtySegment[] = [];
+  for (const raw of row.split(/\s{2,}/)) {
+    const part = raw.trim();
+    if (!part) continue;
+    const qty = part.match(UNIT_X_QTY_REGEX);
+    if (qty) {
+      out.push({ kind: 'qty', unit: toInt(qty[1]), qty: Number(qty[2]) });
+      if (qty[3]) out.push({ kind: 'amount', value: (qty[3].startsWith('-') ? -1 : 1) * toInt(qty[3]) });
+      continue;
+    }
+    const amount = part.match(SIGNED_AMOUNT_REGEX);
+    if (amount) {
+      out.push({ kind: 'amount', value: (amount[1] ? -1 : 1) * toInt(amount[2]) });
+      continue;
+    }
+    if (!/\p{L}{2}/u.test(part)) continue;
+    const named = part.match(NAME_WITH_AMOUNT_REGEX);
+    if (named) {
+      out.push({ kind: 'text', text: named[1].replace(/[\s:|-]+$/, '').trim() });
+      out.push({ kind: 'amount', value: (/^-/.test(named[2]) ? -1 : 1) * toInt(named[2]) });
+    } else {
+      out.push({ kind: 'text', text: part });
+    }
+  }
+  return out;
+}
+
+/**
+ * Items on receipts that print the name on one line and "unit X qty   line total" on the next (FamilyMart,
+ * Lawson and similar minimarkets), with discounts as a name line plus a negative amount. Skewed photos put
+ * the line total on the name row or a qty row before the next name, so segments are paired in reading order:
+ * a qty or total belongs to the latest name that still lacks one and agrees with it (unit × qty = total).
+ * Discounts are folded into the item above them so the items add up to the receipt total.
+ * Returns null when the receipt has no "unit X qty" rows, leaving it to the one-line parser.
+ */
+export function extractQtyLineItems(rows: string[]): string | null {
+  type Candidate = {
+    name: string;
+    unit?: number;
+    qty?: number;
+    amount?: number;
+    discounts: Array<{ value: number; label: string }>;
+  };
+  const candidates: Candidate[] = [];
+  let pendingQty: { unit: number; qty: number } | null = null;
+  let sawQty = false;
+  // A summary-looking text right before a negative amount ("Onigiri Disc 2rb") still names that discount.
+  let skippedLabel: string | null = null;
+  const confirmed = () => candidates.filter((c) => c.qty !== undefined);
+  const last = () => candidates[candidates.length - 1];
+
+  outer: for (const row of rows) {
+    for (const seg of qtyRowSegments(row)) {
+      if (seg.kind === 'text') {
+        if (ITEMS_END_REGEX.test(seg.text) && confirmed().length > 0) break outer;
+        if (isNonItemLine(seg.text)) {
+          skippedLabel = seg.text;
+          continue;
+        }
+        skippedLabel = null;
+        const candidate: Candidate = { name: seg.text, discounts: [] };
+        if (pendingQty) {
+          Object.assign(candidate, pendingQty);
+          pendingQty = null;
+        }
+        candidates.push(candidate);
+      } else if (seg.kind === 'qty') {
+        sawQty = true;
+        skippedLabel = null;
+        const c = last();
+        if (c && c.qty === undefined && (c.amount === undefined || c.amount === seg.unit * seg.qty)) {
+          c.unit = seg.unit;
+          c.qty = seg.qty;
+        } else {
+          pendingQty = { unit: seg.unit, qty: seg.qty };
+        }
+      } else if (seg.value < 0) {
+        const c = last();
+        // A name with no qty right before a negative amount is the discount's label, not an item.
+        const label =
+          skippedLabel ?? (c && c.qty === undefined && c.amount === undefined ? candidates.pop()!.name : 'disc');
+        skippedLabel = null;
+        const target = confirmed().pop();
+        // Drop a trailing promo time window like "(20.00 - 00.00)".
+        if (target) target.discounts.push({ value: -seg.value, label: label.replace(/\s*\([^)]*\)\s*$/, '') || 'disc' });
+      } else {
+        skippedLabel = null;
+        const c = last();
+        if (c && c.amount === undefined && (c.qty === undefined || c.unit! * c.qty === seg.value)) {
+          c.amount = seg.value;
+        }
+      }
+    }
+  }
+
+  if (!sawQty) return null;
+  const items = confirmed()
+    .map((c) => {
+      const gross = c.amount ?? c.unit! * c.qty!;
+      const discount = c.discounts.reduce((s, d) => s + d.value, 0);
+      const base = c.qty! > 1 ? `${c.qty} × ${formatIdrThousands(c.unit!)}` : formatIdrThousands(gross);
+      const note = c.discounts.length
+        ? `${base}${c.discounts.map((d) => ` - ${formatIdrThousands(d.value)} ${d.label}`).join('')}`
+        : c.qty! > 1
+          ? base
+          : '';
+      return { name: c.name, price: String(gross - discount), note };
+    })
+    .filter((item) => Number(item.price) > 0);
+  return items.length > 0 ? serializeReceiptLineItems(items) : null;
 }
 
 export function extractLineItemsHeuristic(reconstructedText: string, merchantName?: string | null): string | null {

@@ -20,11 +20,15 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 945 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 953 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased. Not pushed to GitHub yet: the 1.3.8 and 1.3.9 commits, `prod` and tags `v1.3.8`, `v1.3.9`
+- Unreleased (committed, not built): two-line minimarket receipt items (`extractQtyLineItems` in
+  `src/services/ocr/MlKitEngine.ts`) and more non-item labels (TOTAL PAID, CHANGES, ITEM SOLD, DPP Nilai Lain,
+  QRIS read as GRIS). Item benchmark: CORD unchanged; the user's 16 receipts still parse poorly (precision ~37%:
+  addresses, dates, product codes and Grand Total rows become items).
+- Not pushed to GitHub yet: the 1.3.8 and 1.3.9 commits, `prod` and tags `v1.3.8`, `v1.3.9`
   (scan for secrets, then push).
 
 ## Next steps
@@ -33,6 +37,11 @@
 - AI chat: Qwen thinking mode was tested and does not work (loops until the 2048-token context is full); keep it off.
   Remaining 0.8B misses: Indonesian advice, "make me a budget" often ends in the facts fallback on real data. On the x86 emulator replies take 25-70s; that is the emulator, not phones.
 - Watch real Split Bill use.
+- Receipt items: the user floated marking items on the photo and learning from it (2026-11-26). Proposal given:
+  tap OCR line boxes to mark items, remember marks per merchant, reuse them as row rules and as a one-shot example
+  for the local model; no on-device fine-tuning. Waiting on their go-ahead.
+- Item benchmark against the user's receipts: the scratch scripts were not kept; `bench/eval/ts_bridge.js` is stale
+  (fails on `./receiptText`), so load `src/services/ocr/*.ts` with sucrase and resolve relative imports yourself.
 - Receipt reading: build a private eval set from the user's own receipts (bench/data, gitignored) and measure ML Kit on a
   real phone; the rule-based fallback is ~74% on totals (benchmark), ceiling ~89%.
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
