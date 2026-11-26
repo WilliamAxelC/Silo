@@ -5,9 +5,11 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 ### Fixed
-- Receipt items on FamilyMart-style receipts (name on one line, "13,000 X 1   13,000" on the next): Silo listed
-  the payment, TOTAL PAID and tax rows as items; it now reads the products, folds discounts into the item above
-  them, and the items add up to the total.
+- Receipt items are read when an item's name and price are on different lines (name, then "13,000 X 1  13,000",
+  "4x @35.000  140.000" or "@38.000  38.000"), with option lines ("+Less Sugar", "NORMAL ICE 1x @0") kept as notes
+  and discounts taken off the item above them. Before, Silo listed payment, TOTAL PAID, tax, date and address lines
+  as items. On a 190-receipt benchmark, receipts read with exactly the right items went from 29% to 75%.
+- When the on-phone AI also reads the receipt, Silo keeps the OCR items unless only the AI's add up to the total.
 
 ## [1.3.9] - 2026-11-25
 ### Added

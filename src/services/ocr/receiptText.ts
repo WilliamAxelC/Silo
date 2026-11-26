@@ -115,7 +115,7 @@ const EMBEDDED_PRICE_REGEX =
 
 const LEADING_QTY_REGEX = /^\s*(?:\d+\s*[x×]\s+[A-Za-z]|1\s+[A-Za-z])/i;
 
-function levenshtein(a: string, b: string): number {
+export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;

@@ -4,15 +4,13 @@ import { IOcrEngine, OcrResult } from './types';
 import {
   buildReceiptRows,
   detectUprightRotation,
-  extractAmounts,
   joinSplitThousands,
   extractReceiptDate,
-  isNonItemLine,
   OcrLine,
   pickMerchantFromRows,
   pickTotalFromRows,
 } from './receiptText';
-import { serializeReceiptLineItems } from '../../features/transactions/lineItems';
+import { extractReceiptItems } from './receiptItems';
 
 // Auto-detects: true in Custom Dev Clients, false in Expo Go
 export const IS_NATIVE_OCR_SUPPORTED = Constants.appOwnership !== 'expo';
@@ -187,7 +185,7 @@ export function parseReceiptTextHeuristic(rawText: string): {
   const extractedCategory = inferReceiptCategory(extractedMerchant, reconstructedText);
 
   // 5. Extract Line Items (excluding the merchant header row so branch codes like "ALFAMART 1024" never become items)
-  const extractedLineItems = extractQtyLineItems(lines) ?? extractLineItemsHeuristic(reconstructedText, extractedMerchant);
+  const extractedLineItems = extractReceiptItems(lines);
 
   return {
     extractedTotal,
@@ -250,205 +248,6 @@ export function inferReceiptCategory(merchantName: string | null, rawText: strin
   }
 
   return 'Food & Dining';
-}
-
-function formatIdrThousands(value: number): string {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-}
-
-// Trailing "<qty> <unit price>" columns on a tabular receipt row, e.g. "TELUR AYAM OMEGA 806 29,400" or "INDOMIE 3 3.500".
-// OCR sometimes splits "29,400" into "29, 400", hence the optional space after the separator.
-const TRAILING_QTY_PRICE_REGEX = /^(.*\p{L}.*?)\s+(\d{1,4}(?:[.,]\d{1,3})?)\s*[x×]?\s+@?\s*(\d{1,3}(?:[.,]\s?\d{3})+|\d{3,})$/u;
-
-/**
- * Moves qty / unit-price columns out of an item name into its note, but only when they reconcile with the
- * line total (qty × unit, or grams × price-per-kg for weighed produce). Otherwise the name is left untouched,
- * so product names that merely end in numbers ("AQUA 600", "TEH BOTOL 350") are not mangled.
- */
-export function splitQtyPriceColumns(name: string, lineTotal: number): { name: string; note: string } {
-  const match = name.match(TRAILING_QTY_PRICE_REGEX);
-  if (!match) return { name, note: '' };
-
-  const baseName = match[1].replace(/[\s\-:|]+$/, '').trim();
-  const qty = Number(match[2].replace(',', '.'));
-  const unitPrice = Number(match[3].replace(/\D/g, ''));
-  if (!baseName || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0) {
-    return { name, note: '' };
-  }
-
-  const tolerance = Math.max(5, lineTotal * 0.002);
-  if (Math.abs(qty * unitPrice - lineTotal) <= tolerance) {
-    return { name: baseName, note: qty === 1 ? '' : `${match[2]} × ${formatIdrThousands(unitPrice)}` };
-  }
-  if (Number.isInteger(qty) && qty >= 10 && Math.abs((qty / 1000) * unitPrice - lineTotal) <= tolerance) {
-    return { name: baseName, note: `${qty} g × ${formatIdrThousands(unitPrice)}/kg` };
-  }
-  return { name, note: '' };
-}
-
-// "13,000 X 1" (unit price X qty), optionally followed by the line total on the same OCR line.
-const UNIT_X_QTY_REGEX = /^@?\s*(\d{1,3}(?:[.,]\d{3})+|\d{3,})\s*[xX×]\s*(\d{1,3})(?:\s+(-?\d{1,3}(?:[.,]\d{3})+))?$/;
-const SIGNED_AMOUNT_REGEX = /^(-)?\s*(?:Rp\.?\s*)?(\d{1,3}(?:[.,]\d{3})+|\d{4,})$/i;
-const NAME_WITH_AMOUNT_REGEX = /^(.*\p{L}.*?)\s+(-?\s*(?:Rp\.?\s*)?\d{1,3}(?:[.,]\d{3})+)$/u;
-const ITEMS_END_REGEX = /^(?:sub\s*total|subttl|grand\s*total|total|tl|ttl)\b/i;
-
-const toInt = (digits: string) => Number(digits.replace(/\D/g, ''));
-
-type QtySegment =
-  | { kind: 'qty'; unit: number; qty: number }
-  | { kind: 'amount'; value: number }
-  | { kind: 'text'; text: string };
-
-function qtyRowSegments(row: string): QtySegment[] {
-  const out: QtySegment[] = [];
-  for (const raw of row.split(/\s{2,}/)) {
-    const part = raw.trim();
-    if (!part) continue;
-    const qty = part.match(UNIT_X_QTY_REGEX);
-    if (qty) {
-      out.push({ kind: 'qty', unit: toInt(qty[1]), qty: Number(qty[2]) });
-      if (qty[3]) out.push({ kind: 'amount', value: (qty[3].startsWith('-') ? -1 : 1) * toInt(qty[3]) });
-      continue;
-    }
-    const amount = part.match(SIGNED_AMOUNT_REGEX);
-    if (amount) {
-      out.push({ kind: 'amount', value: (amount[1] ? -1 : 1) * toInt(amount[2]) });
-      continue;
-    }
-    if (!/\p{L}{2}/u.test(part)) continue;
-    const named = part.match(NAME_WITH_AMOUNT_REGEX);
-    if (named) {
-      out.push({ kind: 'text', text: named[1].replace(/[\s:|-]+$/, '').trim() });
-      out.push({ kind: 'amount', value: (/^-/.test(named[2]) ? -1 : 1) * toInt(named[2]) });
-    } else {
-      out.push({ kind: 'text', text: part });
-    }
-  }
-  return out;
-}
-
-/**
- * Items on receipts that print the name on one line and "unit X qty   line total" on the next (FamilyMart,
- * Lawson and similar minimarkets), with discounts as a name line plus a negative amount. Skewed photos put
- * the line total on the name row or a qty row before the next name, so segments are paired in reading order:
- * a qty or total belongs to the latest name that still lacks one and agrees with it (unit × qty = total).
- * Discounts are folded into the item above them so the items add up to the receipt total.
- * Returns null when the receipt has no "unit X qty" rows, leaving it to the one-line parser.
- */
-export function extractQtyLineItems(rows: string[]): string | null {
-  type Candidate = {
-    name: string;
-    unit?: number;
-    qty?: number;
-    amount?: number;
-    discounts: Array<{ value: number; label: string }>;
-  };
-  const candidates: Candidate[] = [];
-  let pendingQty: { unit: number; qty: number } | null = null;
-  let sawQty = false;
-  // A summary-looking text right before a negative amount ("Onigiri Disc 2rb") still names that discount.
-  let skippedLabel: string | null = null;
-  const confirmed = () => candidates.filter((c) => c.qty !== undefined);
-  const last = () => candidates[candidates.length - 1];
-
-  outer: for (const row of rows) {
-    for (const seg of qtyRowSegments(row)) {
-      if (seg.kind === 'text') {
-        if (ITEMS_END_REGEX.test(seg.text) && confirmed().length > 0) break outer;
-        if (isNonItemLine(seg.text)) {
-          skippedLabel = seg.text;
-          continue;
-        }
-        skippedLabel = null;
-        const candidate: Candidate = { name: seg.text, discounts: [] };
-        if (pendingQty) {
-          Object.assign(candidate, pendingQty);
-          pendingQty = null;
-        }
-        candidates.push(candidate);
-      } else if (seg.kind === 'qty') {
-        sawQty = true;
-        skippedLabel = null;
-        const c = last();
-        if (c && c.qty === undefined && (c.amount === undefined || c.amount === seg.unit * seg.qty)) {
-          c.unit = seg.unit;
-          c.qty = seg.qty;
-        } else {
-          pendingQty = { unit: seg.unit, qty: seg.qty };
-        }
-      } else if (seg.value < 0) {
-        const c = last();
-        // A name with no qty right before a negative amount is the discount's label, not an item.
-        const label =
-          skippedLabel ?? (c && c.qty === undefined && c.amount === undefined ? candidates.pop()!.name : 'disc');
-        skippedLabel = null;
-        const target = confirmed().pop();
-        // Drop a trailing promo time window like "(20.00 - 00.00)".
-        if (target) target.discounts.push({ value: -seg.value, label: label.replace(/\s*\([^)]*\)\s*$/, '') || 'disc' });
-      } else {
-        skippedLabel = null;
-        const c = last();
-        if (c && c.amount === undefined && (c.qty === undefined || c.unit! * c.qty === seg.value)) {
-          c.amount = seg.value;
-        }
-      }
-    }
-  }
-
-  if (!sawQty) return null;
-  const items = confirmed()
-    .map((c) => {
-      const gross = c.amount ?? c.unit! * c.qty!;
-      const discount = c.discounts.reduce((s, d) => s + d.value, 0);
-      const base = c.qty! > 1 ? `${c.qty} × ${formatIdrThousands(c.unit!)}` : formatIdrThousands(gross);
-      const note = c.discounts.length
-        ? `${base}${c.discounts.map((d) => ` - ${formatIdrThousands(d.value)} ${d.label}`).join('')}`
-        : c.qty! > 1
-          ? base
-          : '';
-      return { name: c.name, price: String(gross - discount), note };
-    })
-    .filter((item) => Number(item.price) > 0);
-  return items.length > 0 ? serializeReceiptLineItems(items) : null;
-}
-
-export function extractLineItemsHeuristic(reconstructedText: string, merchantName?: string | null): string | null {
-  const lines = reconstructedText.split('\n').map((l) => l.trim()).filter(Boolean);
-  const resolvedMerchant = merchantName !== undefined ? merchantName : pickMerchantFromRows(lines);
-  const normalizedMerchant = resolvedMerchant?.trim().toLowerCase() ?? null;
-  const items: Array<{ name: string; price: string; note: string }> = [];
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    // Never treat the merchant header row (e.g. "ALFAMART 1024" or "APOTEK KIMIA FARMA 124") as a line item.
-    if (normalizedMerchant && i < 6 && line.toLowerCase().includes(normalizedMerchant)) {
-      const cleanedHeader = line
-        .replace(/\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b/g, ' ')
-        .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-      if (cleanedHeader === normalizedMerchant) {
-        continue;
-      }
-    }
-    if (!isNonItemLine(line)) {
-      const amounts = extractAmounts(line);
-      const hasText = /[a-zA-Z]{3,}/.test(line);
-      if (hasText && amounts.length > 0 && line.length >= 6 && line.length <= 60) {
-        const price = amounts[amounts.length - 1];
-        const name = line
-          .replace(/(?:(?:Rp|IDR)\s*\.?\s*)?\d+(?:[.,]\d+)*(?:,-)?\s*$/i, '')
-          .replace(/[\s\-:|]+$/, '')
-          .trim();
-        if (name && !isNonItemLine(name)) {
-          items.push({ price: String(price), ...splitQtyPriceColumns(name, price) });
-        }
-      }
-    }
-  }
-
-  return items.length > 0 ? serializeReceiptLineItems(items) : null;
 }
 
 export function buildOcrResultFromLines(lines: OcrLine[], fallbackText: string): OcrResult {

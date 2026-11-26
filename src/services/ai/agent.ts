@@ -3684,6 +3684,30 @@ export function groundModelItems(
   return items2.length > 0 ? formatReceiptItemsText(items2) : undefined;
 }
 
+/**
+ * Chooses between the OCR reader's items and the model's grounded items. The OCR reader is the stronger of the two
+ * (receipt benchmark, ML Kit: 87% of items found vs 58% for the 0.8B model), so it wins unless it found nothing or
+ * only the model's items add up to the receipt's total or subtotal.
+ */
+export function chooseReceiptItems(
+  ocrItems: string | undefined,
+  modelItems: string | undefined,
+  rows: string[],
+  total?: number | null,
+): string | undefined {
+  if (!ocrItems || !modelItems) return ocrItems || modelItems || undefined;
+  const targets = new Set<number>();
+  if (total) targets.add(Math.round(total));
+  for (const row of rows) {
+    if (/\bsub\s*-?\s*total\b|\bsubttl\b/i.test(row)) for (const amount of extractAmounts(row)) targets.add(amount);
+  }
+  const addsUp = (text: string) => {
+    const sum = itemPricesFromText(text).reduce((a, b) => a + b, 0);
+    return [...targets].some((t) => Math.abs(t - sum) <= 1);
+  };
+  return !addsUp(ocrItems) && addsUp(modelItems) ? modelItems : ocrItems;
+}
+
 function isExternalConfiguredForReceipt(): boolean {
   const settings = useSettingsStore.getState();
   const url = (settings.externalApiUrl ?? '').trim();
@@ -3960,7 +3984,7 @@ const analyzeReceiptImageCore = async (
           ocrResult.extractedDate ||
           undefined;
         const lineItemsText =
-          groundModelItems(parsedData.items, rows, finalTotal, merchantName) || cleanOcrItems || undefined;
+          chooseReceiptItems(cleanOcrItems, groundModelItems(parsedData.items, rows, finalTotal, merchantName), rows, finalTotal);
         const category =
           ocrResult.extractedCategory ||
           inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||
@@ -4033,7 +4057,7 @@ const analyzeReceiptImageCore = async (
           ocrResult.extractedDate ||
           undefined;
         const lineItemsText =
-          groundModelItems(parsedData.items, rows, finalTotal, merchantName) || cleanOcrItems || undefined;
+          chooseReceiptItems(cleanOcrItems, groundModelItems(parsedData.items, rows, finalTotal, merchantName), rows, finalTotal);
         const category =
           ocrResult.extractedCategory ||
           inferReceiptCategory(merchantName ?? cleanOcrMerchant ?? null, rawText) ||

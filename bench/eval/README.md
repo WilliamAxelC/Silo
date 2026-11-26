@@ -23,3 +23,24 @@ chmod +x bench/eval/run_all.sh
 ```
 
 Note: Each `llama-server` stage waits until no `jest`/`tsc --noEmit` processes are active and ≥3000 MB RAM is available before starting, and runs only one `llama-server` instance at a time (`-c 4096 -t 4`).
+
+## Line items on real ML Kit output (`items_eval.js`)
+
+`bench/mlkit-harness/run_on_emulator.sh` runs real ML Kit text recognition on the emulator over every benchmark image
+(plus the private `user_crop` / `user_raw` photos) and writes `bench/cache/ocr_mlkit/<id>.json` (gitignored). On API
+30 images pushed with adb are unreadable to the app, so the script copies them into `/data/media` as root and hands
+them to the app's uid.
+
+`node bench/eval/items_eval.js` runs each file through the app's own path (`buildOcrResultFromLines`: visual rows,
+then `extractReceiptItems`) and scores items against the labels: recall (labelled items found, by price), precision
+(listed items that are real), exact (every item and nothing else) and whether the items add up to the total.
+`--show <id part> --rows` prints the rows and wanted/got items; `--repo <worktree>` scores another checkout.
+
+| Reader (2026-11-26) | CORD exact | CORD recall / precision | Private user receipts, cropped: exact | recall / precision |
+|---|---:|---:|---:|---:|
+| One-row reader (1.3.9) | 29.3% | 71.1% / 65.9% | 0.0% | 51.5% / 27.9% |
+| `extractReceiptItems` (names and prices on any row) | 75.3% | 88.3% / 91.2% | 68.8% | 90.9% / 90.9% |
+
+The user receipts were also used to develop the reader, so their numbers flatter it; CORD (190 receipts) is the
+fairer check. Known misses: skewed photos where every price sits one row above its name, two receipts in one photo,
+Wingstop's multi-column print, and totals too garbled to read.

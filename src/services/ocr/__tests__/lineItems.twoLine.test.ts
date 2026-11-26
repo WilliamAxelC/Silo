@@ -1,4 +1,5 @@
-import { extractQtyLineItems, parseReceiptTextHeuristic } from '../MlKitEngine';
+import { parseReceiptTextHeuristic } from '../MlKitEngine';
+import { extractReceiptItems } from '../receiptItems';
 import { isNonItemLine } from '../receiptText';
 import { parseReceiptLineItemsText } from '../../../features/transactions/lineItems';
 
@@ -70,7 +71,7 @@ describe('two-line minimarket receipts', () => {
   });
 
   it('pairs names with their qty and totals when the photo is skewed', () => {
-    const items = parseReceiptLineItemsText(extractQtyLineItems(rows(FAMILYMART_SKEWED_ROWS)) ?? '');
+    const items = parseReceiptLineItemsText(extractReceiptItems(rows(FAMILYMART_SKEWED_ROWS)) ?? '');
     expect(items.map((i) => [i.name, i.price])).toEqual([
       ['IcekSkLargeLessSugar', '20000'],
       ['ICE KSK LARGE', '20000'],
@@ -82,8 +83,10 @@ describe('two-line minimarket receipts', () => {
     expect(sum(items)).toBe(99000);
   });
 
-  it('leaves receipts without "unit X qty" rows to the one-line parser', () => {
-    expect(extractQtyLineItems(['NASI GORENG  25,000', 'ES TEH  5,000', 'TOTAL  30,000'])).toBeNull();
+  it('still reads one-line items', () => {
+    expect(extractReceiptItems(['NASI GORENG  25,000', 'ES TEH  5,000', 'TOTAL  30,000'])).toBe(
+      'NASI GORENG | 25000\nES TEH | 5000',
+    );
   });
 
   it.each(['TOTAL PAID  Rp 24,000', 'BCA GRIS  24,000', 'DPP Nilai Lain : 19,820', 'CHANGES  0', '# ITEM SOLD  2'])(

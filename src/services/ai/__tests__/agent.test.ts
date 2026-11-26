@@ -12,6 +12,7 @@ import {
   parseGroundedQuery,
   analyzeReceiptImage,
   groundModelItems,
+  chooseReceiptItems,
   replaceFalseConnectivityClaim,
   RECEIPT_SCAN_CANCELLED,
   type RetrievedContextItem,
@@ -1667,5 +1668,31 @@ describe('AI Agent & Context Engine', () => {
         expect(result?.confidence).toBe('high');
       });
     });
+  });
+});
+
+describe('chooseReceiptItems', () => {
+  const rows = ['Onigiri Tuna Mayo', '13,000 X 1  13,000', 'Onigiri Salmon Mayo', '13,000 X 1  13,000', 'TOTAL  Rp 26,000'];
+
+  it('regression: keeps the OCR items when the model read payment rows as items', () => {
+    const ocr = 'Onigiri Tuna Mayo | 13000\nOnigiri Salmon Mayo | 13000';
+    expect(chooseReceiptItems(ocr, 'BCA QRIS | 26000\nTOTAL PAID | 13000', rows, 26000)).toBe(ocr);
+  });
+
+  it('uses the model items when only they add up to the total', () => {
+    const model = 'Onigiri Tuna Mayo | 13000\nOnigiri Salmon Mayo | 13000';
+    expect(chooseReceiptItems('Onigiri Tuna Mayo | 13000', model, rows, 26000)).toBe(model);
+  });
+
+  it('counts a subtotal row as a total the items can add up to', () => {
+    const model = 'Nasi | 20000\nTeh | 5000';
+    const withTax = ['Nasi  20.000', 'Teh  5.000', 'Subtotal  25.000', 'PB1  2.500', 'Total  27.500'];
+    expect(chooseReceiptItems('Nasi | 20000', model, withTax, 27500)).toBe(model);
+  });
+
+  it('falls back to whichever list exists', () => {
+    expect(chooseReceiptItems(undefined, 'Teh | 5000', rows, 26000)).toBe('Teh | 5000');
+    expect(chooseReceiptItems('Teh | 5000', undefined, rows, 26000)).toBe('Teh | 5000');
+    expect(chooseReceiptItems(undefined, undefined, rows, 26000)).toBeUndefined();
   });
 });

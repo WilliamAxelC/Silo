@@ -173,7 +173,7 @@ CASH 170000
       expect(result.extractedTotal).toBe(170000);
     });
 
-    it('formats extractedLineItems as newline-separated Name | integer rupiah lines', () => {
+    it('formats extractedLineItems as newline-separated Name | integer rupiah lines, quantity moved to the note', () => {
       const rawText = [
         'KOPI KENANGAN',
         '1x Kopi Kenangan Mantan Rp 24.000',
@@ -182,7 +182,7 @@ CASH 170000
       ].join('\n');
 
       const result = parseReceiptTextHeuristic(rawText);
-      expect(result.extractedLineItems).toBe('1x Kopi Kenangan Mantan | 24000\n2x Roti Bakar | 30000');
+      expect(result.extractedLineItems).toBe('Kopi Kenangan Mantan | 24000\nRoti Bakar | 30000');
       expect(result.extractedTotal).toBe(54000);
     });
 

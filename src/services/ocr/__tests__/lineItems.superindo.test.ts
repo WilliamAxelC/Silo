@@ -1,4 +1,5 @@
-import { extractLineItemsHeuristic, parseReceiptTextHeuristic } from '../MlKitEngine';
+import { parseReceiptTextHeuristic } from '../MlKitEngine';
+import { extractReceiptItems } from '../receiptItems';
 import { extractReceiptDate, isPlausibleReceiptDate } from '../receiptText';
 import { parseReceiptLineItemsText } from '../../../features/transactions/lineItems';
 
@@ -30,7 +31,7 @@ www.superindo.co.id
 
 describe('Super Indo receipt line items', () => {
   it('keeps the single item, moves qty x unit price into the note, and drops BTKP and footer phone numbers', () => {
-    const items = parseReceiptLineItemsText(extractLineItemsHeuristic(SUPERINDO_ROWS, 'PT LION SUPER INDO') ?? '');
+    const items = parseReceiptLineItemsText(extractReceiptItems(SUPERINDO_ROWS.split('\n')) ?? '');
     expect(items).toEqual([
       expect.objectContaining({ name: 'TELUR AYAM OMEGA', price: '23695', note: '806 g × 29.400/kg' }),
     ]);
@@ -57,13 +58,13 @@ describe('Super Indo receipt line items', () => {
 
   it('drops phone-number rows even before any total row', () => {
     const items = parseReceiptLineItemsText(
-      extractLineItemsHeuristic('KOPI SUSU 18.000\nHUBUNGI KAMI 0812 1313 7035\nCALL CENTER 1500 123 4567', null) ?? '',
+      extractReceiptItems('KOPI SUSU 18.000\nHUBUNGI KAMI 0812 1313 7035\nCALL CENTER 1500 123 4567'.split('\n')) ?? '',
     );
     expect(items.map((i) => i.name)).toEqual(['KOPI SUSU']);
   });
 
   it('strips qty and unit-price columns when qty x price matches the line total', () => {
-    const items = parseReceiptLineItemsText(extractLineItemsHeuristic('INDOMIE GORENG 3 3,500 10,500\nAQUA 600ML 1 4,000 4,000', null) ?? '');
+    const items = parseReceiptLineItemsText(extractReceiptItems('INDOMIE GORENG 3 3,500 10,500\nAQUA 600ML 1 4,000 4,000'.split('\n')) ?? '');
     expect(items).toEqual([
       expect.objectContaining({ name: 'INDOMIE GORENG', price: '10500', note: '3 × 3.500' }),
       expect.objectContaining({ name: 'AQUA 600ML', price: '4000', note: '' }),
