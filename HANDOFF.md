@@ -1,10 +1,13 @@
 # Silo handoff
 
 ## Last updated
-2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8, 1.3.9 and the receipt item work not pushed yet). `prod` = `v1.3.9` @ `3f75720`.
+2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8, 1.3.9 and 1.3.10 not pushed yet). `prod` = `v1.3.10` @ `b296937`.
 
 ## Current state
-- **Live:** 1.3.9 (versionCode 16, sha256 `26614d5b…ca65`): 57 currencies with a searchable picker (More…) for
+- **Live:** 1.3.10 (versionCode 17, sha256 `1104459e…f73e`): new receipt item reader (names and prices on
+  different rows, options as notes, discounts folded in; OCR items preferred over the AI's). Checked on emulator 5554:
+  upgrade over 1.3.9, then a shared skewed FamilyMart photo gave all 5 items, sum = total. Before that 1.3.9
+  (versionCode 16): 57 currencies with a searchable picker (More…) for
   home currency, accounts and budgets; TWD and a few others without decimals. Before that 1.3.8 (versionCode 15): Remove split on the expense page (trash next to
   Split) and the split page; logged repayment income is kept unless the user picks Delete income too.
   Before that 1.3.7 (versionCode 14): one Silo AI mode, worked-out numbers for advice and
@@ -24,11 +27,10 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Unreleased (committed, not built): new receipt item reader `src/services/ocr/receiptItems.ts`
-  (`extractReceiptItems`, replaces the one-row reader) and OCR-first item choice (`chooseReceiptItems` in
-  `agent.ts`). Benchmark and numbers: `bench/eval/README.md` (Line items section).
-- Not pushed to GitHub yet: the 1.3.8 and 1.3.9 commits, `prod` and tags `v1.3.8`, `v1.3.9`
-  (scan for secrets, then push).
+- Nothing unreleased. Receipt item reader: `src/services/ocr/receiptItems.ts` (`extractReceiptItems`) and
+  `chooseReceiptItems` in `agent.ts`; benchmark in `bench/eval/README.md` (Line items section).
+- Not pushed to GitHub yet: the 1.3.8-1.3.10 commits, `prod` and tags `v1.3.8`, `v1.3.9`, `v1.3.10`
+  (scan for secrets, then push; needs the user's OK).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
@@ -43,6 +45,7 @@
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
 
 ## Waiting on the user
+- Pushing 1.3.8-1.3.10 to GitHub (not approved yet).
 - Optional: a dedicated contact alias (silo@cuang.dev as a Zoho alias) instead of william@cuang.dev.
 
 ## Build, test, deploy
@@ -56,6 +59,10 @@
   on-screen text/labels; `~/silo-build/ui.sh '<regex>'` taps the first match (uiautomator).
 - Publish: copy files to docker-host `/home/agent/orca/learnings/projects-cuang-dev/html/projects/silo/`, then
   `docker cp` into `projects-cuang-nginx:/usr/share/nginx/html/projects/silo/`; remove the old APK; verify the live sha.
+- Emulator share test (API 30): adb-pushed photos belong to another app and an adb grant can't open them. Temporarily
+  `pm grant com.LCSdev.silo android.permission.READ_EXTERNAL_STORAGE`, share with `am start -a android.intent.action.SEND
+  -t image/jpeg --eu android.intent.extra.STREAM content://media/external/images/media/<id> -n com.LCSdev.silo/.MainActivity`,
+  then revoke it and delete the photo.
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
