@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.10] - 2026-11-26
 ### Fixed
 - Receipt items are read when an item's name and price are on different lines (name, then "13,000 X 1  13,000",
   "4x @35.000  140.000" or "@38.000  38.000"), with option lines ("+Less Sugar", "NORMAL ICE 1x @0") kept as notes
