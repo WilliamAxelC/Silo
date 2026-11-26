@@ -1,10 +1,12 @@
 # Silo handoff
 
 ## Last updated
-2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-26 with `prod` and tags up to `v1.3.10`). `prod` = `v1.3.10` @ `b296937`.
+2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed up to `v1.3.10`; the 1.3.11 commits, tag `v1.3.11` and `prod` move are local only). `prod` = `v1.3.11` @ `636aff9`.
 
 ## Current state
-- **Live:** 1.3.10 (versionCode 17, sha256 `1104459e…f73e`): new receipt item reader (names and prices on
+- **Live:** 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
+  progress notification (Pause/Resume/Cancel), resume from the partial file, SHA-256 checked. Before that 1.3.10
+  (versionCode 17): new receipt item reader (names and prices on
   different rows, options as notes, discounts folded in; OCR items preferred over the AI's). Checked on emulator 5554:
   upgrade over 1.3.9, then a shared skewed FamilyMart photo gave all 5 items, sum = total. Before that 1.3.9
   (versionCode 16): 57 currencies with a searchable picker (More…) for
@@ -27,10 +29,18 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased. Receipt item reader: `src/services/ocr/receiptItems.ts` (`extractReceiptItems`) and
-  `chooseReceiptItems` in `agent.ts`; benchmark in `bench/eval/README.md` (Line items section).
+- Nothing unreleased. Not pushed to GitHub yet: the 1.3.11 commits (`275f614..636aff9` plus this handoff), tag
+  `v1.3.11` and `prod` (ask the user before pushing).
+- Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
+  notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
+  `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
+  `handleUnattachedNativeEvent` for notification taps on a paused one). Tests:
+  `src/services/ai/__tests__/nativeModelDownload.test.ts`. Emulator-checked on 1.3.11: progress notification, pause
+  on a stalled connection (instant), Resume/Cancel from the shade with Silo open or killed, auto-resume at launch
+  after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
 
 ## Next steps
+- Watch the user's first real model download on 1.3.11 (Android 13+ asks for notification permission first).
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
 - The user is fine with Silo AI as a somewhat useful gimmick (2026-11-25): no more AI tuning unless they report a problem.
 - AI chat: Qwen thinking mode was tested and does not work (loops until the 2048-token context is full); keep it off.
@@ -71,7 +81,10 @@
   path aborts the whole add, so add them with `git add -f` separately and check `git log` before bundling.
 - Release signing: `plugins/withReleaseSigning.js` plus `SILO_RELEASE_SIGNING` on the build box (key in
   `~/silo-build/keys`, backup at orca `~/.local/share/silo-release`). Losing the key means no more updates.
-- Never `pkill -f <pattern>` over ssh (it kills its own shell); use a script that skips its own PID.
+- Never `pkill -f <pattern>` over ssh (it kills its own shell, even `[b]racket` patterns if the same command line
+  mentions the name again); kill by PID. Wait on a build with `while kill -0 <pid>; do sleep 20; done`.
+- Model download test on emulator 5554: move `files/ai/models/qwen3.5-0.8b/*.gguf` and `files/ai/model-manifest.json`
+  aside (adb root), download from Settings. `adb emu network speed umts|edge|full` stalls or slows it for pause tests.
 - Every reported bug gets a `regression:` test that fails on the old code.
 - The local chat model is tiny: any prompt wording change can swing the chat benchmark by 10 points. Rerun the
   model half after touching `DEFAULT_LOCAL_SYSTEM_PROMPT` or fact wording in `buildRetrievedContext`.
