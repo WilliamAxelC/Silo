@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (1.3.8, 1.3.9 and 1.3.10 not pushed yet). `prod` = `v1.3.10` @ `b296937`.
+2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-26 with `prod` and tags up to `v1.3.10`). `prod` = `v1.3.10` @ `b296937`.
 
 ## Current state
 - **Live:** 1.3.10 (versionCode 17, sha256 `1104459e…f73e`): new receipt item reader (names and prices on
@@ -29,8 +29,6 @@
 ## In progress
 - Nothing unreleased. Receipt item reader: `src/services/ocr/receiptItems.ts` (`extractReceiptItems`) and
   `chooseReceiptItems` in `agent.ts`; benchmark in `bench/eval/README.md` (Line items section).
-- Not pushed to GitHub yet: the 1.3.8-1.3.10 commits, `prod` and tags `v1.3.8`, `v1.3.9`, `v1.3.10`
-  (scan for secrets, then push; needs the user's OK).
 
 ## Next steps
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
@@ -45,7 +43,6 @@
 - The user's first real test of Connect Google Drive (needs the Google Cloud Android client, SHA-1 above).
 
 ## Waiting on the user
-- Pushing 1.3.8-1.3.10 to GitHub (not approved yet).
 - Optional: a dedicated contact alias (silo@cuang.dev as a Zoho alias) instead of william@cuang.dev.
 
 ## Build, test, deploy
@@ -66,8 +63,8 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
-- **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.6 were pushed
-  2026-11-25. Never commit infrastructure weaknesses, tokens or personal data, HANDOFF.md included; private
+- **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.10 are pushed
+  (last 2026-11-26). Never commit infrastructure weaknesses, tokens or personal data, HANDOFF.md included; private
   notes go in Claude memory. History was rewritten once before that push (HANDOFF.md only); local
   `backup/pre-scrub-1.3.6` and tag `backup/v1.3.6-pre-scrub` hold the old commits: never push them.
 - `android/` is gitignored, but `android/app/build.gradle` and 3 other files are tracked. `git add` with an ignored
