@@ -107,6 +107,22 @@ export function dismissModelDownloadNotification(): void {
   }
 }
 
+/** Every service event, for state changes made from the notification while no download handle is attached. */
+export function subscribeToNativeModelDownload(
+  listener: (state: NativeDownloadState) => void,
+): (() => void) | null {
+  const native = getNative();
+  if (!native?.addListener) {
+    return null;
+  }
+  try {
+    const subscription = native.addListener('onModelDownload', listener);
+    return () => subscription.remove();
+  } catch {
+    return null;
+  }
+}
+
 type DownloadProgress = { totalBytesExpectedToWrite: number; totalBytesWritten: number };
 
 export type NativeDownloadOptions = {

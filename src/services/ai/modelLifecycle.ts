@@ -15,6 +15,7 @@ import {
   cancelNativeModelDownload,
   createNativeDownloadResumable,
   getNativeModelDownload,
+  subscribeToNativeModelDownload,
   isNativeModelDownloadAvailable,
   type NativeDownloadState,
 } from './nativeModelDownload';
@@ -706,6 +707,9 @@ export class QModelLifecycleManager {
   private lifecycleGeneration = 0;
   private pendingDeferredRecovery: PendingDeferredRecovery | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
+  private unsubscribeNativeDownload: (() => void) | null = null;
+  /** Set while cancelDownload runs, so the service's own "cancelled" echo is not handled twice. */
+  private cancelInProgress = false;
   private inFlightDownloadPromise: Promise<void> | null = null;
   private inFlightVerificationPromise: Promise<void> | null = null;
   private lastPersistedProgressAt = 0;
@@ -826,6 +830,8 @@ export class QModelLifecycleManager {
     this.pendingDeferredRecovery = null;
     this.appStateSubscription?.remove();
     this.appStateSubscription = null;
+    this.unsubscribeNativeDownload?.();
+    this.unsubscribeNativeDownload = null;
     useAIStore.getState().setProvisioningHydrated(false);
   }
 
@@ -1040,6 +1046,7 @@ export class QModelLifecycleManager {
     this.pendingDeferredRecovery = null;
     const resumable = this.downloadResumable;
     this.downloadResumable = null;
+    this.cancelInProgress = true;
 
     try {
       if (resumable) {
@@ -1061,6 +1068,8 @@ export class QModelLifecycleManager {
         return;
       }
       this.failProvisioning(error, 'Unable to cancel model download.');
+    } finally {
+      this.cancelInProgress = false;
     }
   }
 
@@ -2224,6 +2233,43 @@ export class QModelLifecycleManager {
         void this.startProvisioningIfNeeded();
       }
     });
+    this.unsubscribeNativeDownload?.();
+    this.unsubscribeNativeDownload = subscribeToNativeModelDownload((state) =>
+      this.handleUnattachedNativeEvent(state),
+    );
+  }
+
+  /**
+   * Resume / Cancel tapped in the notification while Silo is open on a paused download: no download handle is
+   * listening then, so follow the service here (an attached handle reports through onExternalStop instead).
+   */
+  private handleUnattachedNativeEvent(state: NativeDownloadState) {
+    if (
+      state?.id !== MODEL_DOWNLOAD_ID ||
+      this.cancelInProgress ||
+      this.downloadResumable ||
+      this.inFlightDownloadPromise
+    ) {
+      return;
+    }
+    if (useAIStore.getState().provisioning.status !== 'paused') {
+      return;
+    }
+    if (state.status === 'cancelled') {
+      const cancelToken = ++this.downloadToken;
+      void this.resetProvisioningArtifacts().then(() => {
+        if (this.downloadToken === cancelToken) {
+          this.log('warn', 'download-cancelled', 'Model download cancelled from the notification.');
+        }
+      });
+      return;
+    }
+    if (state.status === 'downloading' || state.status === 'waiting') {
+      // The service is already running this download; resuming attaches to it.
+      void this.resumeDownload().catch((error) =>
+        this.failProvisioning(error, 'Unable to follow the model download.'),
+      );
+    }
   }
 
   private updateProvisioning(snapshot: Partial<AIProvisioningSnapshot>) {

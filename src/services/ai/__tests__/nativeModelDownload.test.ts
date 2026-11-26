@@ -536,6 +536,58 @@ describe('model lifecycle with the Android download service', () => {
     expect(useAIStore.getState().provisioning.canResume).toBe(true);
   });
 
+  const launchPaused = async () => {
+    fsMock.getInfoAsync.mockImplementation(async (path: string) =>
+      path === TEMP_URI
+        ? { exists: true, size: 500_000, uri: TEMP_URI }
+        : { exists: false, uri: path },
+    );
+    mockTransferManifest(
+      persistedManifest({
+        status: 'paused',
+        resumeData: NATIVE_RESUME_DATA,
+        pausedReason: 'Paused.',
+      }),
+    );
+    fake.setState({
+      id: 'model',
+      status: 'paused',
+      path: TEMP_URI,
+      downloadedBytes: 500_000,
+      totalBytes: EXPECTED_SIZE,
+      active: false,
+    });
+    const manager = new QModelLifecycleManager(createMockAdapter());
+    await manager.initialize();
+    expect(useAIStore.getState().provisioning.status).toBe('paused');
+    return manager;
+  };
+
+  it('regression: Cancel in the notification while Silo is open on a paused download clears the paused card', async () => {
+    // Emulator, 2026-11-26: the service deleted the partial file and notification, Silo kept showing "89% (Paused)".
+    await launchPaused();
+
+    fake.emit({ status: 'cancelled', downloadedBytes: 0 });
+    await waitFor(
+      () => useAIStore.getState().provisioning.status === 'not-installed',
+      'cancelled in app',
+    );
+  });
+
+  it('Resume in the notification while Silo is open on a paused download shows it downloading again', async () => {
+    await launchPaused();
+
+    fake.emit({ status: 'downloading', downloadedBytes: 600_000 });
+    await waitFor(() => fake.native.startModelDownload.mock.calls.length > 0, 're-attach');
+    expect(fake.native.startModelDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'model', restart: false }),
+    );
+    await waitFor(
+      () => useAIStore.getState().provisioning.status === 'downloading',
+      'downloading in app',
+    );
+  });
+
   it('cancelling a paused download asks the service to drop its notification and partial file', async () => {
     fsMock.getInfoAsync.mockImplementation(async (path: string) =>
       path === TEMP_URI
