@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-26 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-26 with `prod` and tags up to `v1.3.11`). `prod` = `v1.3.11` @ `636aff9`.
+2026-11-27 by Claude Code (Opus 5.5). Branch `feat/multi-currency` @ `9babfe6` (1.3.12 committed, not pushed; origin has up to `v1.3.11`). `prod` = `v1.3.11` @ `636aff9`.
 
 ## Current state
 - **Live:** 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
@@ -29,7 +29,13 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased or unpushed.
+- **1.3.12 (versionCode 19), not published or pushed:** package id `dev.cuang.silo` (was `com.LCSdev.silo`; the user's
+  other apps use `dev.cuang.*` too) and developer name Cuang (was CDev) in the app and the legal pages, with
+  `TERMS_VERSION` 2026-11-27. Android sees it as a new app: 1.3.11 can't update in place (no users yet).
+  - Publish its `version.json` **without** the `apk` field and with `url` = the download page, so 1.3.11 opens the
+    page instead of downloading an APK its package check rejects. Put `apk` back from 1.3.13 on.
+  - Also republish `docs/legal/` to /projects/silo/privacy/ and /terms/ (EN + ID), and update the download page text.
+  - Google Drive sign-in isn't set up yet; its Android OAuth client must now use `dev.cuang.silo`.
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
