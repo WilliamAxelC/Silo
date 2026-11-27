@@ -101,4 +101,19 @@ describe('update checks', () => {
     await useUpdateStore.getState().check({ force: true, fetchImpl: jest.fn(async () => ({ ok: false, json: async () => ({}) })) });
     expect(useUpdateStore.getState().lastCheckFailed).toBe(true);
   });
+
+  it('regression: a Google Play build never checks cuang.dev and never shows the update banner', async () => {
+    const Constants = require('expo-constants').default;
+    const before = Constants.expoConfig.extra;
+    Constants.expoConfig.extra = { distribution: 'play' };
+    try {
+      const fetchImpl = okFetch(manifest);
+      await useUpdateStore.getState().check({ force: true, fetchImpl });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      useUpdateStore.setState({ latest: { ...manifest, version: '9.0.0', versionCode: 99 } as any, dismissedVersionCode: 0 });
+      expect(selectShowUpdateBanner(useUpdateStore.getState())).toBe(false);
+    } finally {
+      Constants.expoConfig.extra = before;
+    }
+  });
 });

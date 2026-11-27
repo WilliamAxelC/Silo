@@ -72,12 +72,25 @@ interface MessageBubbleProps {
   message: Message;
   durationLabel: string | null;
   onLongPress: (text: string) => void;
+  /** Only for finished AI answers: opens the report form (Google Play's AI-generated content policy). */
+  onReport?: (message: Message) => void;
+}
+
+/** Prefill for reporting a Silo AI answer: the question and the answer, which the user can edit before sending. */
+export function buildAiReportPrefill(question: string | undefined, answer: string): { title: string; description: string } {
+  const q = (question ?? '').trim().slice(0, 600);
+  const a = answer.trim().slice(0, 2800);
+  return {
+    title: 'Silo AI answer',
+    description: `What's wrong with this answer: \n\n${q ? `Question:\n${q}\n\n` : ''}Answer:\n${a}`,
+  };
 }
 
 const MessageBubble = React.memo(function MessageBubble({
   message,
   durationLabel,
   onLongPress,
+  onReport,
 }: MessageBubbleProps) {
   const theme = useAppTheme();
   const markdownStyles = useMemo(
@@ -138,7 +151,24 @@ const MessageBubble = React.memo(function MessageBubble({
           </Text>
         )}
       </TouchableOpacity>
-      {durationLabel && <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text>}
+      {durationLabel || (onReport && message.role === 'ai' && message.status === 'complete' && message.text) ? (
+        <View style={styles.messageFooter}>
+          {durationLabel ? <Text style={[styles.durationText, { color: theme.textMuted }]}>{durationLabel}</Text> : <View />}
+          {onReport && message.role === 'ai' && message.status === 'complete' && message.text ? (
+            <TouchableOpacity
+              onPress={() => onReport(message)}
+              style={styles.reportAnswerBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Report this answer"
+              testID="report-ai-answer"
+            >
+              <Ionicons name="flag-outline" size={13} color={theme.textMuted} />
+              <Text style={[styles.durationText, styles.reportAnswerText, { color: theme.textMuted }]}>Report</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -235,6 +265,16 @@ export const ChatbotScreen = () => {
   useEffect(() => {
     void getModelLifecycleManager()?.ensureInitialized?.();
   }, []);
+
+  const handleReportAnswer = useCallback(
+    (answer: Message) => {
+      const history = useAIStore.getState().chatHistory;
+      const at = history.findIndex((m) => m === answer || (answer.id != null && m.id === answer.id));
+      const question = at > 0 ? [...history.slice(0, at)].reverse().find((m) => m.role === 'user')?.text : undefined;
+      navigation.navigate('Report', { kind: 'bug', ...buildAiReportPrefill(question, answer.text) });
+    },
+    [navigation]
+  );
 
   const handleCopyToClipboard = useCallback(async (text: string) => {
     await Clipboard.setStringAsync(text);
@@ -631,9 +671,16 @@ export const ChatbotScreen = () => {
           ? `${(measuredDuration / 1000).toFixed(measuredDuration >= 10000 ? 0 : 1)}s inference`
           : null;
 
-      return <MessageBubble message={item} durationLabel={durationLabel} onLongPress={handleCopyToClipboard} />;
+      return (
+        <MessageBubble
+          message={item}
+          durationLabel={durationLabel}
+          onLongPress={handleCopyToClipboard}
+          onReport={handleReportAnswer}
+        />
+      );
     },
-    [handleCopyToClipboard]
+    [handleCopyToClipboard, handleReportAnswer]
   );
 
   const showChatRuntimeGate = !canRunNativeChat || isPreparingChatRuntime || isBusyProvisioning;
@@ -1168,6 +1215,9 @@ const styles = StyleSheet.create({
   messageLoadingText: { marginLeft: 8, fontSize: 13 },
   messageMeta: { marginTop: 8, fontSize: 11, fontWeight: '600' },
   durationText: { fontSize: 10, marginTop: 4, marginLeft: 4 },
+  messageFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  reportAnswerBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 4, marginRight: 4, minHeight: 24 },
+  reportAnswerText: { marginLeft: 3, marginTop: 0 },
   inputArea: {
     flexDirection: 'row',
     alignItems: 'flex-end',

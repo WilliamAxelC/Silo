@@ -5,6 +5,16 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+### Added
+- Report a Silo AI answer: tap Report under any finished answer to open the report form with the question and answer
+  filled in. You can edit it, and nothing is sent until you tap Send.
+- A Google Play build (`SILO_DISTRIBUTION=play`): updates come from Google Play, so it never checks cuang.dev and
+  doesn't ask to install apps.
+
+### Changed
+- Privacy Policy and Terms (28 November 2026): they explain the Google Play version, and point to the new Settings
+  and More section names. Silo asks you to agree to the Terms again once.
+
 ## [1.3.13] - 2026-11-28
 ### Added
 - Tap the totals on Cashflow, or Net worth on Accounts, to hide them; tap again to show. Silo remembers the choice.

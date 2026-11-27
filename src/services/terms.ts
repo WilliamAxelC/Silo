@@ -6,7 +6,7 @@ import { expoDb } from '../db/index';
  * Terms of Service acceptance. Under Indonesian consumer law changed terms bind only once accepted, so the
  * app records which version the user agreed to and asks again when TERMS_VERSION changes.
  */
-export const TERMS_VERSION = '2026-11-27';
+export const TERMS_VERSION = '2026-11-28';
 export const TERMS_URL = 'https://cuang.dev/projects/silo/terms/';
 export const PRIVACY_URL = 'https://cuang.dev/projects/silo/privacy/';
 const KEY = 'termsAccepted';

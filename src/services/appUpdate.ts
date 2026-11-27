@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { expoDb } from '../db/index';
 import { recordError } from './errorLog';
 import { getInstalledVersion, useUpdateStore, type UpdateManifest } from './updates';
+import { isPlayBuild } from './distribution';
 
 /**
  * Android kills Silo's process when the user grants "Install unknown apps", so an update waiting for that
@@ -77,10 +78,11 @@ export const useAppUpdateStore = create<AppUpdateState>((set, get) => ({
   error: null,
   fileUri: null,
   sheet: null,
-  openSheet: (manifest) => set({ sheet: manifest }),
+  openSheet: (manifest) => set({ sheet: isPlayBuild() ? null : manifest }),
   closeSheet: () => set((s) => ({ sheet: null, ...(s.status === 'error' ? { status: 'idle' as const, error: null } : {}) })),
 
   start: async (manifest) => {
+    if (isPlayBuild()) return; // Play policy: apps from Google Play must not install their own updates.
     if (get().status === 'downloading' || get().status === 'verifying') return;
     const apk = manifest.apk;
     if (!apk || !native) {

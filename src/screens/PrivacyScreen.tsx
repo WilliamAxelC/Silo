@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NavigationProps } from '../navigation/types';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
+import { isPlayBuild } from '../services/distribution';
 
 /** Every network request Silo can make, in plain words. Keep in sync with the code that makes them. */
 export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: string; what: string; when: string }> = [
@@ -16,12 +17,19 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
     what: 'Your home currency code (for example IDR) to a public currency-rate service (jsDelivr / currency-api).',
     when: 'At most once a day, only if you use another currency.',
   },
-  {
-    icon: 'arrow-up-circle-outline',
-    title: 'Updates',
-    what: 'A small version file from cuang.dev, and the new Silo app file when you tap Update. Nothing about you is sent.',
-    when: 'The check runs at most once a day (turn off "Tell me about new versions" in More, App info); the download only when you tap Update.',
-  },
+  isPlayBuild()
+    ? {
+        icon: 'arrow-up-circle-outline',
+        title: 'Updates',
+        what: 'None from Silo. Google Play installs updates; Silo does not contact cuang.dev to check for them.',
+        when: 'Never.',
+      }
+    : {
+        icon: 'arrow-up-circle-outline',
+        title: 'Updates',
+        what: 'A small version file from cuang.dev, and the new Silo app file when you tap Update. Nothing about you is sent.',
+        when: 'The check runs at most once a day (turn off "Tell me about new versions" in More, About); the download only when you tap Update.',
+      },
   {
     icon: 'sparkles-outline',
     title: 'AI model download',
@@ -38,7 +46,7 @@ export const NETWORK_USES: Array<{ icon: keyof typeof Ionicons.glyphMap; title: 
     icon: 'logo-google',
     title: 'Google Drive (optional)',
     what: 'Your backups, and receipt photos you choose to move, go to a Silo folder in your own Google Drive. Silo can only see files it created there.',
-    when: 'Only after you connect Drive in Settings, Data & System. Disconnect any time.',
+    when: 'Only after you connect Drive in Settings, Backup & export. Disconnect any time.',
   },
   {
     icon: 'bug-outline',
@@ -105,7 +113,7 @@ export const PrivacyScreen = () => {
         ))}
 
         <Text style={[muted, styles.footer]}>
-          To remove everything Silo keeps on this phone, use Settings, Data & System, Erase All Data.
+          To remove everything Silo keeps on this phone, use Settings, Troubleshooting, Erase All Data.
         </Text>
         <View style={styles.links}>
           {[

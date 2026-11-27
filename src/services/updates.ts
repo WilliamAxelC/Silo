@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { create } from 'zustand';
 
 import { expoDb } from '../db/index';
+import { isPlayBuild } from './distribution';
 
 /** Published next to the APK on the download page. The test channel reads version-test.json. */
 export const UPDATE_MANIFEST_URL = 'https://cuang.dev/projects/silo/version.json';
@@ -176,7 +177,8 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
   channel: 'stable',
   lastCheckFailed: false,
   hydrate: () => {
-    const cache = readUpdateCache();
+    // Google Play builds get updates from Play only: never show a cuang.dev version.
+    const cache = isPlayBuild() ? null : readUpdateCache();
     set({
       latest: cache?.latest ?? null,
       checkedAt: cache?.checkedAt ?? null,
@@ -186,7 +188,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     });
   },
   check: async (options = {}) => {
-    if (get().checking) return;
+    if (isPlayBuild() || get().checking) return;
     if (!options.force && !get().enabled) return;
     set({ checking: true });
     const before = get().checkedAt;
@@ -203,6 +205,7 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
     set({ enabled });
   },
   setChannel: async (channel) => {
+    if (isPlayBuild()) return;
     writeSetting(CHANNEL_KEY, channel);
     writeSetting(CACHE_KEY, '');
     set({ channel, latest: null, checkedAt: null });
@@ -217,5 +220,6 @@ export const useUpdateStore = create<UpdateState>((set, get) => ({
 
 /** An update exists and the user has not dismissed the banner for this version. */
 export function selectShowUpdateBanner(state: Pick<UpdateState, 'latest' | 'installed' | 'dismissedVersionCode'>): boolean {
+  if (isPlayBuild()) return false;
   return isNewer(state.latest, state.installed) && (state.latest?.versionCode ?? 0) > state.dismissedVersionCode;
 }

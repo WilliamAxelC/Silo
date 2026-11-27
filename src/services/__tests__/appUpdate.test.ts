@@ -197,4 +197,21 @@ describe('package id', () => {
     expect(SILO_PACKAGE).toBe(appConfig.expo.android.package);
     expect(SILO_PACKAGE).toBe('dev.cuang.silo');
   });
+
+  it('regression: a Google Play build never downloads or installs an APK itself', async () => {
+    const Constants = require('expo-constants').default;
+    const before = Constants.expoConfig.extra;
+    Constants.expoConfig.extra = { distribution: 'play' };
+    try {
+      const native = fakeNative();
+      __setUpdateNativeForTests(native as any);
+      useAppUpdateStore.getState().openSheet(manifest);
+      expect(useAppUpdateStore.getState().sheet).toBeNull();
+      await useAppUpdateStore.getState().start(manifest);
+      expect(native.sha256File).not.toHaveBeenCalled();
+      expect(native.installApk).not.toHaveBeenCalled();
+    } finally {
+      Constants.expoConfig.extra = before;
+    }
+  });
 });

@@ -16,6 +16,12 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+let mockPlayBuild = false;
+jest.mock('../../services/distribution', () => ({
+  isPlayBuild: () => mockPlayBuild,
+  getDistribution: () => (mockPlayBuild ? 'play' : 'web'),
+}));
+
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
   return {
@@ -212,5 +218,29 @@ describe('MoreScreen (F-24, F-25, F-32, NIT-02)', () => {
     expect(renderer.root.findByProps({ accessibilityLabel: 'Receipt Inbox, 2 to review' })).toBeTruthy();
     useReceiptQueueStore.setState({ items: [] } as any);
     ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('regression: the Google Play build shows no cuang.dev update UI, only that Play handles updates', () => {
+    mockPlayBuild = true;
+    try {
+      useUpdateStore.setState({
+        installed: { version: '1.3.1', versionCode: 8 },
+        latest: { version: '1.4.0', versionCode: 9, url: 'https://cuang.dev/projects/silo/', notes: [] },
+      } as any);
+      let renderer: any;
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<MoreScreen />);
+      });
+      const texts = renderer.root.findAllByType(Text).map((t: any) => String(t.props.children ?? ''));
+      expect(texts).toContain('Updates come from Google Play');
+      expect(renderer.root.findAllByProps({ testID: 'update-card' })).toHaveLength(0);
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Check for updates' })).toHaveLength(0);
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Tell me about new versions' })).toHaveLength(0);
+      expect(renderer.root.findAllByProps({ accessibilityLabel: 'Open the Silo download page' })).toHaveLength(0);
+      expect(texts).toContain('Version');
+      ReactTestRenderer.act(() => renderer.unmount());
+    } finally {
+      mockPlayBuild = false;
+    }
   });
 });

@@ -46,8 +46,8 @@ export const ReportScreen = () => {
   const insets = useSafeInsets();
 
   const [kind, setKind] = useState<TicketKind>(route.params?.kind ?? 'bug');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [title, setTitle] = useState(() => String(route.params?.title ?? '').slice(0, 120));
+  const [description, setDescription] = useState(() => String(route.params?.description ?? '').slice(0, 4000));
   const [attachLog, setAttachLog] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [screenshot, setScreenshot] = useState<{ uri: string; base64: string } | null>(null);

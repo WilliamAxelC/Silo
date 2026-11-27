@@ -2,9 +2,10 @@ import React from 'react';
 import { Alert, Text } from 'react-native';
 
 const mockGoBack = jest.fn();
+let mockReportParams: Record<string, string> = { kind: 'bug' };
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ goBack: mockGoBack, navigate: jest.fn() }),
-  useRoute: () => ({ params: { kind: 'bug' } }),
+  useRoute: () => ({ params: mockReportParams }),
 }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
@@ -79,5 +80,21 @@ describe('ReportScreen', () => {
     expect(mockSubmit).not.toHaveBeenCalled();
     expect(r.root.findAllByType(Text).some((t: any) => textOf(t).includes('short title'))).toBe(true);
     ReactTestRenderer.act(() => r.unmount());
+  });
+
+  it('opens prefilled when reporting a Silo AI answer, and nothing is sent until the user taps Send', async () => {
+    mockReportParams = { kind: 'bug', title: 'Silo AI answer', description: "What's wrong with this answer: \n\nAnswer:\nSpend more" };
+    try {
+      let r: any;
+      ReactTestRenderer.act(() => {
+        r = ReactTestRenderer.create(<ReportScreen />);
+      });
+      expect(r.root.findByProps({ accessibilityLabel: 'Report title' }).props.value).toBe('Silo AI answer');
+      expect(r.root.findByProps({ accessibilityLabel: 'Report description' }).props.value).toContain('Spend more');
+      expect(mockSubmit).not.toHaveBeenCalled();
+      ReactTestRenderer.act(() => r.unmount());
+    } finally {
+      mockReportParams = { kind: 'bug' };
+    }
   });
 });

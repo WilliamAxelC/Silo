@@ -74,7 +74,7 @@
     <div>
       <a class="back" href="../">Silo</a>
       <h1>Privacy Policy</h1>
-      <p class="meta">Last updated: 27 November 2026</p>
+      <p class="meta">Last updated: 28 November 2026</p>
     </div>
   </header>
   <p class="note lang">An Indonesian version is available. If they differ, the Indonesian version applies. <a href="id/" hreflang="id" lang="id">Baca dalam bahasa Indonesia</a></p>
@@ -159,8 +159,9 @@
     <p>If you use more than one currency, Silo fetches exchange rates from the public currency-api service, served through jsDelivr and <code>currency-api.pages.dev</code>. It asks at most once a day, and only when a multi-currency feature needs it. Silo sends only your home currency code, for example "IDR".</p>
 
     <h3 id="online-updates">b. Update check and app updates</h3>
-    <p>At most once a day, Silo downloads a small version file from cuang.dev to see if a new version exists. You can turn this off with <strong>Tell me about new versions</strong> in <strong>More, App info</strong>.</p>
+    <p>This section is about Silo installed from cuang.dev. At most once a day, Silo downloads a small version file from cuang.dev to see if a new version exists. You can turn this off with <strong>Tell me about new versions</strong> in <strong>More, About</strong>.</p>
     <p>When you tap <strong>Update</strong>, Silo downloads the new app file (APK) from cuang.dev. Silo checks it against the published checksum, package name and version. Android installs it only if it is signed with the same key as the Silo you have. Nothing about you is sent beyond what any web request reveals.</p>
+    <p>If you install Silo from Google Play, Silo does not check cuang.dev or download updates itself. Google Play installs and updates it under Google's own privacy policy, and Google may give the developer anonymous crash and performance statistics (Android vitals) that Android collects. Silo does not send these itself.</p>
 
     <h3 id="online-model">c. AI model download</h3>
     <p>When you tap <strong>Download Model</strong>, Silo downloads the model files from Hugging Face. Nothing about your money is sent.</p>
@@ -212,7 +213,7 @@
 
     <h3 id="drive-revoke">How to disconnect</h3>
     <ul>
-      <li>In Silo, go to <strong>Settings, Data &amp; System</strong> and disconnect Google Drive. Silo revokes its access and forgets the account. <strong>Erase All Data</strong> also disconnects Google Drive.</li>
+      <li>In Silo, go to <strong>Settings, Backup &amp; export</strong> and disconnect Google Drive. Silo revokes its access and forgets the account. <strong>Erase All Data</strong> also disconnects Google Drive.</li>
       <li>You can also remove Silo's access in your Google Account at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
       <li>Files already in your Drive stay there after you disconnect, erase or uninstall. For receipt photos moved to Drive, Silo then shows only the preview until you connect the same account again. You can delete the files in Google Drive at any time.</li>
     </ul>
@@ -374,7 +375,7 @@
   <section class="card" id="delete">
     <h2>15. Deleting your data</h2>
     <ul>
-      <li><strong>Erase All Data.</strong> In <strong>Settings, Data &amp; System</strong>, <strong>Erase All Data</strong> deletes all records, photos, automatic backups, settings and saved API keys. It clears Silo's whole cache, including thumbnails, photos fetched from Drive, shared photos, update downloads and exports. It also disconnects Google Drive. Files in your Drive stay there. The downloaded AI model is kept, because it contains none of your data. To keep a copy first, use <strong>Back Up All Data</strong> or <strong>Share a backup first</strong>.</li>
+      <li><strong>Erase All Data.</strong> In <strong>Settings, Troubleshooting</strong>, <strong>Erase All Data</strong> deletes all records, photos, automatic backups, settings and saved API keys. It clears Silo's whole cache, including thumbnails, photos fetched from Drive, shared photos, update downloads and exports. It also disconnects Google Drive. Files in your Drive stay there. The downloaded AI model is kept, because it contains none of your data. To keep a copy first, use <strong>Back Up All Data</strong> or <strong>Share a backup first</strong>.</li>
       <li><strong>Uninstall.</strong> Uninstalling Silo deletes its data on the phone.</li>
       <li><strong>Your own copies.</strong> Backups you shared or exported, and files in your Google Drive, are under your control. Delete them where you stored them.</li>
       <li><strong>Bug reports.</strong> Email <a href="mailto:william@cuang.dev">william@cuang.dev</a> with your report number. We will tell you when it is deleted.</li>

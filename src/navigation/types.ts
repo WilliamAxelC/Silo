@@ -35,7 +35,8 @@ export type RootStackParamList = {
   AccountDetail: { walletId: number };
   Activity: undefined;
   Recurring: undefined;
-  Report: { kind?: 'bug' | 'feature' } | undefined;
+  /** `title` / `description` prefill the form (e.g. reporting a Silo AI answer); the user still edits and sends. */
+  Report: { kind?: 'bug' | 'feature'; title?: string; description?: string } | undefined;
   Privacy: undefined;
   Goals: undefined;
   SplitBills: undefined;

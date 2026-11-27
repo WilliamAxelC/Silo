@@ -13,6 +13,7 @@ import { useAppUpdateStore } from '../services/appUpdate';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
 import { DB_SCHEMA_VERSION } from '../db/index';
 import { useSplitsStore } from '../features/splits/store';
+import { isPlayBuild } from '../services/distribution';
 import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -97,10 +98,12 @@ export const MoreScreen = () => {
   const inboxItems = useReceiptQueueStore((s) => s.items);
   const inboxReady = inboxItems.filter((item) => item.status === 'done').length;
   const inboxBadge = inboxReady > 0 ? `${inboxReady} to review` : undefined;
+  const playBuild = isPlayBuild();
   const versionTaps = useRef<{ count: number; at: number }>({ count: 0, at: 0 });
 
   /** Seven quick taps on Version switch to (or from) the test channel: early builds from the test branch. */
   const onVersionTap = () => {
+    if (playBuild) return;
     const now = Date.now();
     const t = versionTaps.current;
     t.count = now - t.at < 1500 ? t.count + 1 : 1;
@@ -119,7 +122,7 @@ export const MoreScreen = () => {
       ]
     );
   };
-  const updateAvailable = isNewer(latest, installed);
+  const updateAvailable = !playBuild && isNewer(latest, installed);
   const updateStatus = checking
     ? 'Checking…'
     : lastCheckFailed
@@ -294,58 +297,75 @@ export const MoreScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          {updateAvailable ? null : (
+          {playBuild ? (
             <>
-              <View style={styles.infoBlock}>
-                <View style={styles.settingRowLeft}>
-                  <Ionicons name="checkmark-circle-outline" size={20} color={theme.primary} />
-                  <Text
-                    style={[styles.settingText, styles.flexText, { color: theme.text, fontSize: theme.scaleFont(14) }]}
-                    testID="update-status"
-                  >
-                    {updateStatus}
+              <View style={styles.menuRow} testID="play-updates">
+                <View style={[styles.settingRowLeft, styles.flexText]}>
+                  <Ionicons name="logo-google-playstore" size={20} color={theme.primary} />
+                  <Text style={[styles.settingText, styles.flexText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    Updates come from Google Play
                   </Text>
-                </View>
-                <View style={styles.infoButtons}>
-                  <TouchableOpacity
-                    style={[styles.infoBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
-                    onPress={() => void checkForUpdates({ force: true })}
-                    disabled={checking}
-                    accessibilityRole="button"
-                    accessibilityLabel="Check for updates"
-                  >
-                    {checking ? (
-                      <ActivityIndicator size="small" color={theme.primary} />
-                    ) : (
-                      <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Check now</Text>
-                    )}
-                  </TouchableOpacity>
                 </View>
               </View>
 
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
             </>
-          )}
+          ) : (
+            <>
+            {updateAvailable ? null : (
+              <>
+                <View style={styles.infoBlock}>
+                  <View style={styles.settingRowLeft}>
+                    <Ionicons name="checkmark-circle-outline" size={20} color={theme.primary} />
+                    <Text
+                      style={[styles.settingText, styles.flexText, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+                      testID="update-status"
+                    >
+                      {updateStatus}
+                    </Text>
+                  </View>
+                  <View style={styles.infoButtons}>
+                    <TouchableOpacity
+                      style={[styles.infoBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                      onPress={() => void checkForUpdates({ force: true })}
+                      disabled={checking}
+                      accessibilityRole="button"
+                      accessibilityLabel="Check for updates"
+                    >
+                      {checking ? (
+                        <ActivityIndicator size="small" color={theme.primary} />
+                      ) : (
+                        <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Check now</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
-          <View style={styles.menuRow}>
-            <View style={[styles.settingRowLeft, styles.flexText]}>
-              <Ionicons name="notifications-outline" size={20} color={theme.primary} />
-              <View style={styles.flexText}>
-                <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Tell me about new versions</Text>
-                <Text style={[styles.settingText, { color: theme.textMuted, fontSize: theme.scaleFont(11), fontWeight: '400' }]}>
-                  Once a day Silo reads a small file from cuang.dev. Nothing about you is sent.
-                </Text>
+                <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              </>
+            )}
+
+            <View style={styles.menuRow}>
+              <View style={[styles.settingRowLeft, styles.flexText]}>
+                <Ionicons name="notifications-outline" size={20} color={theme.primary} />
+                <View style={styles.flexText}>
+                  <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Tell me about new versions</Text>
+                  <Text style={[styles.settingText, { color: theme.textMuted, fontSize: theme.scaleFont(11), fontWeight: '400' }]}>
+                    Once a day Silo reads a small file from cuang.dev. Nothing about you is sent.
+                  </Text>
+                </View>
               </View>
+              <Switch
+                value={autoCheck}
+                onValueChange={setAutoCheck}
+                accessibilityLabel="Tell me about new versions"
+                trackColor={{ true: theme.primary, false: theme.border }}
+              />
             </View>
-            <Switch
-              value={autoCheck}
-              onValueChange={setAutoCheck}
-              accessibilityLabel="Tell me about new versions"
-              trackColor={{ true: theme.primary, false: theme.border }}
-            />
-          </View>
 
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            </>
+          )}
 
           <View style={styles.menuRow}>
             <View style={styles.settingRowLeft}>
@@ -357,20 +377,24 @@ export const MoreScreen = () => {
             </Text>
           </View>
 
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+          {playBuild ? null : (
+            <>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
-            accessibilityRole="link"
-            accessibilityLabel="Open the Silo download page"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="globe-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Download page</Text>
-            </View>
-            <Ionicons name="open-outline" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuRow}
+                onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
+                accessibilityRole="link"
+                accessibilityLabel="Open the Silo download page"
+              >
+                <View style={styles.settingRowLeft}>
+                  <Ionicons name="globe-outline" size={20} color={theme.primary} />
+                  <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Download page</Text>
+                </View>
+                <Ionicons name="open-outline" size={18} color={theme.textMuted} />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {__DEV__ ? (

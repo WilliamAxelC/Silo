@@ -519,4 +519,38 @@ describe('ChatbotScreen', () => {
       });
     }
   });
+
+  it('lets the user report a finished Silo AI answer, prefilled with the question and answer (Play AI content policy)', () => {
+    const { buildAiReportPrefill } = require('../ChatbotScreen');
+    expect(buildAiReportPrefill('How much on food?', 'Rp 50.000')).toEqual({
+      title: 'Silo AI answer',
+      description: "What's wrong with this answer: \n\nQuestion:\nHow much on food?\n\nAnswer:\nRp 50.000",
+    });
+    expect(buildAiReportPrefill(undefined, 'x'.repeat(5000)).description.length).toBeLessThan(3000);
+
+    useAIStore.setState({
+      chatHistory: [
+        { id: 'u1', role: 'user', text: 'How much on food?' },
+        { id: 'a1', role: 'ai', text: 'Rp 50.000', status: 'complete' },
+        { id: 'a2', role: 'ai', text: '', status: 'streaming' },
+      ] as any,
+    });
+    let renderer: any;
+    try {
+      ReactTestRenderer.act(() => {
+        renderer = ReactTestRenderer.create(<ChatbotScreen />);
+      });
+      const buttons = renderer.root.findAll((n: any) => n.props.testID === 'report-ai-answer' && n.props.onPress, { deep: false });
+      expect(buttons).toHaveLength(1);
+      ReactTestRenderer.act(() => buttons[0].props.onPress());
+      expect(mockNavigate).toHaveBeenCalledWith('Report', {
+        kind: 'bug',
+        title: 'Silo AI answer',
+        description: expect.stringContaining('Question:\nHow much on food?\n\nAnswer:\nRp 50.000'),
+      });
+    } finally {
+      ReactTestRenderer.act(() => renderer?.unmount());
+      useAIStore.setState({ chatHistory: [] } as any);
+    }
+  });
 });
