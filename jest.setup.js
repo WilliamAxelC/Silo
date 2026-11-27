@@ -52,8 +52,8 @@ jest.mock('expo-file-system', () => {
 
 // Mock expo-file-system/legacy
 jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///mock/data/user/0/com.LCSdev.silo/files/',
-  cacheDirectory: 'file:///mock/data/user/0/com.LCSdev.silo/cache/',
+  documentDirectory: 'file:///mock/data/user/0/dev.cuang.silo/files/',
+  cacheDirectory: 'file:///mock/data/user/0/dev.cuang.silo/cache/',
   EncodingType: { UTF8: 'utf8', Base64: 'base64' },
   getInfoAsync: jest.fn(async () => ({ exists: true, size: 1024 })),
   makeDirectoryAsync: jest.fn(async () => {}),

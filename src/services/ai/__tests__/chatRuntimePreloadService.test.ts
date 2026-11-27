@@ -78,7 +78,7 @@ describe('ChatRuntimePreloadService regression', () => {
     jest.clearAllMocks();
     jest.useRealTimers();
     Object.defineProperty(Platform, 'OS', { get: () => 'android', configurable: true });
-    fsMock.documentDirectory = 'file:///mock/data/user/0/com.LCSdev.silo/files/';
+    fsMock.documentDirectory = 'file:///mock/data/user/0/dev.cuang.silo/files/';
     fsMock.getInfoAsync.mockResolvedValue({
       exists: true,
       size: 1024,

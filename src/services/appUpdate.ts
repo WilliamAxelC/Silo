@@ -33,7 +33,7 @@ function getPending(): number {
  * version.json and that the file really is a newer Silo, then hand it to Android's package installer
  * (the user confirms there). Android never lets an app replace itself silently.
  */
-export const SILO_PACKAGE = 'com.LCSdev.silo';
+export const SILO_PACKAGE = 'dev.cuang.silo';
 
 interface UpdateNative {
   sha256File(uri: string): Promise<string>;

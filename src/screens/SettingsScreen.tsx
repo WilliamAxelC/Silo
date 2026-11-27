@@ -2402,7 +2402,7 @@ export const SettingsScreen = () => {
           <Text style={[styles.aboutVersion, { color: theme.textMuted, fontSize: theme.scaleFont(13) }]}>
             Version {appConfig.expo.version}
           </Text>
-          <Text style={[styles.aboutAuthor, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>Made by CDev</Text>
+          <Text style={[styles.aboutAuthor, { color: theme.primary, fontSize: theme.scaleFont(13) }]}>Made by Cuang</Text>
         </View>
       </ScrollView>
 

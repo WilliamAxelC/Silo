@@ -12,7 +12,7 @@ import { consumeTrustedSharedImage, takeSharedImages } from '../normalizeImage';
 // including Silo's own database. Only photos handed out by the native share path may be scanned.
 describe('shared image allowlist (regression)', () => {
   it('refuses a URI that did not come from the share sheet', () => {
-    expect(consumeTrustedSharedImage('file:///data/user/0/com.LCSdev.silo/files/SQLite/silo.db')).toBe(false);
+    expect(consumeTrustedSharedImage('file:///data/user/0/dev.cuang.silo/files/SQLite/silo.db')).toBe(false);
     expect(consumeTrustedSharedImage(undefined)).toBe(false);
   });
 

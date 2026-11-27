@@ -78,7 +78,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    fsMock.documentDirectory = 'file:///mock/data/user/0/com.LCSdev.silo/files/';
+    fsMock.documentDirectory = 'file:///mock/data/user/0/dev.cuang.silo/files/';
     fsMock.getFreeDiskStorageAsync = jest.fn(async () => 10 * 1024 * 1024 * 1024);
     fsMock.readAsStringAsync.mockRejectedValue(new Error('not found'));
     fsMock.getInfoAsync.mockResolvedValue({ exists: false, uri: '' });
@@ -113,7 +113,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('returns the canonical active model file URI', () => {
       expect(getActiveModelFileUri()).toBe(
-        'file:///mock/data/user/0/com.LCSdev.silo/files/ai/models/qwen3.5-2b/Qwen3.5-2B-Q4_K_M.gguf',
+        'file:///mock/data/user/0/dev.cuang.silo/files/ai/models/qwen3.5-2b/Qwen3.5-2B-Q4_K_M.gguf',
       );
     });
 
@@ -138,7 +138,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
   describe('A3 download verification (size + native MD5)', () => {
     it('verifies exact byte size and MD5 via getInfoAsync({ md5: true }) and records checksumVerified=true', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       let movedToActive = false;
 
       fsMock.moveAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
@@ -188,7 +188,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('deletes artifact, sets status=failed, and never installs on byte size mismatch', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
 
       fsMock.getInfoAsync.mockImplementation(async (path: string, opts?: { md5?: boolean }) => {
         if (path === tempUri) {
@@ -222,7 +222,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('deletes artifact, sets status=failed, and never installs on MD5 mismatch', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
 
       fsMock.getInfoAsync.mockImplementation(async (path: string, opts?: { md5?: boolean }) => {
         if (path === tempUri) {
@@ -256,7 +256,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('fails closed (never installs) when native MD5 is unavailable but expected', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       let movedToActive = false;
 
       fsMock.moveAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
@@ -336,7 +336,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('pause persists resumeData and keeps temp file', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
       const pauseAsync = jest.fn(async () => ({ resumeData: mockResumeData }));
       let resolveDownload!: (res: { uri: string } | undefined) => void;
@@ -384,7 +384,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('resume passes resumeData to createDownloadResumable and ends ready after verification', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
       let movedToActive = false;
 
@@ -459,7 +459,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('pause with failing pauseAsync falls back to cancel', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const cancelAsync = jest.fn(async () => {});
       const pauseAsync = jest.fn(async () => {
         throw new Error('Native pause error');
@@ -492,7 +492,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('cancel clears resumeData', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
 
       useAIStore.getState().replaceProvisioning({
@@ -525,7 +525,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('restores paused state with canResume=true on initialize after app restart', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
 
       fsMock.getInfoAsync.mockImplementation(async (path: string) => {
@@ -612,7 +612,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
         isInternetReachable: true,
       });
 
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const activeUri = getActiveModelFileUri();
       let movedToActive = false;
 
@@ -647,8 +647,8 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
   describe('Vision projector artifact (download/verify/delete)', () => {
     const PROJECTOR_SIZE = 668227264;
     const PROJECTOR_MD5 = 'bb3eddc16b7f19fd96b9eedf48a7248d';
-    const projectorUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/models/qwen3.5-2b/mmproj-F16.gguf';
-    const tempProjectorUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/mmproj-F16.gguf.part';
+    const projectorUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/models/qwen3.5-2b/mmproj-F16.gguf';
+    const tempProjectorUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/mmproj-F16.gguf.part';
 
     beforeEach(async () => {
       await cancelVisionProjectorDownload().catch(() => {});
@@ -990,7 +990,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('hydratePersistedState eagerly restores paused download without creating dirs, while initialize finishes deferred setup (R4-03)', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
 
       fsMock.getInfoAsync.mockImplementation(async (path: string) => {
@@ -1038,7 +1038,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
 
     it('retryProvisioning called before initialize() preserves and resumes a persisted paused download instead of deleting it (R4-03)', async () => {
       const activeUri = getActiveModelFileUri();
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":750000}';
       let movedToActive = false;
 
@@ -1105,7 +1105,7 @@ describe('modelLifecycle, catalog integrity, and download races', () => {
     });
 
     it('clears pendingDeferredRecovery on cancelDownload, pauseDownload fallback, and deleteInstalledModel before deferred initialize() runs (R4B-01)', async () => {
-      const tempUri = 'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+      const tempUri = 'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
       const mockResumeData = '{"url":"https://example.com/model.gguf","bytesWritten":500000}';
       let tempExists = true;
       let manifestText: string | null = JSON.stringify({

@@ -63,7 +63,7 @@ Summaries: https://fpf.org/blog/indonesias-personal-data-protection-bill-overvie
 
 | Requirement | How it is met |
 |---|---|
-| Art. 5: information on identity, legal basis, purpose. | PP `#who` (CDev as Pengendali Data Pribadi), `#legal-basis`, `#rights`. |
+| Art. 5: information on identity, legal basis, purpose. | PP `#who` (Cuang (formerly CDev) as Pengendali Data Pribadi), `#legal-basis`, `#rights`. |
 | Art. 20: six legal bases. | PP `#legal-basis` table. |
 | Art. 21(1): when relying on consent, state legality, purpose, type and relevance, retention, details collected, processing period, rights. | `#legal-basis`; `#reports-contents`, `#drive-access`, `#external-ai`; `#retention`, `#reports-keep`; `#rights`. |
 | Art. 21(2): notify before the information changes. | PP `#changes`: "Before a change takes effect, we will show it in the app and on this page." |

@@ -66,8 +66,8 @@
 - Publish: copy files to docker-host `/home/agent/orca/learnings/projects-cuang-dev/html/projects/silo/`, then
   `docker cp` into `projects-cuang-nginx:/usr/share/nginx/html/projects/silo/`; remove the old APK; verify the live sha.
 - Emulator share test (API 30): adb-pushed photos belong to another app and an adb grant can't open them. Temporarily
-  `pm grant com.LCSdev.silo android.permission.READ_EXTERNAL_STORAGE`, share with `am start -a android.intent.action.SEND
-  -t image/jpeg --eu android.intent.extra.STREAM content://media/external/images/media/<id> -n com.LCSdev.silo/.MainActivity`,
+  `pm grant dev.cuang.silo android.permission.READ_EXTERNAL_STORAGE`, share with `am start -a android.intent.action.SEND
+  -t image/jpeg --eu android.intent.extra.STREAM content://media/external/images/media/<id> -n dev.cuang.silo/.MainActivity`,
   then revoke it and delete the photo.
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 

@@ -31,7 +31,7 @@ const EXPECTED_SIZE = 1280835840;
 const EXPECTED_MD5 = '6899b2510c7b0c480730d48c3117bd32';
 const EXPECTED_SHA256 = 'aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223';
 const TEMP_URI =
-  'file:///mock/data/user/0/com.LCSdev.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
+  'file:///mock/data/user/0/dev.cuang.silo/files/ai/tmp/Qwen3.5-2B-Q4_K_M.gguf.part';
 
 /** Stands in for the Android download service: records calls and lets a test send its events. */
 function createFakeNative() {
@@ -285,7 +285,7 @@ describe('model lifecycle with the Android download service', () => {
     jest.clearAllMocks();
     fake = createFakeNative();
     setModelDownloadNativeForTests(fake.native);
-    fsMock.documentDirectory = 'file:///mock/data/user/0/com.LCSdev.silo/files/';
+    fsMock.documentDirectory = 'file:///mock/data/user/0/dev.cuang.silo/files/';
     fsMock.getFreeDiskStorageAsync = jest.fn(async () => 10 * 1024 * 1024 * 1024);
     fsMock.readAsStringAsync.mockRejectedValue(new Error('not found'));
     fsMock.getInfoAsync.mockResolvedValue({ exists: false, uri: '' });

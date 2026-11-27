@@ -34,7 +34,7 @@ jest.mock('expo-file-system/legacy', () => ({
   })),
 }));
 
-import { __setUpdateNativeForTests, cleanUpInstalledUpdates, resumePendingUpdate, useAppUpdateStore } from '../appUpdate';
+import { __setUpdateNativeForTests, cleanUpInstalledUpdates, resumePendingUpdate, SILO_PACKAGE, useAppUpdateStore } from '../appUpdate';
 import { useUpdateStore } from '../updates';
 import { parseApk, parseManifest } from '../updates';
 
@@ -51,7 +51,7 @@ function fakeNative(over: Partial<Record<string, any>> = {}) {
     sha256File: jest.fn(async () => SHA),
     canInstallPackages: jest.fn(() => true),
     openInstallPermissionSettings: jest.fn(() => true),
-    inspectApk: jest.fn(() => ({ packageName: 'com.LCSdev.silo', versionCode: 11, versionName: '1.3.4' })),
+    inspectApk: jest.fn(() => ({ packageName: 'dev.cuang.silo', versionCode: 11, versionName: '1.3.4' })),
     installApk: jest.fn(() => true),
     ...over,
   };
@@ -97,7 +97,7 @@ describe('in-app update', () => {
   });
 
   it('refuses an APK that is not Silo or not the announced version', async () => {
-    for (const info of [{ packageName: 'com.evil.app', versionCode: 11 }, { packageName: 'com.LCSdev.silo', versionCode: 9 }, null]) {
+    for (const info of [{ packageName: 'com.evil.app', versionCode: 11 }, { packageName: 'dev.cuang.silo', versionCode: 9 }, null]) {
       const native = fakeNative({ inspectApk: jest.fn(() => info) });
       __setUpdateNativeForTests(native as any);
       await useAppUpdateStore.getState().start(manifest);
@@ -188,5 +188,13 @@ describe('in-app update', () => {
     __setUpdateNativeForTests(fakeNative() as any);
     expect(await resumePendingUpdate()).toBe(false);
     expect(mockSettings.has('pendingUpdateInstall')).toBe(false);
+  });
+});
+
+describe('package id', () => {
+  it('the updater only installs APKs with the package id the app is built with', () => {
+    const appConfig = jest.requireActual('../../../app.json');
+    expect(SILO_PACKAGE).toBe(appConfig.expo.android.package);
+    expect(SILO_PACKAGE).toBe('dev.cuang.silo');
   });
 });

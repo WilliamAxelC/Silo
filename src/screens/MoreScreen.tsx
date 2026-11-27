@@ -441,7 +441,7 @@ export const MoreScreen = () => {
         </View>
 
         <View style={styles.footerWrap}>
-          <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by CDev</Text>
+          <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by Cuang</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
