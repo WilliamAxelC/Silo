@@ -3,17 +3,13 @@
 //   android:exported="true" with no permission, so any app on the phone could start it inside Silo's
 //   process with its own source/output URIs. Silo never crops (no allowsEditing), and expo-image-picker
 //   starts it with an explicit in-app intent, which still works when it is not exported.
-// - expo.modules.clipboard.ClipboardFileProvider is exported so other apps can read images copied to the
-//   clipboard. Silo only copies text.
+// Do NOT add expo.modules.clipboard.ClipboardFileProvider: its attachInfo() throws "must be exported" and Silo
+// crashes at launch (seen on the emulator, 2026-11-28). It only serves cache/.clipboard/, which Silo never
+// writes (text-only clipboard), so leaving it exported exposes nothing.
 const { withAndroidManifest } = require('expo/config-plugins');
 
 const UNEXPORT = [
   { kind: 'activity', name: 'com.canhub.cropper.CropImageActivity' },
-  {
-    kind: 'provider',
-    name: 'expo.modules.clipboard.ClipboardFileProvider',
-    extra: { 'android:authorities': '${applicationId}.ClipboardFileProvider' },
-  },
 ];
 
 function applyHardening(manifest) {

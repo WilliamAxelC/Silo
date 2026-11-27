@@ -8,18 +8,15 @@ describe('withAndroidComponentHardening (security review 2026-11-28)', () => {
     },
   });
 
-  it('regression: the cropper activity and clipboard provider are not exported, and MainActivity is untouched', () => {
+  it('regression: the cropper activity is not exported, the clipboard provider is left alone, MainActivity is untouched', () => {
     const out = plugin.applyHardening(base());
     const app = out.manifest.application[0];
     expect(out.manifest.$['xmlns:tools']).toBe('http://schemas.android.com/tools');
     const cropper = app.activity.find((a: any) => a.$['android:name'] === 'com.canhub.cropper.CropImageActivity');
     expect(cropper.$).toMatchObject({ 'android:exported': 'false', 'tools:replace': 'android:exported' });
-    const clip = app.provider.find((p: any) => p.$['android:name'] === 'expo.modules.clipboard.ClipboardFileProvider');
-    expect(clip.$).toMatchObject({
-      'android:exported': 'false',
-      'tools:replace': 'android:exported',
-      'android:authorities': '${applicationId}.ClipboardFileProvider',
-    });
+    // expo-clipboard asserts its provider is exported and crashes Silo at launch otherwise.
+    expect(plugin.UNEXPORT.map((c: any) => c.name)).not.toContain('expo.modules.clipboard.ClipboardFileProvider');
+    expect(app.provider).toBeUndefined();
     expect(app.activity.find((a: any) => a.$['android:name'] === '.MainActivity').$['android:exported']).toBe('true');
   });
 
