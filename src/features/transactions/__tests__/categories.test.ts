@@ -158,6 +158,7 @@ describe('categories utilities', () => {
         { key: APP_SETTING_KEYS.useThousandsSeparator, value: 'false' },
         { key: APP_SETTING_KEYS.dateFormat, value: 'yyyy/MM/dd' },
         { key: APP_SETTING_KEYS.showIncomeInReportsFirst, value: 'true' },
+        { key: APP_SETTING_KEYS.hideTotals, value: 'true' },
         { key: APP_SETTING_KEYS.fontScale, value: '1.2' },
         { key: APP_SETTING_KEYS.aiInferenceMode, value: 'external' },
         { key: APP_SETTING_KEYS.activeModelId, value: 'qwen3.5-0.5b' },
@@ -172,6 +173,8 @@ describe('categories utilities', () => {
       ];
 
       const parsed = parseSettingsRows(rows);
+      expect(parsed.hideTotals).toBe(true);
+      expect(parseSettingsRows([]).hideTotals).toBe(false);
       expect(parsed.themeMode).toBe('dark');
       expect(parsed.currencyCode).toBe('USD');
       expect(parsed.useThousandsSeparator).toBe(false);

@@ -24,7 +24,7 @@ import { useAppUpdateStore } from '../services/appUpdate';
 import { useTermsStore } from '../services/terms';
 import { ActiveFilterChips, IconToggle, ListToolbar } from '../components/ListToolbar';
 import { countActiveFilters, type DateRangePreset, type TransactionFilters } from '../features/transactions/filters';
-import { addAmounts, formatDisplayCurrency, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
+import { addAmounts, formatDisplayCurrency, HIDDEN_TOTAL, summarizeTransactions, type TransactionFilterSummary } from '../features/transactions/amount';
 import {
   formatCachedLocaleDate,
   formatPeriodLabel,
@@ -328,6 +328,8 @@ export const CashflowScreen = () => {
 
   const currencyCode = useSettingsStore((state) => state.currencyCode);
   const useThousandsSeparator = useSettingsStore((state) => state.useThousandsSeparator);
+  const hideTotals = useSettingsStore((state) => state.hideTotals);
+  const setHideTotals = useSettingsStore((state) => state.setHideTotals);
   const dateFormat = useSettingsStore((state) => state.dateFormat);
   const monthStartDay = useSettingsStore((state) => state.monthStartDay);
   const weekStartDay = useSettingsStore((state) => state.weekStartDay);
@@ -500,8 +502,19 @@ export const CashflowScreen = () => {
     updateCurrentDate(new Date(), false);
   };
 
+  const totalText = (value: number) =>
+    hideTotals ? HIDDEN_TOTAL : formatDisplayCurrency(value || 0, currencyCode, useThousandsSeparator);
+
   const renderSummaryCard = (incomeVal: number, expenseVal: number, balanceVal: number) => (
-    <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <TouchableOpacity
+      testID="cashflow-totals"
+      activeOpacity={0.7}
+      onPress={() => void setHideTotals(!hideTotals)}
+      accessibilityRole="button"
+      accessibilityLabel={hideTotals ? 'Totals hidden. Tap to show.' : undefined}
+      accessibilityHint={hideTotals ? undefined : 'Tap to hide the totals'}
+      style={[styles.summaryCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+    >
       <View style={styles.summaryCol}>
         <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}>Income</Text>
         <Text
@@ -509,7 +522,7 @@ export const CashflowScreen = () => {
           numberOfLines={1}
           adjustsFontSizeToFit
         >
-          {formatDisplayCurrency(incomeVal || 0, currencyCode, useThousandsSeparator)}
+          {totalText(incomeVal)}
         </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
@@ -520,7 +533,7 @@ export const CashflowScreen = () => {
           numberOfLines={1}
           adjustsFontSizeToFit
         >
-          {formatDisplayCurrency(expenseVal || 0, currencyCode, useThousandsSeparator)}
+          {totalText(expenseVal)}
         </Text>
       </View>
       <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
@@ -534,10 +547,10 @@ export const CashflowScreen = () => {
           numberOfLines={1}
           adjustsFontSizeToFit
         >
-          {formatDisplayCurrency(balanceVal || 0, currencyCode, useThousandsSeparator)}
+          {totalText(balanceVal)}
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const walletNames = useMemo(() => new Map(wallets.map((w) => [w.id, w.name])), [wallets]);
@@ -704,7 +717,7 @@ export const CashflowScreen = () => {
   const monthlyHeaderElement = useMemo(
     () => renderSummaryCard(totalIncome, totalExpense, balance),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [totalIncome, totalExpense, balance, currencyCode, useThousandsSeparator, theme]
+    [totalIncome, totalExpense, balance, currencyCode, useThousandsSeparator, theme, hideTotals]
   );
 
   const searchSummaryHeaderElement = useMemo(

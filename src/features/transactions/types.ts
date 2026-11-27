@@ -93,6 +93,7 @@ export interface AppSettings {
   useThousandsSeparator: boolean;
   dateFormat: string;
   showIncomeInReportsFirst: boolean;
+  hideTotals: boolean;
   fontScale: number;
   aiInferenceMode: AIInferenceMode;
   activeModelId: string;

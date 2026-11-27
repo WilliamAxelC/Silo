@@ -160,4 +160,32 @@ describe('AccountsScreen (F-18, F-25)', () => {
 
     ReactTestRenderer.act(() => renderer.unmount());
   });
+
+  it('hides and shows net worth with one tap, sharing the hide-totals choice with Cashflow', () => {
+    useSettingsStore.setState({ hideTotals: false } as any);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(withInsets(<AccountsScreen />));
+    });
+    const summaryTexts = () =>
+      renderer.root
+        .findByProps({ testID: 'networth-totals' })
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+
+    expect(summaryTexts().some((t: string) => t.includes('650.000'))).toBe(true);
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ testID: 'networth-totals' }).props.onPress();
+    });
+    expect(useSettingsStore.getState().hideTotals).toBe(true);
+    expect(summaryTexts().some((t: string) => /\d{3}\.\d{3}/.test(t))).toBe(false);
+    expect(summaryTexts()).toContain('••••••');
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ testID: 'networth-totals' }).props.onPress();
+    });
+    expect(summaryTexts().some((t: string) => t.includes('650.000'))).toBe(true);
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });

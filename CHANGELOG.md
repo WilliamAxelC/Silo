@@ -5,6 +5,9 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+### Added
+- Tap the totals on Cashflow, or Net worth on Accounts, to hide them; tap again to show. Silo remembers the choice.
+
 ## [1.3.12] - 2026-11-27
 ### Changed
 - Silo's Android package id is now `dev.cuang.silo` (was `com.LCSdev.silo`). Android treats it as a new app: 1.3.11

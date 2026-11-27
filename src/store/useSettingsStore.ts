@@ -24,6 +24,7 @@ interface SettingsState extends AppSettings {
   setUseThousandsSeparator: (enabled: boolean) => Promise<void>;
   setDateFormat: (dateFormat: string) => Promise<void>;
   setShowIncomeInReportsFirst: (enabled: boolean) => Promise<void>;
+  setHideTotals: (hidden: boolean) => Promise<void>;
   setFontScale: (fontScale: number) => Promise<void>;
   setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
   setActiveModelId: (modelId: string) => Promise<void>;
@@ -305,6 +306,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShowIncomeInReportsFirst: async (showIncomeInReportsFirst) => {
     await saveSetting('showIncomeInReportsFirst', showIncomeInReportsFirst);
     set({ showIncomeInReportsFirst });
+  },
+
+  // Flip the screen first so one tap hides the totals instantly, then persist.
+  // A failed save only means the choice is forgotten on restart, so it never throws.
+  setHideTotals: async (hideTotals) => {
+    set({ hideTotals });
+    try {
+      await saveSetting('hideTotals', hideTotals);
+    } catch (error) {
+      console.warn('[Settings] Could not save hideTotals', error);
+    }
   },
 
   setFontScale: async (fontScale) => {

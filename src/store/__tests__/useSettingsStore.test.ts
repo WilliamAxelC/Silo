@@ -268,6 +268,18 @@ describe('useSettingsStore', () => {
       expect(useSettingsStore.getState().dateFormat).toBe('dd.MM.yyyy');
     });
 
+    it('hides totals immediately and keeps them hidden if saving fails', async () => {
+      (db.insert as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      await expect(useSettingsStore.getState().setHideTotals(true)).resolves.toBeUndefined();
+      expect(useSettingsStore.getState().hideTotals).toBe(true);
+      warn.mockRestore();
+      await useSettingsStore.getState().setHideTotals(false);
+      expect(useSettingsStore.getState().hideTotals).toBe(false);
+    });
+
     it('updates showIncomeInReportsFirst', async () => {
       await useSettingsStore.getState().setShowIncomeInReportsFirst(true);
       expect(useSettingsStore.getState().showIncomeInReportsFirst).toBe(true);

@@ -22,6 +22,7 @@ import {
   formatAmountForInput,
   formatAmountInput,
   formatDisplayCurrency,
+  HIDDEN_TOTAL,
   isAmountWithinRange,
   parseSignedAmount,
 } from '../features/transactions/amount';
@@ -50,6 +51,8 @@ export const AccountsScreen = () => {
   const insets = useSafeInsets();
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousands = useSettingsStore((s) => s.useThousandsSeparator);
+  const hideTotals = useSettingsStore((s) => s.hideTotals);
+  const setHideTotals = useSettingsStore((s) => s.setHideTotals);
   const wallets = useTransactionStore((s) => s.wallets);
   const transactionsList = useTransactionStore((s) => s.transactionsList);
   const { addWallet, updateWallet, removeWallet } = useTransactionStore.getState();
@@ -98,6 +101,7 @@ export const AccountsScreen = () => {
     [archived, currencyCode, ratesVersion]
   );
   const money = (n: number, code: string = currencyCode) => formatDisplayCurrency(n, code, useThousands);
+  const total = (n: number) => (hideTotals ? HIDDEN_TOTAL : money(n));
   const emptyDraft: Draft = { id: null, name: '', type: 'bank', openingBalance: '', openingNegative: false, currency: currencyCode };
   const draftCurrency = draft?.currency ?? currencyCode;
   const pickDraftCurrency = (code: string) =>
@@ -256,7 +260,15 @@ export const AccountsScreen = () => {
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: getBottomInsetPadding(insets.bottom, 40) }]}
       >
-        <View style={[styles.summary, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <TouchableOpacity
+          testID="networth-totals"
+          activeOpacity={0.7}
+          onPress={() => void setHideTotals(!hideTotals)}
+          accessibilityRole="button"
+          accessibilityLabel={hideTotals ? 'Net worth hidden. Tap to show.' : undefined}
+          accessibilityHint={hideTotals ? undefined : 'Tap to hide the totals'}
+          style={[styles.summary, { backgroundColor: theme.surface, borderColor: theme.border }]}
+        >
           <Text style={[styles.summaryLabel, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
             Net worth
           </Text>
@@ -266,14 +278,14 @@ export const AccountsScreen = () => {
               { color: netWorth < 0 ? theme.expense : theme.text, fontSize: theme.scaleFont(26) },
             ]}
           >
-            {money(netWorth)}
+            {total(netWorth)}
           </Text>
           <View style={styles.summaryRow}>
             <Text style={[styles.summarySub, { color: theme.income, fontSize: theme.scaleFont(12) }]}>
-              Assets {money(assets)}
+              Assets {total(assets)}
             </Text>
             <Text style={[styles.summarySub, { color: theme.expense, fontSize: theme.scaleFont(12) }]}>
-              Debts {money(debts)}
+              Debts {total(debts)}
             </Text>
           </View>
           {archived.length > 0 ? (
@@ -281,7 +293,7 @@ export const AccountsScreen = () => {
               testID="archived-networth-note"
               style={[styles.summaryFootnote, { color: theme.textMuted, fontSize: theme.scaleFont(11) }]}
             >
-              Active accounts only{archivedNet !== 0 ? ` · Archived: ${money(archivedNet)}` : ''}
+              Active accounts only{archivedNet !== 0 ? ` · Archived: ${total(archivedNet)}` : ''}
             </Text>
           ) : null}
           {unpriced > 0 ? (
@@ -289,7 +301,7 @@ export const AccountsScreen = () => {
               {unpriced} foreign account{unpriced === 1 ? '' : 's'} left out until an exchange rate is available
             </Text>
           ) : null}
-        </View>
+        </TouchableOpacity>
 
         {active.map(renderWallet)}
 

@@ -102,6 +102,7 @@ export function getInitialAppSettings(): AppSettings {
     useThousandsSeparator: DEFAULT_APP_SETTINGS.useThousandsSeparator,
     dateFormat: DEFAULT_APP_SETTINGS.dateFormat,
     showIncomeInReportsFirst: DEFAULT_APP_SETTINGS.showIncomeInReportsFirst,
+    hideTotals: DEFAULT_APP_SETTINGS.hideTotals,
     fontScale: DEFAULT_APP_SETTINGS.fontScale,
     aiInferenceMode: DEFAULT_APP_SETTINGS.aiInferenceMode,
     activeModelId: DEFAULT_APP_SETTINGS.activeModelId,
@@ -144,6 +145,9 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.showIncomeInReportsFirst:
         base.showIncomeInReportsFirst = row.value === 'true';
+        break;
+      case APP_SETTING_KEYS.hideTotals:
+        base.hideTotals = row.value === 'true';
         break;
       case APP_SETTING_KEYS.fontScale: {
         const nextScale = Number(row.value);

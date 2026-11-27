@@ -717,3 +717,6 @@ export function summarizeTransactions(
     net: addAmounts(totalIn, -totalOut),
   };
 }
+
+/** Shown in place of a total while the user has tapped it hidden (the hideTotals setting). */
+export const HIDDEN_TOTAL = '••••••';

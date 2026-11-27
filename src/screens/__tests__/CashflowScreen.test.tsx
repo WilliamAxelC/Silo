@@ -713,4 +713,37 @@ describe('CashflowScreen', () => {
     expect(renderer.root.findAllByProps({ testID: 'split-status-paid' }).length).toBeGreaterThan(0);
     ReactTestRenderer.act(() => renderer.unmount());
   });
+
+  it('hides and shows the month totals with one tap on the totals card, and remembers the choice', () => {
+    useSettingsStore.setState({ hideTotals: false, isLoaded: true } as any);
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<CashflowScreen />);
+    });
+    const cardTexts = () =>
+      renderer.root
+        .findByProps({ testID: 'cashflow-totals' })
+        .findAllByType(Text)
+        .map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+
+    expect(cardTexts().some((t: string) => t.includes('25.000'))).toBe(true);
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ testID: 'cashflow-totals' }).props.onPress();
+    });
+    expect(useSettingsStore.getState().hideTotals).toBe(true);
+    expect(cardTexts().some((t: string) => t.includes('25.000'))).toBe(false);
+    expect(cardTexts().filter((t: string) => t === '••••••')).toHaveLength(3);
+    expect(renderer.root.findByProps({ testID: 'cashflow-totals' }).props.accessibilityLabel).toBe('Totals hidden. Tap to show.');
+    // Transactions in the list stay readable; only the totals are hidden.
+    const allTexts = renderer.root.findAllByType(Text).map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));
+    expect(allTexts.some((t: string) => t.includes('25.000'))).toBe(true);
+
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ testID: 'cashflow-totals' }).props.onPress();
+    });
+    expect(useSettingsStore.getState().hideTotals).toBe(false);
+    expect(cardTexts().some((t: string) => t.includes('25.000'))).toBe(true);
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
 });
