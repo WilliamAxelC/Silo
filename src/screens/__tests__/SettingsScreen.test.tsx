@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text } from 'react-native';
 import { File } from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import * as DocumentPicker from 'expo-document-picker';
@@ -46,11 +46,13 @@ jest.mock('../../db/index', () => ({
   },
 }));
 
+const mockRouteParams: { section?: string } = {};
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: jest.fn(),
     goBack: jest.fn(),
   }),
+  useRoute: () => ({ params: mockRouteParams }),
 }));
 
 jest.mock('react-native-safe-area-context', () => {
@@ -1312,6 +1314,70 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     }
   });
 
+  it('groups Settings with the everyday choices first and Erase All Data last', async () => {
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+    const scroll = renderer.root.findByType(ScrollView);
+    const titles = scroll
+      .findAllByType(Text)
+      .map((t: any) => t.props.children)
+      .filter((c: any) => typeof c === 'string' && /^[A-Z &]{4,}$/.test(c) && c !== 'EXPENSE' && c !== 'INCOME');
+    expect(titles).toEqual([
+      'GENERAL',
+      'DISPLAY',
+      'PRIVACY & SECURITY',
+      'REMINDERS',
+      'BACKUP & EXPORT',
+      'CATEGORIES',
+      'AI & RECEIPT SCANNING',
+      'TROUBLESHOOTING',
+      'ABOUT',
+    ]);
+    const labels = scroll.findAll((n: any) => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityRole)
+      .map((n: any) => n.props.accessibilityLabel);
+    const actionable = [...new Set(labels)];
+    expect(actionable.indexOf('Erase all data')).toBe(
+      Math.max(...['Erase all data', 'System Logs & Diagnostics', 'Back Up All Data'].map((l) => actionable.indexOf(l)))
+    );
+  });
+
+  it('has a Hide totals switch that shares the one-tap setting', async () => {
+    useSettingsStore.setState({ hideTotals: false } as any);
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+    const sw = renderer.root.findAllByType(Switch).find((n: any) => n.props.accessibilityLabel === 'Hide totals');
+    expect(sw.props.value).toBe(false);
+    await ReactTestRenderer.act(async () => {
+      sw.props.onValueChange(true);
+    });
+    expect(useSettingsStore.getState().hideTotals).toBe(true);
+  });
+
+  it('opens scrolled to the group another screen asked for', async () => {
+    mockRouteParams.section = 'backup';
+    try {
+      await ReactTestRenderer.act(async () => {
+        renderer = ReactTestRenderer.create(<SettingsScreen />);
+      });
+      const scroll = renderer.root.findByType(ScrollView);
+      const scrollTo = jest.fn();
+      scroll.instance.scrollTo = scrollTo;
+      const title = scroll.findAllByType(Text).find((t: any) => t.props.children === 'BACKUP & EXPORT');
+      const other = scroll.findAllByType(Text).find((t: any) => t.props.children === 'AI & RECEIPT SCANNING');
+      ReactTestRenderer.act(() => {
+        other.props.onLayout({ nativeEvent: { layout: { x: 0, y: 2400, width: 300, height: 20 } } });
+        title.props.onLayout({ nativeEvent: { layout: { x: 0, y: 1200, width: 300, height: 20 } } });
+        title.props.onLayout({ nativeEvent: { layout: { x: 0, y: 1300, width: 300, height: 20 } } });
+      });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo).toHaveBeenCalledWith({ y: 1192, animated: false });
+    } finally {
+      delete mockRouteParams.section;
+    }
+  });
+
   it('imports SettingsScreen without loading expo-notifications at startup when native module is missing (R2B-1)', () => {
     const originalNotificationsMock = Notifications;
     const throwingFactory = jest.fn(() => {
@@ -1329,4 +1395,5 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
       jest.doMock('expo-notifications', () => originalNotificationsMock);
     }
   });
+
 });

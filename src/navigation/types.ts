@@ -40,9 +40,12 @@ export type RootStackParamList = {
   Goals: undefined;
   SplitBills: undefined;
   SplitBillEditor: { transactionId: number };
-  Settings: undefined;
+  /** `section` scrolls Settings to that group on open. */
+  Settings: { section?: SettingsSection } | undefined;
   SystemLogs: undefined;
 };
+
+export type SettingsSection = 'privacy' | 'backup' | 'ai';
 
 export type NavigationProps = CompositeNavigationProp<
   BottomTabNavigationProp<RootTabParamList>,

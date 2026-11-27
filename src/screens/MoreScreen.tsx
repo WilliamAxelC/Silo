@@ -13,6 +13,61 @@ import { useAppUpdateStore } from '../services/appUpdate';
 import { formatCachedLocaleDate } from '../features/transactions/periods';
 import { DB_SCHEMA_VERSION } from '../db/index';
 import { useSplitsStore } from '../features/splits/store';
+import { useReceiptQueueStore } from '../store/useReceiptQueueStore';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+/** A titled card on More. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const theme = useAppTheme();
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>{title}</Text>
+      <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>{children}</View>
+    </>
+  );
+}
+
+/** One tappable row that opens a screen; `last` drops the divider under it. */
+function MenuRow({
+  icon,
+  label,
+  onPress,
+  badge,
+  accessibilityLabel,
+  last,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  badge?: string;
+  accessibilityLabel?: string;
+  last?: boolean;
+}) {
+  const theme = useAppTheme();
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.menuRow}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? (badge ? `${label}, ${badge}` : label)}
+      >
+        <View style={[styles.settingRowLeft, styles.flexText]}>
+          <Ionicons name={icon} size={20} color={theme.primary} />
+          <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>{label}</Text>
+        </View>
+        <View style={styles.menuRowRight}>
+          {badge ? (
+            <Text style={[styles.badgeText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>{badge}</Text>
+          ) : null}
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </View>
+      </TouchableOpacity>
+      {last ? null : <View style={[styles.divider, { backgroundColor: theme.border }]} />}
+    </>
+  );
+}
 
 export const MoreScreen = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -39,6 +94,9 @@ export const MoreScreen = () => {
     ensureSplitsLoaded();
   }, [ensureSplitsLoaded]);
   const unpaidSplitCount = splits.filter((s) => !s.isSettled).length;
+  const inboxItems = useReceiptQueueStore((s) => s.items);
+  const inboxReady = inboxItems.filter((item) => item.status === 'done').length;
+  const inboxBadge = inboxReady > 0 ? `${inboxReady} to review` : undefined;
   const versionTaps = useRef<{ count: number; at: number }>({ count: 0, at: 0 });
 
   /** Seven quick taps on Version switch to (or from) the test channel: early builds from the test branch. */
@@ -96,6 +154,62 @@ export const MoreScreen = () => {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {updateAvailable && latest ? (
+          <View
+            style={[styles.updateCard, { backgroundColor: theme.surface, borderColor: theme.income }]}
+            testID="update-card"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="arrow-up-circle" size={22} color={theme.income} />
+              <Text
+                style={[styles.settingText, styles.flexText, { color: theme.text, fontWeight: '700', fontSize: theme.scaleFont(15) }]}
+                testID="update-status"
+              >
+                {updateStatus}
+              </Text>
+            </View>
+            {latest.notes?.length ? (
+              <Text style={[styles.notesText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
+                {latest.notes.map((n) => `• ${n}`).join('\n')}
+              </Text>
+            ) : null}
+            <View style={styles.infoButtons}>
+              <TouchableOpacity
+                style={[styles.infoBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}
+                onPress={() => openUpdateSheet(latest)}
+                accessibilityRole="button"
+                accessibilityLabel={`Update to Silo ${latest.version}`}
+              >
+                <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Update</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
+        <Section title="Money">
+          <MenuRow icon="wallet-outline" label="Accounts" onPress={() => navigation.navigate('Accounts')} />
+          <MenuRow icon="flag-outline" label="Savings goals" onPress={() => navigation.navigate('Goals')} />
+          <MenuRow icon="repeat-outline" label="Recurring" onPress={() => navigation.navigate('Recurring')} />
+          <MenuRow
+            icon="people-outline"
+            label="Split Bills"
+            badge={unpaidSplitCount > 0 ? `${unpaidSplitCount} unpaid` : undefined}
+            onPress={() => navigation.navigate('SplitBills')}
+            last
+          />
+        </Section>
+
+        <Section title="Receipts & history">
+          <MenuRow
+            icon="receipt-outline"
+            label="Receipt Inbox"
+            badge={inboxBadge}
+            onPress={() => navigation.navigate('ReceiptInbox')}
+          />
+          <MenuRow icon="time-outline" label="Activity" onPress={() => navigation.navigate('Activity')} last />
+        </Section>
+
+        <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo AI</Text>
         <View style={[styles.aiCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.aiHeaderRow}>
             <View style={[styles.aiIconWrap, { backgroundColor: theme.background }]}>
@@ -134,6 +248,131 @@ export const MoreScreen = () => {
           </View>
         </View>
 
+        <Section title="App">
+          <MenuRow icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+          <MenuRow
+            icon="cloud-upload-outline"
+            label="Backup & restore"
+            onPress={() => navigation.navigate('Settings', { section: 'backup' })}
+          />
+          <MenuRow
+            icon="shield-checkmark-outline"
+            label="Privacy: what leaves your phone"
+            accessibilityLabel="Privacy"
+            onPress={() => navigation.navigate('Privacy')}
+            last
+          />
+        </Section>
+
+        <Section title="Help & feedback">
+          <MenuRow icon="bug-outline" label="Report a bug" onPress={() => navigation.navigate('Report', { kind: 'bug' })} />
+          <MenuRow
+            icon="bulb-outline"
+            label="Request a feature"
+            onPress={() => navigation.navigate('Report', { kind: 'feature' })}
+            last
+          />
+        </Section>
+
+        <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>About</Text>
+        <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="app-info">
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={onVersionTap}
+            activeOpacity={0.9}
+            accessibilityRole="text"
+            accessibilityLabel={`Version ${installed.version}, build ${installed.versionCode}${channel === 'test' ? ', test channel' : ''}`}
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="information-circle-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Version</Text>
+            </View>
+            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="app-version">
+              {installed.version} (build {installed.versionCode}){channel === 'test' ? ' · test' : ''}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {updateAvailable ? null : (
+            <>
+              <View style={styles.infoBlock}>
+                <View style={styles.settingRowLeft}>
+                  <Ionicons name="checkmark-circle-outline" size={20} color={theme.primary} />
+                  <Text
+                    style={[styles.settingText, styles.flexText, { color: theme.text, fontSize: theme.scaleFont(14) }]}
+                    testID="update-status"
+                  >
+                    {updateStatus}
+                  </Text>
+                </View>
+                <View style={styles.infoButtons}>
+                  <TouchableOpacity
+                    style={[styles.infoBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                    onPress={() => void checkForUpdates({ force: true })}
+                    disabled={checking}
+                    accessibilityRole="button"
+                    accessibilityLabel="Check for updates"
+                  >
+                    {checking ? (
+                      <ActivityIndicator size="small" color={theme.primary} />
+                    ) : (
+                      <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Check now</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            </>
+          )}
+
+          <View style={styles.menuRow}>
+            <View style={[styles.settingRowLeft, styles.flexText]}>
+              <Ionicons name="notifications-outline" size={20} color={theme.primary} />
+              <View style={styles.flexText}>
+                <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Tell me about new versions</Text>
+                <Text style={[styles.settingText, { color: theme.textMuted, fontSize: theme.scaleFont(11), fontWeight: '400' }]}>
+                  Once a day Silo reads a small file from cuang.dev. Nothing about you is sent.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={autoCheck}
+              onValueChange={setAutoCheck}
+              accessibilityLabel="Tell me about new versions"
+              trackColor={{ true: theme.primary, false: theme.border }}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.menuRow}>
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="server-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Database</Text>
+            </View>
+            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="db-version">
+              v{DB_SCHEMA_VERSION}
+            </Text>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
+            accessibilityRole="link"
+            accessibilityLabel="Open the Silo download page"
+          >
+            <View style={styles.settingRowLeft}>
+              <Ionicons name="globe-outline" size={20} color={theme.primary} />
+              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Download page</Text>
+            </View>
+            <Ionicons name="open-outline" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+        </View>
+
         {__DEV__ ? (
           <>
             <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
@@ -169,277 +408,6 @@ export const MoreScreen = () => {
           </>
         ) : null}
 
-        <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Accounts')}
-            accessibilityRole="button"
-            accessibilityLabel="Accounts"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="wallet-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Accounts</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Goals')}
-            accessibilityRole="button"
-            accessibilityLabel="Savings goals"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="flag-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Savings goals</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('SplitBills')}
-            accessibilityRole="button"
-            accessibilityLabel="Split Bills"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="people-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Split Bills</Text>
-            </View>
-            <View style={styles.menuRowRight}>
-              {unpaidSplitCount > 0 ? (
-                <Text style={[styles.badgeText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>
-                  {unpaidSplitCount} unpaid
-                </Text>
-              ) : null}
-              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Recurring')}
-            accessibilityRole="button"
-            accessibilityLabel="Recurring"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="repeat-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Recurring</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('ReceiptInbox')}
-            accessibilityRole="button"
-            accessibilityLabel="Receipt Inbox"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="receipt-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Receipt Inbox</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Activity')}
-            accessibilityRole="button"
-            accessibilityLabel="Activity"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="time-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Activity</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Settings')}
-            accessibilityRole="button"
-            accessibilityLabel="App Settings"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="settings-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>App Settings</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={[styles.sectionTitle, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>App info</Text>
-        <View style={[styles.menuCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="app-info">
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={onVersionTap}
-            activeOpacity={0.9}
-            accessibilityRole="text"
-            accessibilityLabel={`Version ${installed.version}, build ${installed.versionCode}${channel === 'test' ? ', test channel' : ''}`}
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="information-circle-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Version</Text>
-            </View>
-            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="app-version">
-              {installed.version} (build {installed.versionCode}){channel === 'test' ? ' · test' : ''}
-            </Text>
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.menuRow}>
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="server-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Database</Text>
-            </View>
-            <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13) }} testID="db-version">
-              v{DB_SCHEMA_VERSION}
-            </Text>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.infoBlock}>
-            <View style={styles.settingRowLeft}>
-              <Ionicons
-                name={updateAvailable ? 'arrow-up-circle' : 'checkmark-circle-outline'}
-                size={20}
-                color={updateAvailable ? theme.income : theme.primary}
-              />
-              <Text
-                style={[styles.settingText, styles.flexText, { color: updateAvailable ? theme.income : theme.text, fontSize: theme.scaleFont(14) }]}
-                testID="update-status"
-              >
-                {updateStatus}
-              </Text>
-            </View>
-            {updateAvailable && latest?.notes?.length ? (
-              <Text style={[styles.notesText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>
-                {latest.notes.map((n) => `• ${n}`).join('\n')}
-              </Text>
-            ) : null}
-            <View style={styles.infoButtons}>
-              {updateAvailable && latest ? (
-                <TouchableOpacity
-                  style={[styles.infoBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}
-                  onPress={() => openUpdateSheet(latest)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Update to Silo ${latest.version}`}
-                >
-                  <Text style={{ color: theme.onPrimary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Update</Text>
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={[styles.infoBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
-                onPress={() => void checkForUpdates({ force: true })}
-                disabled={checking}
-                accessibilityRole="button"
-                accessibilityLabel="Check for updates"
-              >
-                {checking ? (
-                  <ActivityIndicator size="small" color={theme.primary} />
-                ) : (
-                  <Text style={{ color: theme.primary, fontWeight: '700', fontSize: theme.scaleFont(13) }}>Check now</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.menuRow}>
-            <View style={[styles.settingRowLeft, styles.flexText]}>
-              <Ionicons name="notifications-outline" size={20} color={theme.primary} />
-              <View style={styles.flexText}>
-                <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Tell me about new versions</Text>
-                <Text style={[styles.settingText, { color: theme.textMuted, fontSize: theme.scaleFont(11), fontWeight: '400' }]}>
-                  Once a day Silo reads a small file from cuang.dev. Nothing about you is sent.
-                </Text>
-              </View>
-            </View>
-            <Switch
-              value={autoCheck}
-              onValueChange={setAutoCheck}
-              accessibilityLabel="Tell me about new versions"
-              trackColor={{ true: theme.primary, false: theme.border }}
-            />
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Report', { kind: 'bug' })}
-            accessibilityRole="button"
-            accessibilityLabel="Report a bug"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="bug-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Report a bug</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Report', { kind: 'feature' })}
-            accessibilityRole="button"
-            accessibilityLabel="Request a feature"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="bulb-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Request a feature</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => navigation.navigate('Privacy')}
-            accessibilityRole="button"
-            accessibilityLabel="Privacy"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="shield-checkmark-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Privacy: what leaves your phone</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => void Linking.openURL(DOWNLOAD_PAGE_URL)}
-            accessibilityRole="link"
-            accessibilityLabel="Open the Silo download page"
-          >
-            <View style={styles.settingRowLeft}>
-              <Ionicons name="globe-outline" size={20} color={theme.primary} />
-              <Text style={[styles.settingText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>Download page</Text>
-            </View>
-            <Ionicons name="open-outline" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-        </View>
-
         <View style={styles.footerWrap}>
           <Text style={[styles.footerText, { color: theme.textMuted, fontSize: theme.scaleFont(12) }]}>Silo · by Cuang</Text>
         </View>
@@ -460,6 +428,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '700' },
   scrollContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 28 },
   aiCard: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
+  updateCard: { padding: 14, borderRadius: 12, borderWidth: 1.5, marginBottom: 14, gap: 8 },
   aiHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   aiIconWrap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
   aiHeaderText: { flex: 1 },

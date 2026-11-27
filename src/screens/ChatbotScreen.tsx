@@ -512,7 +512,7 @@ export const ChatbotScreen = () => {
   const handleProvisionAction = async () => {
     try {
       if (provisioning.status === 'not-installed') {
-        navigation.navigate('Settings');
+        navigation.navigate('Settings', { section: 'ai' });
         return;
       }
       if (['failed', 'update-available'].includes(provisioning.status)) {
@@ -763,7 +763,7 @@ export const ChatbotScreen = () => {
             ) : isExternalUnconfigured ? (
               <TouchableOpacity
                 style={[styles.primaryMiniButton, { backgroundColor: theme.primary }]}
-                onPress={() => navigation.navigate('Settings')}
+                onPress={() => navigation.navigate('Settings', { section: 'ai' })}
                 hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 accessibilityRole="button"
                 accessibilityLabel="Configure external API"
@@ -919,7 +919,7 @@ export const ChatbotScreen = () => {
                       </Text>
                       <TouchableOpacity
                         style={[styles.chatGateButton, { backgroundColor: theme.primary }]}
-                        onPress={() => navigation.navigate('Settings')}
+                        onPress={() => navigation.navigate('Settings', { section: 'ai' })}
                         accessibilityRole="button"
                         accessibilityLabel="Open Settings"
                       >

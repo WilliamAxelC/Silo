@@ -14,10 +14,11 @@ import {
   Linking,
   Platform,
   Image,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 import * as DocumentPicker from 'expo-document-picker';
@@ -48,7 +49,7 @@ import {
 } from '../services/notifications';
 import { authenticateUser, canUseAppLock } from '../components/AppLockGate';
 
-import { NavigationProps } from '../navigation/types';
+import { NavigationProps, type RootStackParamList, type SettingsSection } from '../navigation/types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from '../store/useAIStore';
 import { useTransactionStore } from '../store/useTransactionStore';
@@ -109,12 +110,24 @@ export const SettingsScreen = () => {
   const navigation = useNavigation<NavigationProps>();
   const theme = useAppTheme();
   const insets = useSafeInsets();
+  const route = useRoute<RouteProp<RootStackParamList, 'Settings'>>();
+  const targetSection = route.params?.section;
+  const scrollRef = useRef<ScrollView>(null);
+  const scrolledToSection = useRef(false);
+  /** Jumps to the group another screen asked for (e.g. More → Backup & restore) once that group is laid out. */
+  const onSectionLayout = (key: SettingsSection) => (event: LayoutChangeEvent) => {
+    if (key !== targetSection || scrolledToSection.current) return;
+    scrolledToSection.current = true;
+    scrollRef.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 8), animated: false });
+  };
 
   const themeMode = useSettingsStore((s) => s.themeMode);
   const currencyCode = useSettingsStore((s) => s.currencyCode);
   const useThousandsSeparator = useSettingsStore((s) => s.useThousandsSeparator);
   const dateFormat = useSettingsStore((s) => s.dateFormat);
   const showIncomeInReportsFirst = useSettingsStore((s) => s.showIncomeInReportsFirst);
+  const hideTotals = useSettingsStore((s) => s.hideTotals);
+  const setHideTotals = useSettingsStore((s) => s.setHideTotals);
   const fontScale = useSettingsStore((s) => s.fontScale);
   const aiInferenceMode = useSettingsStore((s) => s.aiInferenceMode);
   const externalApiProvider = useSettingsStore((s) => s.externalApiProvider);
@@ -1079,9 +1092,201 @@ export const SettingsScreen = () => {
         <Text style={[styles.headerTitle, { color: theme.text, fontSize: theme.scaleFont(18) }]}>Settings</Text>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 132 }]} showsVerticalScrollIndicator={false}>
-        {/* Appearance & Formatting Section */}
-        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>APPEARANCE & LOCALE</Text>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={[styles.content, { paddingBottom: 132 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* General: money and dates */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>GENERAL</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          {/* Currency Code Selector */}
+          <View style={styles.rowBlock}>
+            <View style={styles.rowBlockHeader}>
+              <View style={styles.rowLeft}>
+                <Ionicons name="cash-outline" size={18} color={theme.primary} />
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Currency</Text>
+              </View>
+              <Text style={[styles.inlineValue, { color: theme.textMuted }, captionScale]}>
+                {currencyName(currencyCode)}
+              </Text>
+            </View>
+            <View style={styles.optionRowCompact}>
+              {quickCurrencyChoices([currencyCode], currencyCode).map((option) => {
+                const isSelected = currencyCode === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.optionChip,
+                      {
+                        borderColor: isSelected ? theme.primary : theme.border,
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                      },
+                    ]}
+                    onPress={() => handleCurrencySelect(option)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select ${option} currency`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={[styles.optionChip, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={() => setCurrencyPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="More currencies"
+              >
+                <Text style={[styles.optionChipText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>More…</Text>
+              </TouchableOpacity>
+            </View>
+            <CurrencyPickerModal
+              visible={currencyPickerVisible}
+              title="Home currency"
+              selected={currencyCode}
+              preferred={[currencyCode]}
+              onSelect={(code) => handleCurrencySelect(code)}
+              onClose={() => setCurrencyPickerVisible(false)}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Month starts on day */}
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setMonthStartModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Month starts on day"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="calendar-number-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Month starts on day</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  {monthStartDay === 1 ? 'Calendar month (1st to end)' : `Custom cycle starting on day ${monthStartDay}`}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.rowValueRight}>
+              <Text style={[styles.inlineValue, { color: theme.primary }, captionScale]}>Day {monthStartDay}</Text>
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Week starts on */}
+          <View style={styles.rowBlock}>
+            <View style={styles.rowBlockHeader}>
+              <View style={styles.rowLeft}>
+                <Ionicons name="today-outline" size={18} color={theme.primary} />
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Week starts on</Text>
+              </View>
+            </View>
+            <View style={styles.segmentedRow}>
+              {WEEK_START_OPTIONS.map((option) => {
+                const isSelected = weekStartDay === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.segmentBtn,
+                      {
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                    onPress={() => setWeekStartDay(option.key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Week starts on ${option.label}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text
+                      style={[
+                        styles.segmentBtnText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Date Format */}
+          <View style={styles.rowBlock}>
+            <View style={styles.rowBlockHeader}>
+              <View style={styles.rowLeft}>
+                <Ionicons name="calendar-outline" size={18} color={theme.primary} />
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Date format</Text>
+              </View>
+            </View>
+            <View style={styles.optionRowCompact}>
+              {DATE_FORMAT_OPTIONS.map((option) => {
+                const isSelected = dateFormat === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.optionChip,
+                      {
+                        borderColor: isSelected ? theme.primary : theme.border,
+                        backgroundColor: isSelected ? theme.primary : theme.background,
+                      },
+                    ]}
+                    onPress={() => setDateFormat(option.key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Date format ${option.label}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Thousands Separator Toggle */}
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="reorder-three-outline" size={18} color={theme.primary} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Use thousands separator</Text>
+            </View>
+            <Switch
+              value={useThousandsSeparator}
+              onValueChange={setUseThousandsSeparator}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(useThousandsSeparator)}
+              accessibilityLabel="Use thousands separator"
+            />
+          </View>
+        </View>
+
+        {/* Display */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>DISPLAY</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {/* Theme Selector */}
           <View style={styles.rowBlock}>
@@ -1175,198 +1380,12 @@ export const SettingsScreen = () => {
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-          {/* Currency Code Selector */}
-          <View style={styles.rowBlock}>
-            <View style={styles.rowBlockHeader}>
-              <View style={styles.rowLeft}>
-                <Ionicons name="cash-outline" size={18} color={theme.primary} />
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Currency</Text>
-              </View>
-              <Text style={[styles.inlineValue, { color: theme.textMuted }, captionScale]}>
-                {currencyName(currencyCode)}
-              </Text>
-            </View>
-            <View style={styles.optionRowCompact}>
-              {quickCurrencyChoices([currencyCode], currencyCode).map((option) => {
-                const isSelected = currencyCode === option;
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.optionChip,
-                      {
-                        borderColor: isSelected ? theme.primary : theme.border,
-                        backgroundColor: isSelected ? theme.primary : theme.background,
-                      },
-                    ]}
-                    onPress={() => handleCurrencySelect(option)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Select ${option} currency`}
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    <Text
-                      style={[
-                        styles.optionChipText,
-                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-              <TouchableOpacity
-                style={[styles.optionChip, { borderColor: theme.border, backgroundColor: theme.background }]}
-                onPress={() => setCurrencyPickerVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel="More currencies"
-              >
-                <Text style={[styles.optionChipText, { color: theme.primary, fontSize: theme.scaleFont(12) }]}>More…</Text>
-              </TouchableOpacity>
-            </View>
-            <CurrencyPickerModal
-              visible={currencyPickerVisible}
-              title="Home currency"
-              selected={currencyCode}
-              preferred={[currencyCode]}
-              onSelect={(code) => handleCurrencySelect(code)}
-              onClose={() => setCurrencyPickerVisible(false)}
-            />
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          {/* Date Format */}
-          <View style={styles.rowBlock}>
-            <View style={styles.rowBlockHeader}>
-              <View style={styles.rowLeft}>
-                <Ionicons name="calendar-outline" size={18} color={theme.primary} />
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Date format</Text>
-              </View>
-            </View>
-            <View style={styles.optionRowCompact}>
-              {DATE_FORMAT_OPTIONS.map((option) => {
-                const isSelected = dateFormat === option.key;
-                return (
-                  <TouchableOpacity
-                    key={option.key}
-                    style={[
-                      styles.optionChip,
-                      {
-                        borderColor: isSelected ? theme.primary : theme.border,
-                        backgroundColor: isSelected ? theme.primary : theme.background,
-                      },
-                    ]}
-                    onPress={() => setDateFormat(option.key)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Date format ${option.label}`}
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    <Text
-                      style={[
-                        styles.optionChipText,
-                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(12) },
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          {/* Month starts on day */}
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => setMonthStartModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Month starts on day"
-          >
-            <View style={styles.rowLeft}>
-              <Ionicons name="calendar-number-outline" size={18} color={theme.primary} />
-              <View style={styles.rowTextBlock}>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Month starts on day</Text>
-                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                  {monthStartDay === 1 ? 'Calendar month (1st to end)' : `Custom cycle starting on day ${monthStartDay}`}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.rowValueRight}>
-              <Text style={[styles.inlineValue, { color: theme.primary }, captionScale]}>Day {monthStartDay}</Text>
-              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          {/* Week starts on */}
-          <View style={styles.rowBlock}>
-            <View style={styles.rowBlockHeader}>
-              <View style={styles.rowLeft}>
-                <Ionicons name="today-outline" size={18} color={theme.primary} />
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Week starts on</Text>
-              </View>
-            </View>
-            <View style={styles.segmentedRow}>
-              {WEEK_START_OPTIONS.map((option) => {
-                const isSelected = weekStartDay === option.key;
-                return (
-                  <TouchableOpacity
-                    key={option.key}
-                    style={[
-                      styles.segmentBtn,
-                      {
-                        backgroundColor: isSelected ? theme.primary : theme.background,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                    onPress={() => setWeekStartDay(option.key)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Week starts on ${option.label}`}
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentBtnText,
-                        { color: isSelected ? theme.onPrimary : theme.text, fontSize: theme.scaleFont(13) },
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          {/* Thousands Separator Toggle */}
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="reorder-three-outline" size={18} color={theme.primary} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>Use thousands separator</Text>
-            </View>
-            <Switch
-              value={useThousandsSeparator}
-              onValueChange={setUseThousandsSeparator}
-              trackColor={switchTrackColor}
-              thumbColor={getSwitchThumbColor(useThousandsSeparator)}
-              accessibilityLabel="Use thousands separator"
-            />
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
           {/* Default Reports view: Income Toggle */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
               <Ionicons name="swap-vertical-outline" size={18} color={theme.primary} />
               <View style={styles.rowTextBlock}>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Default Reports view: Income</Text>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Reports opens on Income</Text>
                 <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
                   Open Reports on Income instead of Expenses
                 </Text>
@@ -1380,6 +1399,64 @@ export const SettingsScreen = () => {
               accessibilityLabel="Default Reports view: Income"
             />
           </View>
+        </View>
+
+        {/* Privacy & security */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]} onLayout={onSectionLayout('privacy')}>PRIVACY & SECURITY</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="finger-print-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>App Lock</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Fingerprint, face or phone PIN to open Silo</Text>
+              </View>
+            </View>
+            <Switch
+              value={appLockEnabled}
+              onValueChange={(next) => void handleAppLockToggle(next)}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(appLockEnabled)}
+              accessibilityLabel="App Lock"
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Hide totals (same switch as one tap on the Cashflow or Net worth totals) */}
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="eye-off-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Hide totals</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Show dots instead of the Cashflow and Net worth totals. Tapping a total also switches this.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={hideTotals}
+              onValueChange={(next) => void setHideTotals(next)}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(hideTotals)}
+              accessibilityLabel="Hide totals"
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => navigation.navigate('Privacy')}
+            accessibilityRole="button"
+            accessibilityLabel="Privacy: what leaves your phone"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={theme.primary} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>What leaves your phone</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* Reminders Section */}
@@ -1441,8 +1518,265 @@ export const SettingsScreen = () => {
           ) : null}
         </View>
 
-        {/* AI & Receipt Scanning Section */}
-        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>AI & RECEIPT SCANNING</Text>
+        {/* Backup & export */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]} onLayout={onSectionLayout('backup')}>BACKUP & EXPORT</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.rowWithSecondary}>
+            <TouchableOpacity
+              style={styles.rowPrimaryArea}
+              onPress={handleBackup}
+              disabled={isBackingUp}
+              accessibilityRole="button"
+              accessibilityLabel="Back Up All Data"
+            >
+              <View style={styles.rowLeft}>
+                <Ionicons name="cloud-upload-outline" size={18} color={theme.primary} />
+                <View style={styles.rowTextBlock}>
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Back Up All Data</Text>
+                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                    Save a backup file directly to a folder on this device
+                  </Text>
+                </View>
+              </View>
+              {isBackingUp ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
+              onPress={() => void handleShareBackupFile()}
+              disabled={isBackingUp}
+              accessibilityRole="button"
+              accessibilityLabel="Share backup file"
+            >
+              <Ionicons name="share-outline" size={18} color={theme.primary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={handleRestore}
+            disabled={isBackingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Restore From Backup"
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="cloud-download-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  Pick a Silo backup (.db) file to replace local data
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="time-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Automatic Backups</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  A backup a day on this phone, last {AUTO_BACKUP_KEEP} kept. Tap one to restore or share it.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={autoBackupOn}
+              onValueChange={(v) => void handleToggleAutoBackup(v)}
+              trackColor={{ false: theme.border, true: theme.primary }}
+              thumbColor={getSwitchThumbColor(autoBackupOn)}
+              accessibilityLabel="Automatic backups"
+            />
+          </View>
+          {autoBackups.map((backup) => (
+            <TouchableOpacity
+              key={backup.uri}
+              style={styles.autoBackupRow}
+              onPress={() => handleAutoBackupPress(backup)}
+              accessibilityRole="button"
+              accessibilityLabel={`Automatic backup from ${backup.date}`}
+            >
+              <Text style={[styles.rowSubText, { color: theme.text }, captionScale]}>{backup.date}</Text>
+              <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                {backup.sizeBytes > 0 ? `${Math.max(1, Math.round(backup.sizeBytes / 1024))} KB` : ''}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={styles.autoBackupRow}
+            onPress={() => void handleBackUpNow()}
+            disabled={isBackingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Make an automatic backup now"
+          >
+            <Text style={[styles.rowSubText, { color: theme.primary, fontWeight: '700' }, captionScale]}>Back up now</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <DriveSyncSection onRestoreFile={(uri) => runRestore(uri)} locale={dateFormat || 'en-GB'} />
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          <View style={styles.rowWithSecondary}>
+            <TouchableOpacity
+              style={styles.rowPrimaryArea}
+              onPress={handleExportCSV}
+              disabled={isExporting}
+              accessibilityRole="button"
+              accessibilityLabel="Export Transactions CSV"
+            >
+              <View style={styles.rowLeft}>
+                <Ionicons name="download-outline" size={18} color={theme.primary} />
+                <View style={styles.rowTextBlock}>
+                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Export Transactions CSV</Text>
+                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                    Save a CSV file directly to a folder on this device
+                  </Text>
+                </View>
+              </View>
+              {isExporting ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
+              onPress={() => void handleShareCSV()}
+              disabled={isExporting}
+              accessibilityRole="button"
+              accessibilityLabel="Share Transactions CSV"
+            >
+              <Ionicons name="share-outline" size={18} color={theme.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Categories Section */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>CATEGORIES</Text>
+        <View style={styles.categorySplitWrap}>
+          {/* Expense Categories */}
+          <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.categoryColumnHeader}>
+              <View>
+                <Text style={[styles.categoryEyebrow, { color: theme.expense, fontSize: theme.scaleFont(11) }]}>
+                  EXPENSE
+                </Text>
+                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
+                  Spending ({expenseCategories.length})
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.roundAddBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
+                onPress={() => openAddCategoryModal('expense')}
+                accessibilityRole="button"
+                accessibilityLabel="Add expense category"
+              >
+                <Ionicons name="add" size={20} color={theme.expense} />
+              </TouchableOpacity>
+            </View>
+
+            {expenseCategories.map((category) => (
+              <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
+                <View style={styles.categoryPillLeft}>
+                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    {category.name}
+                  </Text>
+                  {category.isSystem && (
+                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+                      Default
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.categoryActions}>
+                  <TouchableOpacity
+                    onPress={() => openEditCategoryModal(category)}
+                    style={styles.iconActionBtn}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${category.name}`}
+                  >
+                    <Ionicons name="create-outline" size={18} color={theme.textMuted} />
+                  </TouchableOpacity>
+                  {!category.isSystem ? (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCategory(category)}
+                      style={styles.iconActionBtn}
+                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${category.name}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Income Categories */}
+          <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 10 }]}>
+            <View style={styles.categoryColumnHeader}>
+              <View>
+                <Text style={[styles.categoryEyebrow, { color: theme.income, fontSize: theme.scaleFont(11) }]}>
+                  INCOME
+                </Text>
+                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
+                  Earnings ({incomeCategories.length})
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.roundAddBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
+                onPress={() => openAddCategoryModal('income')}
+                accessibilityRole="button"
+                accessibilityLabel="Add income category"
+              >
+                <Ionicons name="add" size={20} color={theme.income} />
+              </TouchableOpacity>
+            </View>
+
+            {incomeCategories.map((category) => (
+              <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
+                <View style={styles.categoryPillLeft}>
+                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
+                    {category.name}
+                  </Text>
+                  {category.isSystem && (
+                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
+                      Default
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.categoryActions}>
+                  <TouchableOpacity
+                    onPress={() => openEditCategoryModal(category)}
+                    style={styles.iconActionBtn}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${category.name}`}
+                  >
+                    <Ionicons name="create-outline" size={18} color={theme.textMuted} />
+                  </TouchableOpacity>
+                  {!category.isSystem ? (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCategory(category)}
+                      style={styles.iconActionBtn}
+                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${category.name}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* AI & receipt scanning */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]} onLayout={onSectionLayout('ai')}>AI & RECEIPT SCANNING</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {/* Inference Mode Toggle (On-Device vs External API) */}
           <View style={styles.rowBlock}>
@@ -2077,280 +2411,21 @@ export const SettingsScreen = () => {
 
         </View>
 
-        {/* Categories Section */}
-        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>CATEGORIES</Text>
-        <View style={styles.categorySplitWrap}>
-          {/* Expense Categories */}
-          <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.categoryColumnHeader}>
-              <View>
-                <Text style={[styles.categoryEyebrow, { color: theme.expense, fontSize: theme.scaleFont(11) }]}>
-                  EXPENSE
-                </Text>
-                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
-                  Spending ({expenseCategories.length})
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.roundAddBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
-                onPress={() => openAddCategoryModal('expense')}
-                accessibilityRole="button"
-                accessibilityLabel="Add expense category"
-              >
-                <Ionicons name="add" size={20} color={theme.expense} />
-              </TouchableOpacity>
-            </View>
-
-            {expenseCategories.map((category) => (
-              <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
-                <View style={styles.categoryPillLeft}>
-                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                    {category.name}
-                  </Text>
-                  {category.isSystem && (
-                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
-                      Default
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.categoryActions}>
-                  <TouchableOpacity
-                    onPress={() => openEditCategoryModal(category)}
-                    style={styles.iconActionBtn}
-                    hitSlop={4}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${category.name}`}
-                  >
-                    <Ionicons name="create-outline" size={18} color={theme.textMuted} />
-                  </TouchableOpacity>
-                  {!category.isSystem ? (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteCategory(category)}
-                      style={styles.iconActionBtn}
-                      hitSlop={4}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${category.name}`}
-                    >
-                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Income Categories */}
-          <View style={[styles.categoryColumnCard, { backgroundColor: theme.surface, borderColor: theme.border, marginTop: 10 }]}>
-            <View style={styles.categoryColumnHeader}>
-              <View>
-                <Text style={[styles.categoryEyebrow, { color: theme.income, fontSize: theme.scaleFont(11) }]}>
-                  INCOME
-                </Text>
-                <Text style={[styles.categoryHeading, { color: theme.text, fontSize: theme.scaleFont(15) }]}>
-                  Earnings ({incomeCategories.length})
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.roundAddBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
-                onPress={() => openAddCategoryModal('income')}
-                accessibilityRole="button"
-                accessibilityLabel="Add income category"
-              >
-                <Ionicons name="add" size={20} color={theme.income} />
-              </TouchableOpacity>
-            </View>
-
-            {incomeCategories.map((category) => (
-              <View key={category.id} style={[styles.categoryPillRow, { borderColor: theme.border }]}>
-                <View style={styles.categoryPillLeft}>
-                  <Text style={[styles.categoryPillText, { color: theme.text, fontSize: theme.scaleFont(14) }]}>
-                    {category.name}
-                  </Text>
-                  {category.isSystem && (
-                    <Text style={[styles.badgeText, { color: theme.textMuted, fontSize: theme.scaleFont(10) }]}>
-                      Default
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.categoryActions}>
-                  <TouchableOpacity
-                    onPress={() => openEditCategoryModal(category)}
-                    style={styles.iconActionBtn}
-                    hitSlop={4}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${category.name}`}
-                  >
-                    <Ionicons name="create-outline" size={18} color={theme.textMuted} />
-                  </TouchableOpacity>
-                  {!category.isSystem ? (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteCategory(category)}
-                      style={styles.iconActionBtn}
-                      hitSlop={4}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${category.name}`}
-                    >
-                      <Ionicons name="trash-outline" size={18} color={theme.expense} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Data & Logs Section */}
-        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>DATA & SYSTEM</Text>
+        {/* Troubleshooting (Erase stays last) */}
+        <Text style={[styles.sectionTitle, { color: theme.textMuted }, captionScale]}>TROUBLESHOOTING</Text>
         <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="finger-print-outline" size={18} color={theme.primary} />
-              <View style={styles.rowTextBlock}>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>App Lock</Text>
-                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>Fingerprint, face or phone PIN to open Silo</Text>
-              </View>
-            </View>
-            <Switch
-              value={appLockEnabled}
-              onValueChange={(next) => void handleAppLockToggle(next)}
-              trackColor={switchTrackColor}
-              thumbColor={getSwitchThumbColor(appLockEnabled)}
-              accessibilityLabel="App Lock"
-            />
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.rowWithSecondary}>
-            <TouchableOpacity
-              style={styles.rowPrimaryArea}
-              onPress={handleExportCSV}
-              disabled={isExporting}
-              accessibilityRole="button"
-              accessibilityLabel="Export Transactions CSV"
-            >
-              <View style={styles.rowLeft}>
-                <Ionicons name="download-outline" size={18} color={theme.primary} />
-                <View style={styles.rowTextBlock}>
-                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Export Transactions CSV</Text>
-                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                    Save a CSV file directly to a folder on this device
-                  </Text>
-                </View>
-              </View>
-              {isExporting ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
-              onPress={() => void handleShareCSV()}
-              disabled={isExporting}
-              accessibilityRole="button"
-              accessibilityLabel="Share Transactions CSV"
-            >
-              <Ionicons name="share-outline" size={18} color={theme.primary} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.rowWithSecondary}>
-            <TouchableOpacity
-              style={styles.rowPrimaryArea}
-              onPress={handleBackup}
-              disabled={isBackingUp}
-              accessibilityRole="button"
-              accessibilityLabel="Back Up All Data"
-            >
-              <View style={styles.rowLeft}>
-                <Ionicons name="cloud-upload-outline" size={18} color={theme.primary} />
-                <View style={styles.rowTextBlock}>
-                  <Text style={[styles.rowText, { color: theme.text }, textScale]}>Back Up All Data</Text>
-                  <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                    Save a backup file directly to a folder on this device
-                  </Text>
-                </View>
-              </View>
-              {isBackingUp ? <ActivityIndicator color={theme.primary} /> : <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.secondaryIconBtn, { borderLeftColor: theme.border }]}
-              onPress={() => void handleShareBackupFile()}
-              disabled={isBackingUp}
-              accessibilityRole="button"
-              accessibilityLabel="Share backup file"
-            >
-              <Ionicons name="share-outline" size={18} color={theme.primary} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
           <TouchableOpacity
             style={styles.row}
-            onPress={handleRestore}
-            disabled={isBackingUp}
+            onPress={() => navigation.navigate('SystemLogs')}
             accessibilityRole="button"
-            accessibilityLabel="Restore From Backup"
+            accessibilityLabel="System Logs & Diagnostics"
           >
             <View style={styles.rowLeft}>
-              <Ionicons name="cloud-download-outline" size={18} color={theme.primary} />
-              <View style={styles.rowTextBlock}>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Restore From Backup</Text>
-                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                  Pick a Silo backup (.db) file to replace local data
-                </Text>
-              </View>
+              <Ionicons name="terminal-outline" size={18} color={theme.primary} />
+              <Text style={[styles.rowText, { color: theme.text }, textScale]}>System Logs & Diagnostics</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <View style={styles.row}>
-            <View style={styles.rowLeft}>
-              <Ionicons name="time-outline" size={18} color={theme.primary} />
-              <View style={styles.rowTextBlock}>
-                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Automatic Backups</Text>
-                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                  A backup a day on this phone, last {AUTO_BACKUP_KEEP} kept. Tap one to restore or share it.
-                </Text>
-              </View>
-            </View>
-            <Switch
-              value={autoBackupOn}
-              onValueChange={(v) => void handleToggleAutoBackup(v)}
-              trackColor={{ false: theme.border, true: theme.primary }}
-              thumbColor={getSwitchThumbColor(autoBackupOn)}
-              accessibilityLabel="Automatic backups"
-            />
-          </View>
-          {autoBackups.map((backup) => (
-            <TouchableOpacity
-              key={backup.uri}
-              style={styles.autoBackupRow}
-              onPress={() => handleAutoBackupPress(backup)}
-              accessibilityRole="button"
-              accessibilityLabel={`Automatic backup from ${backup.date}`}
-            >
-              <Text style={[styles.rowSubText, { color: theme.text }, captionScale]}>{backup.date}</Text>
-              <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
-                {backup.sizeBytes > 0 ? `${Math.max(1, Math.round(backup.sizeBytes / 1024))} KB` : ''}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            style={styles.autoBackupRow}
-            onPress={() => void handleBackUpNow()}
-            disabled={isBackingUp}
-            accessibilityRole="button"
-            accessibilityLabel="Make an automatic backup now"
-          >
-            <Text style={[styles.rowSubText, { color: theme.primary, fontWeight: '700' }, captionScale]}>Back up now</Text>
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <DriveSyncSection onRestoreFile={(uri) => runRestore(uri)} locale={dateFormat || 'en-GB'} />
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
@@ -2368,21 +2443,6 @@ export const SettingsScreen = () => {
                   Remove everything Silo keeps on this phone and start fresh
                 </Text>
               </View>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => navigation.navigate('SystemLogs')}
-            accessibilityRole="button"
-            accessibilityLabel="System Logs & Diagnostics"
-          >
-            <View style={styles.rowLeft}>
-              <Ionicons name="terminal-outline" size={18} color={theme.primary} />
-              <Text style={[styles.rowText, { color: theme.text }, textScale]}>System Logs & Diagnostics</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
           </TouchableOpacity>
