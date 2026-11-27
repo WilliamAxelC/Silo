@@ -55,6 +55,7 @@ import { getAIRuntimeAvailability, getProvisioningStatusLabel, useAIStore } from
 import { useTransactionStore } from '../store/useTransactionStore';
 import { CurrencyChangeModal } from '../components/CurrencyChangeModal';
 import { useAppTheme } from '../theme/useAppTheme';
+import { ACCENTS, ACCENT_KEYS, isAccentColor } from '../theme/colors';
 import type { CategoryRecord, CategoryType, ThemeMode, ExternalAPIProvider, WeekStartDay } from '../features/transactions/types';
 import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../features/transactions/constants';
 import { MAX_MONTH_START_DAY, MIN_MONTH_START_DAY } from '../features/transactions/periods';
@@ -127,6 +128,10 @@ export const SettingsScreen = () => {
   const dateFormat = useSettingsStore((s) => s.dateFormat);
   const showIncomeInReportsFirst = useSettingsStore((s) => s.showIncomeInReportsFirst);
   const hideTotals = useSettingsStore((s) => s.hideTotals);
+  const accentColor = useSettingsStore((s) => s.accentColor);
+  const setAccentColor = useSettingsStore((s) => s.setAccentColor);
+  const pureBlack = useSettingsStore((s) => s.pureBlack);
+  const setPureBlack = useSettingsStore((s) => s.setPureBlack);
   const setHideTotals = useSettingsStore((s) => s.setHideTotals);
   const fontScale = useSettingsStore((s) => s.fontScale);
   const aiInferenceMode = useSettingsStore((s) => s.aiInferenceMode);
@@ -1072,7 +1077,7 @@ export const SettingsScreen = () => {
 
   const switchTrackColor = {
     false: theme.isDarkMode ? '#3f3f46' : '#d1d5db',
-    true: theme.isDarkMode ? '#0369a1' : '#7dd3fc',
+    true: theme.primaryTrack,
   };
   const getSwitchThumbColor = (value: boolean) =>
     value ? theme.primary : theme.isDarkMode ? '#e5e7eb' : '#ffffff';
@@ -1331,6 +1336,64 @@ export const SettingsScreen = () => {
                 );
               })}
             </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Colour theme: accent only, so income stays green and expenses red */}
+          <View style={styles.rowBlock}>
+            <View style={styles.rowBlockHeader}>
+              <View style={styles.rowLeft}>
+                <Ionicons name="color-fill-outline" size={18} color={theme.primary} />
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Colour</Text>
+              </View>
+              <Text style={[styles.inlineValue, { color: theme.primary }, captionScale]}>
+                {ACCENTS[isAccentColor(accentColor) ? accentColor : 'ocean'].label}
+              </Text>
+            </View>
+            <View style={styles.swatchRow}>
+              {ACCENT_KEYS.map((key) => {
+                const isSelected = (isAccentColor(accentColor) ? accentColor : 'ocean') === key;
+                const swatch = ACCENTS[key][theme.isDarkMode ? 'dark' : 'light'].primary;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.swatch, { borderColor: isSelected ? theme.text : 'transparent' }]}
+                    onPress={() => void setAccentColor(key)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${ACCENTS[key].label} colour`}
+                    accessibilityState={{ selected: isSelected }}
+                    testID={`accent-${key}`}
+                  >
+                    <View style={[styles.swatchFill, { backgroundColor: swatch }]}>
+                      {isSelected ? <Ionicons name="checkmark" size={18} color={theme.onPrimary} /> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+          {/* Pure black dark mode */}
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons name="moon-outline" size={18} color={theme.primary} />
+              <View style={styles.rowTextBlock}>
+                <Text style={[styles.rowText, { color: theme.text }, textScale]}>Pure black in dark mode</Text>
+                <Text style={[styles.rowSubText, { color: theme.textMuted }, captionScale]}>
+                  True black backgrounds; easier on OLED screens at night
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={pureBlack}
+              onValueChange={(next) => void setPureBlack(next)}
+              trackColor={switchTrackColor}
+              thumbColor={getSwitchThumbColor(pureBlack)}
+              accessibilityLabel="Pure black in dark mode"
+            />
           </View>
 
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
@@ -2702,6 +2765,9 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, fontWeight: '700' },
   backButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 28 },
+  swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
+  swatch: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, padding: 3 },
+  swatchFill: { flex: 1, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: {
     fontWeight: '800',
     letterSpacing: 0.6,

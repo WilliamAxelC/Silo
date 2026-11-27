@@ -9,6 +9,9 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 - Tap the totals on Cashflow, or Net worth on Accounts, to hide them; tap again to show. Silo remembers the choice.
 - Settings has a Hide totals switch (Privacy & security), and More has a Backup & restore shortcut.
 - Receipt Inbox on More shows how many scanned receipts are ready to review.
+- Colour themes: Ocean, Indigo, Violet, Teal, Pink, Orange and Graphite (Settings, Display), all readable in light
+  and dark. Income stays green and expenses red.
+- Pure black in dark mode, for OLED screens.
 
 ### Changed
 - More is grouped as Money, Receipts & history, Silo AI, App, Help & feedback and About. An available update now shows at the top.

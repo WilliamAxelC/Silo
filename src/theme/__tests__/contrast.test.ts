@@ -1,4 +1,4 @@
-import { darkTheme, lightTheme } from '../colors';
+import { ACCENT_KEYS, buildThemeColors, darkTheme, lightTheme } from '../colors';
 
 function luminance(hex: string): number {
   const v = hex.replace('#', '');
@@ -42,4 +42,26 @@ describe('theme contrast (WCAG AA)', () => {
       expect(contrast(theme[fg], theme[bg])).toBeGreaterThanOrEqual(4.5);
     });
   }
+});
+
+// Colour themes (2026-11-28): every accent, light and dark, with and without pure black, keeps AA.
+describe('colour themes keep WCAG AA', () => {
+  const variants = ACCENT_KEYS.flatMap((accent) => [
+    [`${accent} light`, buildThemeColors(false, accent)],
+    [`${accent} dark`, buildThemeColors(true, accent)],
+    [`${accent} pure black`, buildThemeColors(true, accent, true)],
+  ] as const);
+  it.each(variants)('%s', (_name, theme) => {
+    for (const [fg, bg] of PAIRS) {
+      const ratio = contrast(theme[fg], theme[bg]);
+      if (ratio < 4.5) throw new Error(`${fg} on ${bg} is ${ratio.toFixed(2)}:1`);
+    }
+  });
+
+  it('only pure black changes the dark background, and never in light mode', () => {
+    expect(buildThemeColors(true, 'ocean', true).background).toBe('#000000');
+    expect(buildThemeColors(false, 'ocean', true).background).toBe(lightTheme.background);
+    expect(buildThemeColors(true, 'ocean')).toEqual(darkTheme);
+    expect(buildThemeColors(false, 'ocean')).toEqual(lightTheme);
+  });
 });

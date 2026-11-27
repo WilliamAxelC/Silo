@@ -221,7 +221,7 @@ export const RecurringScreen = () => {
 
   const switchTrackColor = {
     false: theme.isDarkMode ? '#3f3f46' : '#d1d5db',
-    true: theme.isDarkMode ? '#0369a1' : '#7dd3fc',
+    true: theme.primaryTrack,
   };
 
   const renderRule = ({ item }: { item: RecurringRule }) => {

@@ -10,6 +10,7 @@ import { DEFAULT_APP_SETTINGS, EXTERNAL_API_PRESETS, MODEL_CATALOG } from '../fe
 import { clampMonthStartDay } from '../features/transactions/periods';
 import type { AppSettings, ThemeMode, AIInferenceMode, ExternalAPIProvider, WeekStartDay } from '../features/transactions/types';
 import { useAIStore } from './useAIStore';
+import { isAccentColor, type AccentColor } from '../theme/colors';
 
 interface SettingsState extends AppSettings {
   isLoaded: boolean;
@@ -25,6 +26,8 @@ interface SettingsState extends AppSettings {
   setDateFormat: (dateFormat: string) => Promise<void>;
   setShowIncomeInReportsFirst: (enabled: boolean) => Promise<void>;
   setHideTotals: (hidden: boolean) => Promise<void>;
+  setAccentColor: (accent: AccentColor) => Promise<void>;
+  setPureBlack: (enabled: boolean) => Promise<void>;
   setFontScale: (fontScale: number) => Promise<void>;
   setAiInferenceMode: (mode: AIInferenceMode) => Promise<void>;
   setActiveModelId: (modelId: string) => Promise<void>;
@@ -317,6 +320,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     } catch (error) {
       console.warn('[Settings] Could not save hideTotals', error);
     }
+  },
+
+  setAccentColor: async (accentColor) => {
+    if (!isAccentColor(accentColor)) return;
+    await saveSetting('accentColor', accentColor);
+    set({ accentColor });
+  },
+
+  setPureBlack: async (pureBlack) => {
+    await saveSetting('pureBlack', pureBlack);
+    set({ pureBlack });
   },
 
   setFontScale: async (fontScale) => {

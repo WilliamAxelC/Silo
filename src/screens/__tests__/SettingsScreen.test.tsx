@@ -1342,6 +1342,30 @@ describe('SettingsScreen - Receipt reading mode & Vision projector', () => {
     );
   });
 
+  it('picks a colour theme and pure black from Display, and the theme follows', async () => {
+    useSettingsStore.setState({ accentColor: 'ocean', pureBlack: false, themeMode: 'light' } as any);
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<SettingsScreen />);
+    });
+    const violet = renderer.root.findByProps({ testID: 'accent-violet' });
+    expect(violet.props.accessibilityState).toEqual({ selected: false });
+    await ReactTestRenderer.act(async () => {
+      violet.props.onPress();
+    });
+    expect(useSettingsStore.getState().accentColor).toBe('violet');
+    expect(renderer.root.findByProps({ testID: 'accent-violet' }).props.accessibilityState).toEqual({ selected: true });
+    const { ACCENTS } = require('../../theme/colors');
+    const icons = renderer.root.findAll((n: any) => n.props?.name === 'color-fill-outline');
+    expect(icons[0].props.color).toBe(ACCENTS.violet.light.primary);
+
+    const sw = renderer.root.findAllByType(Switch).find((n: any) => n.props.accessibilityLabel === 'Pure black in dark mode');
+    await ReactTestRenderer.act(async () => {
+      sw.props.onValueChange(true);
+    });
+    expect(useSettingsStore.getState().pureBlack).toBe(true);
+    useSettingsStore.setState({ accentColor: 'ocean', pureBlack: false } as any);
+  });
+
   it('has a Hide totals switch that shares the one-tap setting', async () => {
     useSettingsStore.setState({ hideTotals: false } as any);
     await ReactTestRenderer.act(async () => {

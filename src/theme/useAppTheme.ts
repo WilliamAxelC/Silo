@@ -1,12 +1,15 @@
 import { useCallback, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { lightTheme, darkTheme } from './colors';
+import { buildThemeColors, isAccentColor } from './colors';
 import { spacing } from './spacing';
 import { scaleFontSize, typography } from './typography';
 
 export const useAppTheme = () => {
   const themeMode = useSettingsStore((state) => state.themeMode);
+  const accentSetting = useSettingsStore((state) => state.accentColor);
+  const pureBlack = useSettingsStore((state) => state.pureBlack) === true;
+  const accent = isAccentColor(accentSetting) ? accentSetting : 'ocean';
   const rawFontScale = useSettingsStore((state) => state.fontScale);
   const fontScale =
     typeof rawFontScale === 'number' && Number.isFinite(rawFontScale) && rawFontScale > 0
@@ -14,7 +17,7 @@ export const useAppTheme = () => {
       : 1;
   const systemColorScheme = useColorScheme();
   const isDarkMode = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
-  const colors = isDarkMode ? darkTheme : lightTheme;
+  const colors = useMemo(() => buildThemeColors(isDarkMode, accent, pureBlack), [isDarkMode, accent, pureBlack]);
 
   const scaleFont = useCallback((size: number) => scaleFontSize(size, fontScale), [fontScale]);
 

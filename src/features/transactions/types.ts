@@ -94,6 +94,10 @@ export interface AppSettings {
   dateFormat: string;
   showIncomeInReportsFirst: boolean;
   hideTotals: boolean;
+  /** Colour theme accent; one of theme/colors ACCENTS. */
+  accentColor: string;
+  /** True black backgrounds in dark mode. */
+  pureBlack: boolean;
   fontScale: number;
   aiInferenceMode: AIInferenceMode;
   activeModelId: string;

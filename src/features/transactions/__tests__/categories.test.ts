@@ -175,6 +175,10 @@ describe('categories utilities', () => {
       const parsed = parseSettingsRows(rows);
       expect(parsed.hideTotals).toBe(true);
       expect(parseSettingsRows([]).hideTotals).toBe(false);
+      expect(parseSettingsRows([{ key: APP_SETTING_KEYS.accentColor, value: 'violet' }]).accentColor).toBe('violet');
+      // An unknown accent (e.g. from a newer backup) falls back to the default instead of breaking the theme.
+      expect(parseSettingsRows([{ key: APP_SETTING_KEYS.accentColor, value: 'neon' }]).accentColor).toBe('ocean');
+      expect(parseSettingsRows([{ key: APP_SETTING_KEYS.pureBlack, value: 'true' }]).pureBlack).toBe(true);
       expect(parsed.themeMode).toBe('dark');
       expect(parsed.currencyCode).toBe('USD');
       expect(parsed.useThousandsSeparator).toBe(false);

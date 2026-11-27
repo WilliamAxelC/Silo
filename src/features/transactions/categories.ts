@@ -1,3 +1,4 @@
+import { isAccentColor } from '../../theme/colors';
 import type { AppSettings, CategoryRecord, CategoryType, TransactionType } from './types';
 import {
   APP_SETTING_KEYS,
@@ -103,6 +104,8 @@ export function getInitialAppSettings(): AppSettings {
     dateFormat: DEFAULT_APP_SETTINGS.dateFormat,
     showIncomeInReportsFirst: DEFAULT_APP_SETTINGS.showIncomeInReportsFirst,
     hideTotals: DEFAULT_APP_SETTINGS.hideTotals,
+    accentColor: DEFAULT_APP_SETTINGS.accentColor,
+    pureBlack: DEFAULT_APP_SETTINGS.pureBlack,
     fontScale: DEFAULT_APP_SETTINGS.fontScale,
     aiInferenceMode: DEFAULT_APP_SETTINGS.aiInferenceMode,
     activeModelId: DEFAULT_APP_SETTINGS.activeModelId,
@@ -148,6 +151,12 @@ export function parseSettingsRows(rows: Array<{ key: string; value: string }>): 
         break;
       case APP_SETTING_KEYS.hideTotals:
         base.hideTotals = row.value === 'true';
+        break;
+      case APP_SETTING_KEYS.accentColor:
+        if (isAccentColor(row.value)) base.accentColor = row.value;
+        break;
+      case APP_SETTING_KEYS.pureBlack:
+        base.pureBlack = row.value === 'true';
         break;
       case APP_SETTING_KEYS.fontScale: {
         const nextScale = Number(row.value);
