@@ -4,6 +4,8 @@ User-visible changes to Silo, newest first. Format: [Keep a Changelog](https://k
 published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = latest release).
 
 ## [Unreleased]
+
+## [1.3.12] - 2026-11-27
 ### Changed
 - Silo's Android package id is now `dev.cuang.silo` (was `com.LCSdev.silo`). Android treats it as a new app: 1.3.11
   can't update to it in place, so back up, install 1.3.12 from the download page, restore, then uninstall the old one.

@@ -1,10 +1,15 @@
 # Silo handoff
 
 ## Last updated
-2026-11-27 by Claude Code (Opus 5.5). Branch `feat/multi-currency` @ `9babfe6` (1.3.12 committed, not pushed; origin has up to `v1.3.11`). `prod` = `v1.3.11` @ `636aff9`.
+2026-11-27 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-27 with `prod` and tags up to `v1.3.12`). `prod` = `v1.3.12` @ `9babfe6`.
 
 ## Current state
-- **Live:** 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
+- **Live:** 1.3.12 (versionCode 19, sha256 `d63dbeca…6eba`): package id `dev.cuang.silo` (was `com.LCSdev.silo`; all
+  the user's apps use `dev.cuang.*`) and developer name Cuang (was CDev) in the app, legal pages and download page;
+  `TERMS_VERSION` 2026-11-27. Android treats it as a new app, so its `version.json` has **no `apk` field** and 1.3.11
+  opens the download page `#upgrade` (back up, install, restore, uninstall; checked on emulator 5554). **Put `apk`
+  back from 1.3.13 on**, otherwise 1.3.12 won't update in the app. Google Drive's Android OAuth client (not set up
+  yet) must use `dev.cuang.silo`. Before that 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
   progress notification (Pause/Resume/Cancel), resume from the partial file, SHA-256 checked. Before that 1.3.10
   (versionCode 17): new receipt item reader (names and prices on
   different rows, options as notes, discounts folded in; OCR items preferred over the AI's). Checked on emulator 5554:
@@ -21,21 +26,15 @@
   1.3.3+ phones update in the app (`version.json` has the apk url + sha256 + size). Phones on 1.3.2 or older need the
   one-time back up / uninstall / install / restore (download page `#upgrade`).
 - **Live web pages:** Privacy Policy and Terms (EN + ID, the ID versions prevail) under /projects/silo/privacy/ and /terms/.
-  Privacy updated 2026-11-24 for Split Bill. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
+  Privacy updated 2026-11-24 for Split Bill and both pages on 2026-11-27 for the Cuang name and new package id. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 968 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 986 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- **1.3.12 (versionCode 19), not published or pushed:** package id `dev.cuang.silo` (was `com.LCSdev.silo`; the user's
-  other apps use `dev.cuang.*` too) and developer name Cuang (was CDev) in the app and the legal pages, with
-  `TERMS_VERSION` 2026-11-27. Android sees it as a new app: 1.3.11 can't update in place (no users yet).
-  - Publish its `version.json` **without** the `apk` field and with `url` = the download page, so 1.3.11 opens the
-    page instead of downloading an APK its package check rejects. Put `apk` back from 1.3.13 on.
-  - Also republish `docs/legal/` to /projects/silo/privacy/ and /terms/ (EN + ID), and update the download page text.
-  - Google Drive sign-in isn't set up yet; its Android OAuth client must now use `dev.cuang.silo`.
+- Nothing unreleased or unpushed.
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
