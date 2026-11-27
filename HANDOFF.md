@@ -1,14 +1,19 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-27 up to `b9cfb0c` with `prod` and tags up to `v1.3.12`; commits after that are local only). `prod` = `v1.3.12` @ `9babfe6`.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-28 with `prod` and tags up to `v1.3.13`). `prod` = `v1.3.13` @ `5c7667c`.
 
 ## Current state
-- **Live:** 1.3.12 (versionCode 19, sha256 `d63dbeca…6eba`): package id `dev.cuang.silo` (was `com.LCSdev.silo`; all
+- **Live:** 1.3.13 (versionCode 20, sha256 `45425216…63cd`), `version.json` has the `apk` field again (in-app
+  updates from 1.3.12 on; 1.3.11 and older get "not the expected Silo version" and should use the download page).
+  1.3.13: tap a total (Cashflow card, Net worth) to hide it (`hideTotals`, also a switch in Settings), colour themes
+  (`theme/colors.ts` `ACCENTS`, setting `accentColor`) and pure black dark mode (`pureBlack`), More and Settings
+  regrouped (Settings takes `{ section: 'privacy' | 'backup' | 'ai' }` and scrolls there), and
+  `plugins/withAndroidComponentHardening.js` un-exports the cropper activity. Before that 1.3.12 (versionCode 19,
+  sha256 `d63dbeca…6eba`): package id `dev.cuang.silo` (was `com.LCSdev.silo`; all
   the user's apps use `dev.cuang.*`) and developer name Cuang (was CDev) in the app, legal pages and download page;
-  `TERMS_VERSION` 2026-11-27. Android treats it as a new app, so its `version.json` has **no `apk` field** and 1.3.11
-  opens the download page `#upgrade` (back up, install, restore, uninstall; checked on emulator 5554). **Put `apk`
-  back from 1.3.13 on**, otherwise 1.3.12 won't update in the app. Google Drive's Android OAuth client (not set up
+  `TERMS_VERSION` 2026-11-27. Android treats it as a new app, so 1.3.12's `version.json` had no `apk` field and 1.3.11
+  opened the download page `#upgrade`. Google Drive's Android OAuth client (not set up
   yet) must use `dev.cuang.silo`. Before that 1.3.11 (versionCode 18, sha256 `0e5c8606…e4dc`): AI model downloads run in a foreground service with a
   progress notification (Pause/Resume/Cancel), resume from the partial file, SHA-256 checked. Before that 1.3.10
   (versionCode 17): new receipt item reader (names and prices on
@@ -30,15 +35,10 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 989 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 1019 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Unreleased and unpushed: tap-to-hide totals. One tap on the Cashflow totals card (`testID cashflow-totals`) or the
-  Accounts Net worth card (`networth-totals`) swaps the amounts for `HIDDEN_TOTAL` dots (balance and net worth turn grey
-  so the colour doesn't leak a negative). Shared, saved setting `hideTotals` (`setHideTotals` sets state first and only
-  warns if the save fails). Transaction rows, account balances, Reports and search totals are not hidden.
-  Emulator-checked (5554): hide, show, and still hidden after an app restart. Ships in 1.3.13 (remember the `apk` field).
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
@@ -48,6 +48,11 @@
   after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
 
 ## Next steps
+- Google Play (asked 2026-11-28, not started): Play forbids self-updating, so a Play build must drop the in-app
+  updater, `REQUEST_INSTALL_PACKAGES` and the cuang.dev version check; publish an AAB with Play App Signing; fill
+  Data safety (contacts, receipt photos, optional external AI and Drive), the dataSync foreground-service
+  declaration, and add a way to report an AI answer (Play's AI-generated content policy). Target SDK 36 and 16 KB
+  page alignment already pass (checked on the 1.3.13 APK). Needs the user's Play Console account.
 - Watch the user's first real model download on 1.3.11 (Android 13+ asks for notification permission first).
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
 - The user is fine with Silo AI as a somewhat useful gimmick (2026-11-25): no more AI tuning unless they report a problem.
@@ -81,6 +86,9 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
+- Never un-export `expo.modules.clipboard.ClipboardFileProvider`: its `attachInfo` asserts it is exported and Silo
+  crashes at launch (happened in a 1.3.13 test build). Check the emulator after any manifest change.
+- Bundles for the build box need `HEAD`: `git bundle create <file> HEAD feat/multi-currency`, or prebuild fails.
 - **github.com/WilliamAxelC/Silo is PUBLIC.** `feat/multi-currency`, `prod` and tags v1.3.1-v1.3.11 are pushed
   (last 2026-11-26). Never commit infrastructure weaknesses, tokens or personal data, HANDOFF.md included; private
   notes go in Claude memory. History was rewritten once before that push (HANDOFF.md only); local
