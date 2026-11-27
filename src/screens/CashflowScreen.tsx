@@ -542,7 +542,11 @@ export const CashflowScreen = () => {
         <Text
           style={[
             styles.summaryValue,
-            { color: (balanceVal || 0) >= 0 ? theme.income : theme.expense, fontSize: theme.scaleFont(13) },
+            {
+              // Grey while hidden so the colour doesn't give away a negative balance.
+              color: hideTotals ? theme.textMuted : (balanceVal || 0) >= 0 ? theme.income : theme.expense,
+              fontSize: theme.scaleFont(13),
+            },
           ]}
           numberOfLines={1}
           adjustsFontSizeToFit

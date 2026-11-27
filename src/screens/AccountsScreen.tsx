@@ -275,7 +275,7 @@ export const AccountsScreen = () => {
           <Text
             style={[
               styles.netWorth,
-              { color: netWorth < 0 ? theme.expense : theme.text, fontSize: theme.scaleFont(26) },
+              { color: netWorth < 0 && !hideTotals ? theme.expense : theme.text, fontSize: theme.scaleFont(26) },
             ]}
           >
             {total(netWorth)}

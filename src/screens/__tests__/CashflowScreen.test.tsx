@@ -734,6 +734,12 @@ describe('CashflowScreen', () => {
     expect(useSettingsStore.getState().hideTotals).toBe(true);
     expect(cardTexts().some((t: string) => t.includes('25.000'))).toBe(false);
     expect(cardTexts().filter((t: string) => t === '••••••')).toHaveLength(3);
+    // The balance is negative here; its dots must not turn red and give that away.
+    const [, expenseDots, balanceDots] = renderer.root
+      .findByProps({ testID: 'cashflow-totals' })
+      .findAllByType(Text)
+      .filter((t: any) => t.props.children === '••••••');
+    expect(StyleSheet.flatten(balanceDots.props.style).color).not.toBe(StyleSheet.flatten(expenseDots.props.style).color);
     expect(renderer.root.findByProps({ testID: 'cashflow-totals' }).props.accessibilityLabel).toBe('Totals hidden. Tap to show.');
     // Transactions in the list stay readable; only the totals are hidden.
     const allTexts = renderer.root.findAllByType(Text).map((t: any) => (Array.isArray(t.props.children) ? t.props.children.join('') : String(t.props.children ?? '')));

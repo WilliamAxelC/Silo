@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-27 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-27 with `prod` and tags up to `v1.3.12`). `prod` = `v1.3.12` @ `9babfe6`.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-27 up to `b9cfb0c` with `prod` and tags up to `v1.3.12`; commits after that are local only). `prod` = `v1.3.12` @ `9babfe6`.
 
 ## Current state
 - **Live:** 1.3.12 (versionCode 19, sha256 `d63dbeca…6eba`): package id `dev.cuang.silo` (was `com.LCSdev.silo`; all
@@ -30,11 +30,15 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 986 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 989 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unreleased or unpushed.
+- Unreleased and unpushed: tap-to-hide totals. One tap on the Cashflow totals card (`testID cashflow-totals`) or the
+  Accounts Net worth card (`networth-totals`) swaps the amounts for `HIDDEN_TOTAL` dots (balance and net worth turn grey
+  so the colour doesn't leak a negative). Shared, saved setting `hideTotals` (`setHideTotals` sets state first and only
+  warns if the save fails). Transaction rows, account balances, Reports and search totals are not hidden.
+  Emulator-checked (5554): hide, show, and still hidden after an app restart. Ships in 1.3.13 (remember the `apk` field).
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
