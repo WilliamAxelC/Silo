@@ -1,7 +1,7 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-28 with `prod` and tags up to `v1.3.13`). `prod` = `v1.3.13` @ `5c7667c`.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-28 up to `9076e58` with `prod` and tags up to `v1.3.13`; 1.3.14 commits are local only). `prod` = `v1.3.13` @ `5c7667c`.
 
 ## Current state
 - **Live:** 1.3.13 (versionCode 20, sha256 `45425216…63cd`), `version.json` has the `apk` field again (in-app
@@ -35,10 +35,21 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 1019 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 1026 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
+- **1.3.14 built, not published or pushed** (commit `877ced1`): Google Play variant (`SILO_DISTRIBUTION=play` via
+  `app.config.js`; `src/services/distribution.ts` `isPlayBuild()` turns off the cuang.dev update check, banner,
+  update card, test channel, download page and installer; `REQUEST_INSTALL_PACKAGES` blocked), a Report button on
+  finished Silo AI answers (prefills `Report` with `title` / `description`), and Privacy/Terms 2026-11-28 (Play
+  section, new menu names) with `TERMS_VERSION` 2026-11-28. The legal pages are not published yet. They must go live
+  before the Play submission, ideally with a web 1.3.14 so the Terms gate matches.
+  - Play AAB: `~/silo-build/apks/play.aab` on ai-renderer (`build_play.sh`), 1.3.14 / versionCode 21, signed with
+    Silo's key (upload key), arm64-v8a + x86_64, 16 KB aligned, no install-apps permission. Emulator-checked (Play
+    variant installed over web 1.3.13): Terms re-accept, More shows "Updates come from Google Play", Privacy says
+    no update checks, AI answer → Report → prefilled form.
+  - Play Console steps and recommended answers: `docs/play/README.md`.
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
@@ -48,11 +59,9 @@
   after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
 
 ## Next steps
-- Google Play (asked 2026-11-28, not started): Play forbids self-updating, so a Play build must drop the in-app
-  updater, `REQUEST_INSTALL_PACKAGES` and the cuang.dev version check; publish an AAB with Play App Signing; fill
-  Data safety (contacts, receipt photos, optional external AI and Drive), the dataSync foreground-service
-  declaration, and add a way to report an AI answer (Play's AI-generated content policy). Target SDK 36 and 16 KB
-  page alignment already pass (checked on the 1.3.13 APK). Needs the user's Play Console account.
+- Google Play: the build is ready (see In progress). The rest happens in the user's Play Console: app signing choice
+  (recommended: upload Silo's existing key so Play and cuang.dev installs update each other), listing, Data safety,
+  the foreground-service declaration with videos, then an internal test track. See `docs/play/README.md`.
 - Watch the user's first real model download on 1.3.11 (Android 13+ asks for notification permission first).
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
 - The user is fine with Silo AI as a somewhat useful gimmick (2026-11-25): no more AI tuning unless they report a problem.
