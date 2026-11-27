@@ -5,6 +5,7 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+## [1.3.13] - 2026-11-28
 ### Added
 - Tap the totals on Cashflow, or Net worth on Accounts, to hide them; tap again to show. Silo remembers the choice.
 - Settings has a Hide totals switch (Privacy & security), and More has a Backup & restore shortcut.
@@ -17,6 +18,10 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 - More is grouped as Money, Receipts & history, Silo AI, App, Help & feedback and About. An available update now shows at the top.
 - Settings is regrouped: General, Display, Privacy & security, Reminders, Backup & export, Categories, AI & receipt
   scanning, Troubleshooting. Erase All Data moved to the bottom. Links from Silo AI open Settings at the AI section.
+
+### Security
+- Two library screens other apps could open inside Silo (the unused image cropper and the clipboard file
+  provider) are now private to Silo. Silo no longer asks for the draw-over-other-apps permission.
 
 ## [1.3.12] - 2026-11-27
 ### Changed
