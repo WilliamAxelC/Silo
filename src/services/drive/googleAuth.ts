@@ -48,11 +48,32 @@ function setConnectedAccount(email: string | null) {
   else expoDb.runSync('DELETE FROM app_settings WHERE key = ?;', [ACCOUNT_KEY]);
 }
 
+/**
+ * Google answers DEVELOPER_ERROR (code 10) when its Cloud project has no Android OAuth client for this package
+ * name plus signing certificate. The library text only makes sense to developers, so say what it means.
+ */
+export function explainSignInError(error: unknown): unknown {
+  const e = error as { code?: unknown; message?: unknown } | null;
+  const code = String(e?.code ?? '');
+  const message = String(e?.message ?? '');
+  if (code === '10' || code === 'DEVELOPER_ERROR' || message.startsWith('DEVELOPER_ERROR')) {
+    return new Error(
+      "Google Drive isn't set up for this copy of Silo yet, so Google refused the sign-in. Your records are safe. Use Back Up All Data for now."
+    );
+  }
+  return error;
+}
+
 /** Opens Google's account picker. Resolves the email, or null when the user backs out. */
 export async function connectDrive(): Promise<string | null> {
   const m = signin();
   await m.GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-  const result: any = await m.GoogleSignin.signIn();
+  let result: any;
+  try {
+    result = await m.GoogleSignin.signIn();
+  } catch (error) {
+    throw explainSignInError(error);
+  }
   if (result?.type === 'cancelled') return null;
   const user = result?.data?.user ?? result?.user;
   const granted: string[] = result?.data?.scopes ?? result?.scopes ?? [];

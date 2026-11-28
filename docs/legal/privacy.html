@@ -342,7 +342,7 @@
       <table>
         <thead><tr><th scope="col">Data</th><th scope="col">Kept</th></tr></thead>
         <tbody>
-          <tr><td>Your records, photos and settings on the phone</td><td>Until you delete them, use Erase All Data, or uninstall Silo</td></tr>
+          <tr><td>Your records, photos and settings on the phone</td><td>Until you delete them, use Erase All Data, or uninstall Silo (unless you choose Keep app data when uninstalling)</td></tr>
           <tr><td>Chat with the AI assistant</td><td>In memory only, until Silo closes</td></tr>
           <tr><td>Activity log</td><td>Up to 90 days, at most 2,000 entries</td></tr>
           <tr><td>Error log</td><td>The last 50 entries</td></tr>
@@ -369,14 +369,14 @@
       <li>Silo checks each update against the published checksum, package name and version. Android installs it only if it is signed with the same key.</li>
       <li>We do not hold your money records, so they cannot leak from our side.</li>
     </ul>
-    <p>No system is perfectly secure. Keep your phone locked and up to date, and only install Silo from <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
+    <p>No system is perfectly secure. Keep your phone locked and up to date, and only install Silo from Google Play or <a href="https://cuang.dev/projects/silo/">cuang.dev/projects/silo</a>.</p>
   </section>
 
   <section class="card" id="delete">
     <h2>15. Deleting your data</h2>
     <ul>
       <li><strong>Erase All Data.</strong> In <strong>Settings, Troubleshooting</strong>, <strong>Erase All Data</strong> deletes all records, photos, automatic backups, settings and saved API keys. It clears Silo's whole cache, including thumbnails, photos fetched from Drive, shared photos, update downloads and exports. It also disconnects Google Drive. Files in your Drive stay there. The downloaded AI model is kept, because it contains none of your data. To keep a copy first, use <strong>Back Up All Data</strong> or <strong>Share a backup first</strong>.</li>
-      <li><strong>Uninstall.</strong> Uninstalling Silo deletes its data on the phone.</li>
+      <li><strong>Uninstall.</strong> Uninstalling Silo deletes its data on the phone. On Android 10 and later the uninstall dialog may offer <strong>Keep app data</strong>; if you tick it, Android keeps Silo's data on the phone until you install Silo again or clear it in Android's app settings.</li>
       <li><strong>Your own copies.</strong> Backups you shared or exported, and files in your Google Drive, are under your control. Delete them where you stored them.</li>
       <li><strong>Bug reports.</strong> Email <a href="mailto:william@cuang.dev">william@cuang.dev</a> with your report number. We will tell you when it is deleted.</li>
     </ul>

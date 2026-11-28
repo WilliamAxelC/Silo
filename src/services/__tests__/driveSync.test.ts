@@ -161,6 +161,15 @@ describe('Google Drive sync', () => {
     expect(getConnectedAccount()).toBeNull();
   });
 
+  it('regression: explains a Google DEVELOPER_ERROR instead of showing the raw library text', async () => {
+    const err: any = new Error('DEVELOPER_ERROR: Follow troubleshooting instructions at https://react-native-google-signin.github.io/docs/troubleshooting');
+    err.code = '10';
+    mockSignin.GoogleSignin.signIn.mockRejectedValueOnce(err);
+    await expect(connectDrive()).rejects.toThrow(/isn't set up for this copy of Silo/);
+    await expect(connectDrive()).resolves.toBe('me@example.com');
+    expect(getConnectedAccount()).toBe('me@example.com');
+  });
+
   it('backs up into Silo/Backups, replaces the same day and keeps only the newest 30', async () => {
     await connectDrive();
     await backupToDrive(new Date(2026, 10, 23));

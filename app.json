@@ -69,6 +69,7 @@
       "./plugins/withAndroidThemePolish",
       "./plugins/withReleaseSigning",
       "./plugins/withAndroidComponentHardening",
+      "./plugins/withKeepDataOnUninstall",
       [
         "expo-local-authentication",
         {

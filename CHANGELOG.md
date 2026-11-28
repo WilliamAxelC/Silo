@@ -10,10 +10,17 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
   filled in. You can edit it, and nothing is sent until you tap Send.
 - A Google Play build (`SILO_DISTRIBUTION=play`): updates come from Google Play, so it never checks cuang.dev and
   doesn't ask to install apps.
+- Keep app data on uninstall: on Android 10 and later, the uninstall dialog offers to keep Silo's records, so a
+  reinstall (or a switch between the Google Play and cuang.dev versions) picks up where you left off.
+
+### Fixed
+- Connect Google Drive: when Google refuses the sign-in because Drive isn't set up for this copy of Silo, Silo says
+  so in plain words instead of showing Google's DEVELOPER_ERROR text.
 
 ### Changed
 - Privacy Policy and Terms (28 November 2026): they explain the Google Play version, and point to the new Settings
-  and More section names. Silo asks you to agree to the Terms again once.
+  and More section names, and that you can keep Silo's data when uninstalling. Silo asks you to agree to the Terms
+  again once.
 
 ## [1.3.13] - 2026-11-28
 ### Added
