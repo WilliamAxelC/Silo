@@ -151,7 +151,7 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
   const everyCount = Math.max(1, Number.parseInt(every, 10) || 1);
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardSheet style={styles.overlay}>
         <View
           testID="budget-plan-editor"

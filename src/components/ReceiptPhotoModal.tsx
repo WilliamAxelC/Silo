@@ -81,7 +81,7 @@ export const ReceiptPhotoModal: React.FC<ReceiptPhotoModalProps> = ({ visible, i
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View
         style={[
           styles.backdrop,

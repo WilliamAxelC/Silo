@@ -41,7 +41,7 @@ export function CurrencyPickerModal({ visible, title = 'Choose currency', select
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={close}>
       <KeyboardSheet style={styles.backdrop}>
         <View
           style={[

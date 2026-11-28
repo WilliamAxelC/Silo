@@ -212,7 +212,7 @@ export const ContactsPickerModal = ({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardSheet style={styles.overlay}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}

@@ -215,7 +215,7 @@ export function DriveSyncSection({ onRestoreFile, locale }: { onRestoreFile: (ur
       </View>
       {lastError ? <Text style={[sub, styles.block, { color: theme.expense }]}>Last sync problem: {lastError}</Text> : null}
 
-      <Modal visible={backups !== null} transparent animationType="slide" onRequestClose={() => setBackups(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={backups !== null} transparent animationType="slide" onRequestClose={() => setBackups(null)}>
         <View style={styles.overlay}>
           <View style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 16) }]}>
             <Text style={{ color: theme.text, fontWeight: '800', fontSize: theme.scaleFont(17), marginBottom: 8 }}>Backups in Drive</Text>

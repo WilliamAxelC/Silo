@@ -321,7 +321,7 @@ export const AccountsScreen = () => {
         </Text>
       </ScrollView>
 
-      <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
         <KeyboardSheet style={styles.overlay}>
           <View
             testID="account-editor-sheet"

@@ -37,7 +37,7 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
   const options = wallets.filter((w) => w.isActive && w.id !== excludeId);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1}
           accessible={false} onPress={onClose}>
         <TouchableOpacity

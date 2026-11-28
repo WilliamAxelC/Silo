@@ -333,7 +333,7 @@ export const RecurringScreen = () => {
         }
       />
 
-      <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={closeEditor}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={draft !== null} transparent animationType="slide" onRequestClose={closeEditor}>
         <KeyboardSheet style={styles.overlay}>
           <View
             testID="recurring-editor-sheet"

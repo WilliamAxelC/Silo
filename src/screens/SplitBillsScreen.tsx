@@ -637,7 +637,7 @@ export const SplitBillsScreen = () => {
       </ScrollView>
 
       {/* Pick Transaction Modal */}
-      <Modal
+      <Modal statusBarTranslucent navigationBarTranslucent
         visible={newPickerVisible}
         transparent
         animationType="slide"

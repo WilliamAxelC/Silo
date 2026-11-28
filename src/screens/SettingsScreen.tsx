@@ -2531,7 +2531,7 @@ export const SettingsScreen = () => {
       </ScrollView>
 
       {/* Month Start Day Picker Modal */}
-      <Modal
+      <Modal statusBarTranslucent navigationBarTranslucent
         visible={monthStartModalVisible}
         transparent
         animationType="fade"
@@ -2617,7 +2617,7 @@ export const SettingsScreen = () => {
       ) : null}
 
       {/* Add / Edit Category Modal */}
-      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
         <KeyboardSheet style={styles.keyboardShell}>
           <TouchableOpacity
             style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
@@ -2681,7 +2681,7 @@ export const SettingsScreen = () => {
         />
       ) : null}
 
-      <Modal visible={eraseVisible} transparent animationType="fade" onRequestClose={() => setEraseVisible(false)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={eraseVisible} transparent animationType="fade" onRequestClose={() => setEraseVisible(false)}>
         <KeyboardSheet style={styles.eraseOverlay}>
           <View style={[styles.eraseCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="erase-dialog">
             <Text style={[styles.rowText, { color: theme.text, fontSize: theme.scaleFont(17), fontWeight: '800' }]}>

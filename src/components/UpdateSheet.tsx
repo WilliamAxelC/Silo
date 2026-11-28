@@ -33,7 +33,7 @@ export function UpdateSheet() {
   const muted = { color: theme.textMuted, fontSize: theme.scaleFont(13) };
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={close}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="slide" onRequestClose={close}>
       <View style={styles.overlay}>
         <View
           style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 18) }]}

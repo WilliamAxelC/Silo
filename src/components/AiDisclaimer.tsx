@@ -44,7 +44,7 @@ export function AiDisclaimerModal() {
     setVisible(false);
   };
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={close}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="fade" onRequestClose={close}>
       <View style={styles.overlay}>
         <View
           style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 18) }]}

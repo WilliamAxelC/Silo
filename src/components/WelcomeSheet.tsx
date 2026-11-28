@@ -239,7 +239,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
   };
 
   return (
-    <Modal
+    <Modal statusBarTranslucent navigationBarTranslucent
       visible={visible}
       transparent
       animationType="slide"

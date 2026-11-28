@@ -66,7 +66,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <KeyboardSheet style={styles.keyboardShell}>
         <TouchableOpacity
           style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 16)]}

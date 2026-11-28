@@ -78,7 +78,7 @@ export function CurrencyChangeModal({ fromCurrency, toCurrency, onClose }: Props
   };
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardSheet style={styles.overlay}>
         <View style={[styles.card, { backgroundColor: theme.surface }]} testID="currency-change-modal">
           <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(17) }]}>

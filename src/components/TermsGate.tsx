@@ -34,7 +34,7 @@ export function TermsGate() {
   );
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => (prompt === 'changed' ? state.postpone() : undefined)}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible transparent animationType="fade" onRequestClose={() => (prompt === 'changed' ? state.postpone() : undefined)}>
       <View style={styles.overlay}>
         <View
           style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 18) }]}

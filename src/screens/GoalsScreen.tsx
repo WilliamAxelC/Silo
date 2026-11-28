@@ -217,7 +217,7 @@ export const GoalsScreen = () => {
         })}
       </ScrollView>
 
-      <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
         <KeyboardSheet style={styles.overlay}>
           <View style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 16) }]}>
             <ScrollView keyboardShouldPersistTaps="handled">
@@ -358,7 +358,7 @@ export const GoalsScreen = () => {
         ) : null}
       </Modal>
 
-      <Modal visible={adding !== null} transparent animationType="fade" onRequestClose={() => setAdding(null)}>
+      <Modal statusBarTranslucent navigationBarTranslucent visible={adding !== null} transparent animationType="fade" onRequestClose={() => setAdding(null)}>
         <KeyboardSheet style={[styles.overlay, styles.centered]}>
           <View style={[styles.dialog, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={{ color: theme.text, fontWeight: '800', fontSize: theme.scaleFont(16), marginBottom: 10 }}>

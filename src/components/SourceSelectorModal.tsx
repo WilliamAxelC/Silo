@@ -17,7 +17,7 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
   const theme = useAppTheme();
   const insets = useSafeInsets();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity
         style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 20)]}
         activeOpacity={1}

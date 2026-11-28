@@ -78,4 +78,15 @@ describe('KeyboardSheet (popups bouncing when a field is focused)', () => {
     });
     expect(missing.map((f) => path.relative(SRC, f))).toEqual([]);
   });
+
+  it('every popup window fills the screen, so Android never slides it on top of the keyboard padding', () => {
+    // Without these the popup window stops above the nav bar while React Native lays it out full screen, and
+    // Android pans the window when a field is focused: that doubled the keyboard adjustment.
+    const offenders = sourceFiles(SRC).flatMap((file) =>
+      (fs.readFileSync(file, 'utf8').match(/<Modal\b[^>]*>/g) ?? [])
+        .filter((tag) => !/statusBarTranslucent/.test(tag) || !/navigationBarTranslucent/.test(tag))
+        .map(() => path.relative(SRC, file))
+    );
+    expect(offenders).toEqual([]);
+  });
 });

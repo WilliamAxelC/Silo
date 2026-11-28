@@ -345,7 +345,7 @@ export const AmountCalculatorModal: React.FC<AmountCalculatorModalProps> = ({
   ...rest
 }) => {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal statusBarTranslucent navigationBarTranslucent visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1}
           accessible={false} onPress={onClose}>
         <TouchableOpacity activeOpacity={1}
