@@ -1,9 +1,8 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` pushed up to `9f7c6ca`; later local commits
-(`0e21df2` Play signing docs, `2ca4cf3` popup keyboard fix + tablets/foldables, and this handoff) are NOT pushed.
-`prod` = `v1.3.14` @ `909e09d` pushed. 1.3.15 (Play-only renumber) is on the branch, not tagged.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` pushed up to this commit.
+`prod` = `v1.3.14` @ `909e09d` pushed. 1.3.15 and 1.3.16 are on the branch, not tagged.
 
 ## Current state
 - **Live:** 1.3.14 (versionCode 21, sha256 `604b0bb0…7ca3`, built from `909e09d`), `version.json` with `apk`.
@@ -14,7 +13,10 @@
   The Google Play build of the same commit is `~/silo-releases/silo-1.3.14-play.aab` on orca (sha256 `9155ca12…84a6`).
   **1.3.15 (versionCode 22, `602b4e5`)** is the same app with a new number, because Play already has a versionCode 21
   upload: Play AAB `~/silo-releases/silo-1.3.15-play.aab` (`eea91d82…`) and website APK `silo-1.3.15.apk` (`14a383ee…`)
-  are built and on the /play/ page, not uploaded to Play and not on the website download page (web stays 1.3.14).
+  are built and on the /play/ page, not on the website download page (web stays 1.3.14).
+  **1.3.16 (versionCode 23, `c3b3b27`)**: popup keyboard fix + tablets/foldables (see In progress for details).
+  Play AAB `~/silo-releases/silo-1.3.16-play.aab` (`f7658891…b865`) uploaded to Play internal testing
+  2026-11-28 with notes `tools/play-publish/notes-1.3.16.json`; on /play/ (AAB only, no website APK built).
   Before that 1.3.13 (versionCode 20, sha256 `45425216…63cd`): tap a total (Cashflow card, Net worth) to hide it (`hideTotals`, also a switch in Settings), colour themes
   (`theme/colors.ts` `ACCENTS`, setting `accentColor`) and pure black dark mode (`pureBlack`), More and Settings
   regrouped (Settings takes `{ section: 'privacy' | 'backup' | 'ai' }` and scrolls there), and
@@ -51,7 +53,7 @@
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Unreleased (CHANGELOG [Unreleased]), commits `2ca4cf3`..HEAD, not pushed, needs a version bump to ship:
+- 1.3.16 is only on Play internal testing (not closed testing, not the website). Details of the fix:
   popups bounced on the user's phone when a field was focused (Edit account). Cause: RN laid popups out full
   screen while the Android dialog window stopped above the nav bar and panned for the keyboard, on top of
   KeyboardAvoidingView "height". Fix: every `<Modal>` is `statusBarTranslucent navigationBarTranslucent` (window =
@@ -64,8 +66,8 @@
   Edit account, New goal, Add money, Recurring, New budget, Category, Currency search all sit on the keyboard and
   don't move. Not checked on a real phone or Android 15+ yet.
 ## Next steps
-- Google Play (checked via the API 2026-11-28): 1.3.15 (vc22) completed on internal and closed testing (alpha, 177
-  countries incl. ID); alpha also has a leftover duplicate draft. English listing complete, no Indonesian listing,
+- Google Play (checked via the API 2026-11-28): 1.3.16 (vc23) on internal, 1.3.15 (vc22) on closed testing (alpha,
+  177 countries incl. ID; the duplicate draft is gone). Promote 1.3.16 to alpha only when the user asks. English listing complete, no Indonesian listing,
   production empty. Personal account: needs 12+ testers opted in to the CLOSED test for 14 consecutive days, then
   Dashboard → Apply for production. Testers must be on the closed-test email list and tap "Become a tester" on its
   opt-in link (internal testers and the service account don't count). Then App content (Data safety, rating,
