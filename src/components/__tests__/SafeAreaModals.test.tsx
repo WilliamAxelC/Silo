@@ -173,7 +173,7 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
-  it('keeps CategorySelectorModal and WelcomeSheet above the keyboard on Android with padding, not height (MIN-01)', () => {
+  it('keeps CategorySelectorModal and WelcomeSheet above the keyboard on Android with KeyboardSheet, not height (MIN-01)', () => {
     const originalOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
     try {
@@ -193,14 +193,16 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
           )
         );
       });
-      expect(catRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('padding');
+      expect(catRenderer.root.findAllByProps({ testID: 'keyboard-sheet' }).length).toBeGreaterThan(0);
+      expect(catRenderer.root.findAllByType(KeyboardAvoidingView)).toHaveLength(0);
       ReactTestRenderer.act(() => catRenderer.unmount());
 
       let welcomeRenderer: any;
       ReactTestRenderer.act(() => {
         welcomeRenderer = ReactTestRenderer.create(withInsets(<WelcomeSheet visible />));
       });
-      expect(welcomeRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('padding');
+      expect(welcomeRenderer.root.findAllByProps({ testID: 'keyboard-sheet' }).length).toBeGreaterThan(0);
+      expect(welcomeRenderer.root.findAllByType(KeyboardAvoidingView)).toHaveLength(0);
       ReactTestRenderer.act(() => welcomeRenderer.unmount());
     } finally {
       Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });

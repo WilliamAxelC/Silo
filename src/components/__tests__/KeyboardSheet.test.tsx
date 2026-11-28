@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text } from 'react-native';
+import { Dimensions, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text } from 'react-native';
 
-import { KeyboardSheet } from '../KeyboardSheet';
+import { KeyboardSheet, keyboardCover } from '../KeyboardSheet';
 
 const ReactTestRenderer = require('react-test-renderer');
 
@@ -18,9 +18,24 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe('KeyboardSheet (popups bouncing when a field is focused)', () => {
-  it('pads instead of resizing on Android, so the sheet cannot loop', () => {
+  it('works out the keyboard cover without measuring what it pads (no bounce loop)', () => {
+    // Popup window not resized (edge-to-edge): keyboard 300 + nav bar 48 is covered.
+    expect(keyboardCover(300, 48, 800, 800)).toBe(348);
+    // Android already shrank the popup by the whole keyboard: nothing left to pad.
+    expect(keyboardCover(300, 48, 800, 452)).toBe(0);
+    // Keyboard hidden or not measured yet.
+    expect(keyboardCover(0, 48, 800, 800)).toBe(0);
+    expect(keyboardCover(300, 48, 800, 0)).toBe(0);
+  });
+
+  it('on Android pads the backdrop by the keyboard and keeps the caller\'s own padding', () => {
     const originalOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    const listeners: Record<string, (e: any) => void> = {};
+    const spy = jest.spyOn(Keyboard, 'addListener').mockImplementation(((name: string, cb: (e: any) => void) => {
+      listeners[name] = cb;
+      return { remove: jest.fn() } as any;
+    }) as any);
     try {
       let renderer: any;
       ReactTestRenderer.act(() => {
@@ -30,14 +45,21 @@ describe('KeyboardSheet (popups bouncing when a field is focused)', () => {
           </KeyboardSheet>
         );
       });
-      const kav = renderer.root.findByType(KeyboardAvoidingView);
-      expect(kav.props.behavior).toBe('padding');
-      // The caller's padding lives on an inner view, so the keyboard padding never overrides it.
-      expect(StyleSheet.flatten(kav.props.style).padding).toBeUndefined();
+      expect(renderer.root.findAllByType(KeyboardAvoidingView)).toHaveLength(0);
+      const outer = () => renderer.root.findAllByProps({ testID: 'keyboard-sheet' })[0];
+      const screenHeight = Dimensions.get('screen').height;
+      ReactTestRenderer.act(() => {
+        outer().props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 400, height: screenHeight } } });
+        listeners.keyboardDidShow({ endCoordinates: { height: 280, screenY: 0, screenX: 0, width: 400 } });
+      });
+      expect(StyleSheet.flatten(outer().props.style).paddingBottom).toBe(280);
       const inner = renderer.root.findAllByProps({ testID: 'shell' })[0];
       expect(StyleSheet.flatten(inner.props.style).padding).toBe(20);
+      ReactTestRenderer.act(() => listeners.keyboardDidHide({}));
+      expect(StyleSheet.flatten(outer().props.style).paddingBottom).toBe(0);
       ReactTestRenderer.act(() => renderer.unmount());
     } finally {
+      spy.mockRestore();
       Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
     }
   });
