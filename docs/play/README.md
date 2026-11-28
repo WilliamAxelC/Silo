@@ -87,6 +87,9 @@ python3 tools/play-publish/publish_play.py upload silo-1.3.14-play.aab --notes t
 python3 tools/play-publish/publish_play.py upload silo-1.3.14-play.aab --notes tools/play-publish/notes-1.3.14.json
 ```
 
+After each release, add it to `docs/play/releases.json` (newest first, with sha256 and size), copy the .aab and
+.apk to the site's `play/releases/`, and rebuild the page: `python3 tools/play-publish/play_page.py <site>/play`.
+
 It refuses to roll out straight to production; use `--track production --status draft` and press Release in Play
 Console.
 
