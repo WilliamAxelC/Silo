@@ -90,7 +90,17 @@ Not collected by the developer:
 Uploads can be scripted with the Google Play Developer API once the app exists and the first AAB was uploaded by
 hand: a Google Cloud service account with the Android Publisher API enabled, invited in Play Console (Users and
 permissions) with release rights for Silo. Its JSON key stays off the repo (like the signing key). A script can then
-upload `play.aab` to a track (internal first) with release notes.
+upload `play.aab` to a track (internal first) with release notes: `tools/play-publish/publish_play.py`
+(standard library plus `openssl`; the key file's path goes in `SILO_PLAY_KEY`, never in the repo).
+
+```
+python3 tools/play-publish/publish_play.py check
+python3 tools/play-publish/publish_play.py upload silo-1.3.14-play.aab --notes tools/play-publish/notes-1.3.14.json --dry-run
+python3 tools/play-publish/publish_play.py upload silo-1.3.14-play.aab --notes tools/play-publish/notes-1.3.14.json
+```
+
+It refuses to roll out straight to production; use `--track production --status draft` and press Release in Play
+Console.
 
 ## Before submitting
 

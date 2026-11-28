@@ -86,3 +86,6 @@ bench/.venv/
 
 bench/**/__pycache__/
 bench/**/*.log
+
+# Files the user drops for agents (keys, client files): never commit
+.orca/
