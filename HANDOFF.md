@@ -47,26 +47,22 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 1038 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 1040 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- `2ca4cf3` (unreleased, in CHANGELOG [Unreleased]): popups bounced on the user's phone when a field was focused
-  (Edit account; Android 'height' KeyboardAvoidingView resized the view it measured). Every Modal popup now uses
-  `src/components/KeyboardSheet.tsx` (always "padding"); `KeyboardSheet.test.tsx` fails if any file uses "height" or a
-  Modal with a TextInput lacks KeyboardSheet. Tablets/foldables: centred app column (`MAX_CONTENT_WIDTH` 720 in
-  `src/theme/layout.ts`, `AppNavigator` `app-column`), `SHEET_WIDTH`/`DIALOG_WIDTH` on every popup,
-  `plugins/withLargeScreens.js` (no manifest orientation, `app.json` orientation "default", MainActivity locks
-  portrait only below 600dp smallest width, `smallestScreenSize` config change). Being checked on emulator 5554
-  (keyboard popups, `wm size`/`wm density` tablet simulation); not on a real phone yet. Needs a version bump to ship.
-- Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
-  notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
-  `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
-  `handleUnattachedNativeEvent` for notification taps on a paused one). Tests:
-  `src/services/ai/__tests__/nativeModelDownload.test.ts`. Emulator-checked on 1.3.11: progress notification, pause
-  on a stalled connection (instant), Resume/Cancel from the shade with Silo open or killed, auto-resume at launch
-  after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
-
+- Unreleased (CHANGELOG [Unreleased]), commits `2ca4cf3`..HEAD, not pushed, needs a version bump to ship:
+  popups bounced on the user's phone when a field was focused (Edit account). Cause: RN laid popups out full
+  screen while the Android dialog window stopped above the nav bar and panned for the keyboard, on top of
+  KeyboardAvoidingView "height". Fix: every `<Modal>` is `statusBarTranslucent navigationBarTranslucent` (window =
+  layout, no pan) and wraps fields in `src/components/KeyboardSheet.tsx` (Android: pads by keyboard height + nav
+  bar minus any window resize, `keyboardCover`; iOS: KAV padding). Guard tests in `KeyboardSheet.test.tsx`.
+  Tablets/foldables: centred column (`MAX_CONTENT_WIDTH` 720, `src/theme/layout.ts`, `AppNavigator` `app-column`),
+  `SHEET_WIDTH`/`DIALOG_WIDTH` on popups, `plugins/withLargeScreens.js` (no manifest orientation, app.json
+  "default", MainActivity locks portrait below 600dp smallest width, `smallestScreenSize` config change).
+  Emulator-checked (API 30, phone portrait + 1600x2560@320 portrait/landscape via `wm size`/`wm density`):
+  Edit account, New goal, Add money, Recurring, New budget, Category, Currency search all sit on the keyboard and
+  don't move. Not checked on a real phone or Android 15+ yet.
 ## Next steps
 - Google Play (checked via the API 2026-11-28): 1.3.15 (vc22) completed on internal and closed testing (alpha, 177
   countries incl. ID); alpha also has a leftover duplicate draft. English listing complete, no Indonesian listing,
@@ -114,8 +110,12 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
-- Popups: wrap a Modal's backdrop in `KeyboardSheet`, never `KeyboardAvoidingView behavior="height"` (bounces on
-  newer Android); give sheets `...SHEET_WIDTH` and dialogs `...DIALOG_WIDTH` from `src/theme/layout.ts`.
+- Popups: `<Modal statusBarTranslucent navigationBarTranslucent>` and wrap the backdrop in `KeyboardSheet`, never
+  `KeyboardAvoidingView behavior="height"`; sheets get `...SHEET_WIDTH`, dialogs `...DIALOG_WIDTH`.
+- With 3-button navigation, a popup shows a light nav bar strip when Silo's theme differs from the phone's: RN's
+  `enableEdgeToEdge` (dialog window) forces the contrast scrim from the system theme; a theme override can't win.
+- Emulator keyboard tests: `~/silo-build/shot.sh NAME` focuses the first field, screenshots twice 1s apart and
+  prints the field and IME bounds (identical shots = no bounce).
 - Emulator 5554's Silo now holds the fictional demo dataset (chat-bench fixture, plus 2 goals and a CGV split) used for
   the Play screenshots. Re-seed it the same way for new screenshots: never use the user's real receipts or data.
 - Never un-export `expo.modules.clipboard.ClipboardFileProvider`: its `attachInfo` asserts it is exported and Silo

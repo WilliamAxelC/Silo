@@ -11,7 +11,8 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ### Fixed
 - Popups no longer bounce up and down when you tap a field (Edit account and others on newer Android phones). Every
-  popup with a text field now stays above the keyboard, including Change main currency and Pick transaction.
+  popup with a text field now sits just above the keyboard, in portrait and landscape, including Savings goals,
+  Change main currency and Pick transaction, which the keyboard used to cover.
 
 ## [1.3.15] - 2026-11-28
 
