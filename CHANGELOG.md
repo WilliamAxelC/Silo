@@ -10,6 +10,7 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
   filled in. You can edit it, and nothing is sent until you tap Send.
 - A Google Play build (`SILO_DISTRIBUTION=play`): updates come from Google Play, so it never checks cuang.dev and
   doesn't ask to install apps.
+- Save & split bill: when adding an expense, split it right away instead of saving first and opening it again.
 - Keep app data on uninstall: on Android 10 and later, the uninstall dialog offers to keep Silo's records, so a
   reinstall (or a switch between the Google Play and cuang.dev versions) picks up where you left off.
 

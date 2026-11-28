@@ -928,7 +928,17 @@ export const AddTransactionScreen = () => {
     }
   };
 
-  const handleSave = () => saveTransaction();
+  // "Save & split bill" on a new expense: save, then open the split editor for it. A ref (not state) so the
+  // date-check alert, which calls saveTransaction again, keeps the choice; a plain Save clears it.
+  const splitAfterSaveRef = useRef(false);
+  const handleSave = () => {
+    splitAfterSaveRef.current = false;
+    return saveTransaction();
+  };
+  const handleSaveAndSplit = () => {
+    splitAfterSaveRef.current = true;
+    return saveTransaction();
+  };
 
   const saveTransaction = async (skipDateCheck = false, dateOverride?: Date) => {
     let hasValidationError = false;
@@ -1076,10 +1086,14 @@ export const AddTransactionScreen = () => {
         if (repeat) {
           createRecurringRule(data, repeat, data.date);
         }
+        const openSplitNow =
+          (openSplitAfterSave || splitAfterSaveRef.current) && data.type === 'expense' && typeof newTransactionId === 'number';
+        splitAfterSaveRef.current = false;
         if (receiptQueueId) {
           // The transaction now owns the receipt photo; keep the receipt in "Recently saved" to fix later.
           useReceiptQueueStore.getState().markSaved(receiptQueueId, typeof newTransactionId === 'number' ? newTransactionId : null);
-
+        }
+        if (receiptQueueId && !openSplitNow) {
           const remainingReady = useReceiptQueueStore
             .getState()
             .items.filter((item) => item.status === 'done');
@@ -1105,7 +1119,7 @@ export const AddTransactionScreen = () => {
           }
           return;
         }
-        if (openSplitAfterSave && data.type === 'expense' && typeof newTransactionId === 'number') {
+        if (openSplitNow) {
           const navAny = navigation as unknown as {
             replace?: (screen: string, params: Record<string, unknown>) => void;
           };
@@ -2051,6 +2065,23 @@ export const AddTransactionScreen = () => {
 
           {/* Secondary Actions (Split Bill, Template / Duplicate & Delete) */}
           <View style={styles.secondaryStack}>
+            {!editingId && type === 'expense' && !openSplitAfterSave ? (
+              <View style={styles.secondaryActionRow}>
+                <TouchableOpacity
+                  style={[styles.templateSaveButton, { flex: 1, borderColor: theme.primary, backgroundColor: theme.primaryMuted }]}
+                  onPress={handleSaveAndSplit}
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save and split this bill"
+                  testID="save-and-split"
+                >
+                  <Ionicons name="people-outline" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                  <Text style={[styles.secondaryActionText, { color: theme.primary, fontSize: theme.scaleFont(14) }]}>
+                    Save &amp; split bill
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {editingId && type === 'expense' ? (
               <View style={styles.secondaryActionRow}>
               <TouchableOpacity

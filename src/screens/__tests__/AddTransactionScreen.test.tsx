@@ -494,6 +494,46 @@ describe('AddTransactionScreen', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
+  it('splits a new expense straight from the add screen: Save & split saves it, then opens the split', async () => {
+    mockAddTransaction.mockResolvedValue(42);
+    mockReplace.mockClear();
+    mockNavigate.mockClear();
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Sushi Tei');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('480000');
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findAll((n: any) => n.props.accessibilityLabel === 'Save and split this bill')[0].props.onPress();
+    });
+    expect(mockAddTransaction).toHaveBeenCalledWith(expect.objectContaining({ merchantName: 'Sushi Tei', totalAmount: -480000 }));
+    expect(mockReplace).toHaveBeenCalledWith('SplitBillEditor', { transactionId: 42 });
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
+  it('plain Save on a new expense does not open the split', async () => {
+    mockAddTransaction.mockResolvedValue(43);
+    mockReplace.mockClear();
+    mockNavigate.mockClear();
+    let renderer: any;
+    ReactTestRenderer.act(() => {
+      renderer = ReactTestRenderer.create(<AddTransactionScreen />);
+    });
+    ReactTestRenderer.act(() => {
+      renderer.root.findByProps({ placeholder: 'Merchant or title' }).props.onChangeText('Sushi Tei');
+      renderer.root.findByProps({ placeholder: '0' }).props.onChangeText('480000');
+    });
+    await ReactTestRenderer.act(async () => {
+      await renderer.root.findAll((n: any) => n.props.accessibilityLabel === 'Save transaction')[0].props.onPress();
+    });
+    expect(mockReplace).not.toHaveBeenCalledWith('SplitBillEditor', expect.anything());
+    expect(mockNavigate).not.toHaveBeenCalledWith('SplitBillEditor', expect.anything());
+    ReactTestRenderer.act(() => renderer.unmount());
+  });
+
   it('opens calculator keypad on amount tap and preserves USD decimals end-to-end', async () => {
     useSettingsStore.setState({ currencyCode: 'USD', useThousandsSeparator: true });
     mockAddTransaction.mockResolvedValue(undefined);
