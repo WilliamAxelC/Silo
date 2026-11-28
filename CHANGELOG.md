@@ -19,7 +19,8 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
   doesn't ask to install apps.
 - Save & split bill: when adding an expense, split it right away instead of saving first and opening it again.
 - Keep app data on uninstall: on Android 10 and later, the uninstall dialog offers to keep Silo's records, so a
-  reinstall (or a switch between the Google Play and cuang.dev versions) picks up where you left off.
+  reinstall of the same version (Google Play or cuang.dev) picks up where you left off. Switching between the two
+  still needs Back Up All Data and Restore, because Google Play signs Silo with its own key.
 
 ### Fixed
 - Connect Google Drive: when Google refuses the sign-in because Drive isn't set up for this copy of Silo, Silo says

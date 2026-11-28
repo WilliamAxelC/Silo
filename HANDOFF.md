@@ -67,8 +67,8 @@
   `SILO_PLAY_KEY`; where the key lives is in Claude memory, not here). `check` gave 403 on 2026-11-28 until the account is invited in
   Play Console with release rights and the first AAB is uploaded by hand.
 - Google Drive: works on the website APK (Android client "Silo Direct APK", release SHA-1). The Play-installed copy
-  gets DEVELOPER_ERROR because Play re-signs with its own key: it needs a second Android client with Play's app
-  signing SHA-1 (`publish_play.py signing-cert 21` once API access works, or Play Console, App signing). Older note: They need a
+  gets DEVELOPER_ERROR because Play signs with a Google-generated key: it needs a second Android client with Play's
+  SHA-1 `5E:1C:10:4B:…:29:FB` (see `docs/play/README.md`, App signing). Play and website installs can't update each other. Older note: They need a
   Google Cloud project with the Drive API, a consent screen published to production (drive.file is non-sensitive),
   and an Android OAuth client for `dev.cuang.silo` with the release SHA-1 (see [[silo-drive-sync-plan]] memory). If
   Play App Signing uses a Google-generated key, add a second Android client with Play's app-signing SHA-1.

@@ -12,13 +12,15 @@ definitions.
 - Output: `apks/play.aab`, signed with Silo's release key, which acts as the **upload key**.
 - Version: shares `versionName` / `versionCode` with the cuang.dev APK. Every upload needs a higher `versionCode`.
 
-## App signing (decide before the first upload; it can't be changed later)
+## App signing (done)
 
-- **Recommended: upload Silo's existing signing key** ("Use a different app signing key", then export it with PEPK).
-  Play then delivers APKs signed with the same key as cuang.dev, so a phone can move between the two without
-  reinstalling and losing data.
-- Or let Google generate a new key. Then the Play app and the cuang.dev app can't update each other, and switching
-  needs back up, uninstall, install, restore.
+Play App Signing uses a key Google generated (chosen 2026-11-28). Silo's own key is the upload key. Consequences:
+- Play installs and cuang.dev installs can't update each other; switching needs Back Up All Data, uninstall, install,
+  Restore ("Keep app data" doesn't help across keys).
+- Google sign-in (Drive) needs two Android OAuth clients for `dev.cuang.silo`: one with Silo's SHA-1
+  (`DD:CA:7C:B0:8F:34:9F:70:E2:AB:7C:D4:0D:C2:F0:5C:1D:76:32:E1`, cuang.dev APK) and one with Play's app signing
+  SHA-1 (`5E:1C:10:4B:47:05:0D:34:E5:3C:20:69:E1:A8:DD:81:14:0E:29:FB`, from Play's certificates.zip
+  `deployment_cert.der`).
 
 ## Store listing
 
