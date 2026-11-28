@@ -1,8 +1,8 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed up to `9076e58`; the 1.3.14 commits, tag
-`v1.3.14` and `prod` = `v1.3.14` @ `909e09d` are local only until the user OKs a push). Pushed `prod` = `v1.3.13`.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` pushed up to this commit, `prod` = `v1.3.14` @
+`909e09d` pushed. 1.3.15 (`1e30352`, Play-only renumber) is on the branch, not tagged.
 
 ## Current state
 - **Live:** 1.3.14 (versionCode 21, sha256 `604b0bb0…7ca3`, built from `909e09d`), `version.json` with `apk`.
