@@ -1,8 +1,9 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` pushed up to this commit, `prod` = `v1.3.14` @
-`909e09d` pushed. 1.3.15 (`1e30352`, Play-only renumber) is on the branch, not tagged.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` pushed up to `9f7c6ca`; later local commits
+(`0e21df2` Play signing docs, `2ca4cf3` popup keyboard fix + tablets/foldables, and this handoff) are NOT pushed.
+`prod` = `v1.3.14` @ `909e09d` pushed. 1.3.15 (Play-only renumber) is on the branch, not tagged.
 
 ## Current state
 - **Live:** 1.3.14 (versionCode 21, sha256 `604b0bb0…7ca3`, built from `909e09d`), `version.json` with `apk`.
@@ -46,11 +47,18 @@
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 1031 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 1038 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- Nothing unpublished. Local commits after `9076e58` are not pushed yet (see Last updated).
+- `2ca4cf3` (unreleased, in CHANGELOG [Unreleased]): popups bounced on the user's phone when a field was focused
+  (Edit account; Android 'height' KeyboardAvoidingView resized the view it measured). Every Modal popup now uses
+  `src/components/KeyboardSheet.tsx` (always "padding"); `KeyboardSheet.test.tsx` fails if any file uses "height" or a
+  Modal with a TextInput lacks KeyboardSheet. Tablets/foldables: centred app column (`MAX_CONTENT_WIDTH` 720 in
+  `src/theme/layout.ts`, `AppNavigator` `app-column`), `SHEET_WIDTH`/`DIALOG_WIDTH` on every popup,
+  `plugins/withLargeScreens.js` (no manifest orientation, `app.json` orientation "default", MainActivity locks
+  portrait only below 600dp smallest width, `smallestScreenSize` config change). Being checked on emulator 5554
+  (keyboard popups, `wm size`/`wm density` tablet simulation); not on a real phone yet. Needs a version bump to ship.
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
@@ -60,12 +68,13 @@
   after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
 
 ## Next steps
-- Google Play: the AAB and all listing assets are ready (see Current state). The rest happens in the user's Play
-  Console (listing text in `docs/play/listing/`): app signing choice (recommended: upload Silo's existing key so Play and cuang.dev installs update each
-  other), listing, Data safety, the dataSync declaration (two uses, video links on /play/), then an internal test
-  track. See `docs/play/README.md`. Play uploads: `tools/play-publish/publish_play.py` (service account key path in
-  `SILO_PLAY_KEY`; where the key lives is in Claude memory, not here). `check` gave 403 on 2026-11-28 until the account is invited in
-  Play Console with release rights and the first AAB is uploaded by hand.
+- Google Play (checked via the API 2026-11-28): 1.3.15 (vc22) completed on internal and closed testing (alpha, 177
+  countries incl. ID); alpha also has a leftover duplicate draft. English listing complete, no Indonesian listing,
+  production empty. Personal account: needs 12+ testers opted in to the CLOSED test for 14 consecutive days, then
+  Dashboard → Apply for production. Testers must be on the closed-test email list and tap "Become a tester" on its
+  opt-in link (internal testers and the service account don't count). Then App content (Data safety, rating,
+  dataSync declaration with the /play/ videos) and promote to production. `publish_play.py check` works now
+  (`SILO_PLAY_KEY`; key location in Claude memory). Offered: add the id listing via the API.
 - Google Drive: works on the website APK (Android client "Silo Direct APK", release SHA-1). The Play-installed copy
   gets DEVELOPER_ERROR because Play signs with a Google-generated key: it needs a second Android client with Play's
   SHA-1 `5E:1C:10:4B:…:29:FB` (see `docs/play/README.md`, App signing). Play and website installs can't update each other. Older note: They need a
@@ -105,6 +114,8 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
+- Popups: wrap a Modal's backdrop in `KeyboardSheet`, never `KeyboardAvoidingView behavior="height"` (bounces on
+  newer Android); give sheets `...SHEET_WIDTH` and dialogs `...DIALOG_WIDTH` from `src/theme/layout.ts`.
 - Emulator 5554's Silo now holds the fictional demo dataset (chat-bench fixture, plus 2 goals and a CGV split) used for
   the Play screenshots. Re-seed it the same way for new screenshots: never use the user's real receipts or data.
 - Never un-export `expo.modules.clipboard.ClipboardFileProvider`: its `attachInfo` asserts it is exported and Silo
