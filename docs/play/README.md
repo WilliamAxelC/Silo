@@ -23,21 +23,9 @@ definitions.
 ## Store listing
 
 - **App name:** Silo
-- **Short description (80 max):** Private expense tracker: scan receipts, budgets and split bills, all on your phone.
-- **Full description:**
-
-  Silo is a money tracker that keeps your records on your phone.
-
-  • Scan receipts, or share photos from any app. Silo reads the total, date, shop and items on the phone.
-  • Cashflow and calendar views, reports by category, budgets with plans, savings goals and recurring transactions.
-  • Accounts in 57 currencies, with exchange rates for net worth.
-  • Split a bill with friends, track who paid, and send reminders.
-  • Silo AI: ask about your spending. It runs on your phone after a one-time model download, or with your own AI service.
-  • App Lock, hide your totals with one tap, colour themes and pure black dark mode.
-  • Back up to a file or your own Google Drive, and export CSV.
-
-  No account and no ads. Nothing is uploaded unless you turn on a feature that needs it, and the in-app Privacy page
-  lists each of those features.
+- **Short and full descriptions (EN and ID):** `docs/play/listing/` (`short-en.txt` 80 chars, `short-id.txt`,
+  `full-en.txt`, `full-id.txt`). They lead with "works offline"; keep that true: anything new that goes online must
+  be listed in the in-app Privacy page and in the "Works offline" paragraph.
 
 - **Category:** Finance. **Tags:** budget, expense tracker. **Contact email:** william@cuang.dev
 - **Privacy policy URL:** https://cuang.dev/projects/silo/privacy/

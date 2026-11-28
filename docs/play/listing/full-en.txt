@@ -1,0 +1,33 @@
+Silo is a money tracker that works offline. Your records stay on your phone: no account, no sign-up, no ads, and no copy of your data on our servers.
+
+WORKS OFFLINE
+Adding expenses, scanning receipts, budgets, reports, split bills and Silo AI all run on your phone, with or without a connection. Silo only goes online for things you can see: exchange rates, the one-time AI model download, and features you turn on yourself (Google Drive backup, your own AI service, bug reports). The Privacy page inside the app lists each one.
+
+SCAN RECEIPTS
+• Snap a receipt, import a stack of photos, or share them from any app.
+• Silo reads the shop, date, total and items on your phone.
+• Receipt Inbox reads a whole stack in the background, then you check and save each one.
+
+TRACK YOUR MONEY
+• Cashflow list and calendar with daily totals, search and filters.
+• Accounts for cash, bank and e-wallets, with transfers and net worth.
+• Reports by category, account or tag.
+• Budgets with what's left per day, savings goals and recurring transactions.
+• 57 currencies.
+
+SPLIT BILLS
+• Split equally, by amount or by item, including your own share.
+• Send each person their share on WhatsApp and mark who has paid.
+• You can split while adding an expense.
+
+SILO AI, ON YOUR PHONE
+• Ask about your spending: "How much did I spend on food this month?"
+• Runs on your phone after a one-time model download, so your questions never leave it. Or connect your own AI service if you prefer.
+
+PRIVATE BY DESIGN
+• App Lock with fingerprint, face or phone PIN.
+• Hide your totals with one tap.
+• Daily automatic backups on the phone, backup files you keep wherever you like, optional backups to your own Google Drive, and CSV export.
+• Colour themes and a pure black dark mode.
+
+Silo AI can be wrong, even about your own numbers. Silo is not financial advice. The app is in English.

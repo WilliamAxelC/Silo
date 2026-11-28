@@ -1,0 +1,33 @@
+Silo adalah pencatat keuangan yang bekerja offline. Catatan Anda tetap di ponsel: tanpa akun, tanpa pendaftaran, tanpa iklan, dan tidak ada salinan data Anda di server kami.
+
+BEKERJA OFFLINE
+Mencatat pengeluaran, memindai struk, anggaran, laporan, bagi tagihan, dan Silo AI semuanya berjalan di ponsel Anda, dengan atau tanpa internet. Silo hanya terhubung ke internet untuk hal yang Anda lihat: kurs mata uang, unduhan model AI satu kali, dan fitur yang Anda aktifkan sendiri (cadangan Google Drive, layanan AI pilihan Anda, laporan bug). Halaman Privasi di dalam aplikasi menjelaskan masing-masing.
+
+PINDAI STRUK
+• Foto struk, impor banyak foto sekaligus, atau bagikan dari aplikasi lain.
+• Silo membaca nama toko, tanggal, total, dan daftar barang di ponsel Anda.
+• Kotak Masuk Struk membaca setumpuk struk di latar belakang, lalu Anda periksa dan simpan satu per satu.
+
+CATAT KEUANGAN
+• Daftar arus kas dan kalender dengan total harian, pencarian, dan filter.
+• Akun tunai, bank, dan dompet digital, dengan transfer dan kekayaan bersih.
+• Laporan per kategori, akun, atau tag.
+• Anggaran dengan sisa per hari, target tabungan, dan transaksi berulang.
+• 57 mata uang.
+
+BAGI TAGIHAN
+• Bagi rata, per nominal, atau per barang, termasuk bagian Anda sendiri.
+• Kirim bagian tiap orang lewat WhatsApp dan tandai siapa yang sudah bayar.
+• Bisa langsung dibagi saat mencatat pengeluaran.
+
+SILO AI, DI PONSEL ANDA
+• Tanyakan pengeluaran Anda: "Berapa pengeluaran makan saya bulan ini?"
+• Berjalan di ponsel setelah unduhan model satu kali, jadi pertanyaan Anda tidak keluar dari ponsel. Atau hubungkan layanan AI Anda sendiri.
+
+PRIVASI SEJAK AWAL
+• Kunci Aplikasi dengan sidik jari, wajah, atau PIN ponsel.
+• Sembunyikan total dengan sekali ketuk.
+• Cadangan otomatis harian di ponsel, file cadangan yang bisa Anda simpan di mana saja, cadangan opsional ke Google Drive Anda sendiri, dan ekspor CSV.
+• Tema warna dan mode gelap hitam pekat.
+
+Silo AI bisa keliru, bahkan tentang angka Anda sendiri. Silo bukan nasihat keuangan. Tampilan aplikasi saat ini dalam bahasa Inggris.
