@@ -41,8 +41,10 @@ definitions.
 
 - **Category:** Finance. **Tags:** budget, expense tracker. **Contact email:** william@cuang.dev
 - **Privacy policy URL:** https://cuang.dev/projects/silo/privacy/
-- **Screenshots:** at least 2 phone screenshots (Cashflow, Reports, receipt scan, Settings themes). Use demo data, not
-  real receipts.
+- **Graphics (ready):** https://cuang.dev/projects/silo/play/ has the 512 px icon, the 1024 x 500 feature graphic,
+  8 phone screenshots (1080 x 1920, made-up data) and a zip of all of them. Sources: `docs/play/assets/icon-512.png`;
+  the screenshots were taken on emulator 5554 with the chat benchmark's fictional dataset
+  (`src/services/ai/chatBench/fixture.ts` seeded into a DB file and copied in as `silo.db`).
 
 ## App content
 
@@ -53,12 +55,13 @@ definitions.
   crypto.
 - **AI-generated content:** Silo AI answers have a **Report** button. It opens the in-app report form with the question
   and answer filled in, and the report goes to the developer.
-- **Foreground service (dataSync):** declare two uses.
-  1. Downloading the on-device AI model (about 0.7 GB), which the user starts with Download, with a progress
-     notification.
-  2. Reading a stack of scanned receipts in the background, which the user starts by scanning or sharing several
-     photos.
-  Google asks for a short screen recording of each.
+- **Foreground service (dataSync):** declare two uses, each with a video link.
+  1. Network processing, Other: downloading the on-device AI model (532 MB), which the user starts with Download
+     Model, with a progress notification (Pause, Cancel). Video:
+     https://cuang.dev/projects/silo/play/silo-fgs-datasync.mp4
+  2. Local processing, Other: reading imported or scanned receipts on the phone (text recognition plus the on-device
+     AI), which the user starts from Receipt Inbox, with a "Reading receipts: n of m" notification. Video:
+     https://cuang.dev/projects/silo/play/silo-fgs-receipts.mp4
 - **Permissions to explain if asked:**
   - Camera: scanning receipts.
   - Contacts: optional, to pick people for split bills; contacts stay on the phone.
@@ -81,6 +84,13 @@ Reports are deleted 12 months after their last activity.
 Not collected by the developer:
 - Exchange-rate requests send only the home currency code.
 - The AI model download sends nothing about the user.
+
+## Automating releases (optional)
+
+Uploads can be scripted with the Google Play Developer API once the app exists and the first AAB was uploaded by
+hand: a Google Cloud service account with the Android Publisher API enabled, invited in Play Console (Users and
+permissions) with release rights for Silo. Its JSON key stays off the repo (like the signing key). A script can then
+upload `play.aab` to a track (internal first) with release notes.
 
 ## Before submitting
 

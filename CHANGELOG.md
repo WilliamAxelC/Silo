@@ -5,6 +5,8 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+## [1.3.14] - 2026-11-28
+
 ### Added
 - Report a Silo AI answer: tap Report under any finished answer to open the report form with the question and answer
   filled in. You can edit it, and nothing is sent until you tap Send.

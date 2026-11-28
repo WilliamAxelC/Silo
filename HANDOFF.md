@@ -1,12 +1,17 @@
 # Silo handoff
 
 ## Last updated
-2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed 2026-11-28 up to `9076e58` with `prod` and tags up to `v1.3.13`; 1.3.14 commits are local only). `prod` = `v1.3.13` @ `5c7667c`.
+2026-11-28 by Claude Code (Opus 5.5). Branch `feat/multi-currency` (pushed up to `9076e58`; the 1.3.14 commits, tag
+`v1.3.14` and `prod` = `v1.3.14` @ `909e09d` are local only until the user OKs a push). Pushed `prod` = `v1.3.13`.
 
 ## Current state
-- **Live:** 1.3.13 (versionCode 20, sha256 `45425216…63cd`), `version.json` has the `apk` field again (in-app
-  updates from 1.3.12 on; 1.3.11 and older get "not the expected Silo version" and should use the download page).
-  1.3.13: tap a total (Cashflow card, Net worth) to hide it (`hideTotals`, also a switch in Settings), colour themes
+- **Live:** 1.3.14 (versionCode 21, sha256 `604b0bb0…7ca3`, built from `909e09d`), `version.json` with `apk`.
+  1.3.14: Save & split bill on a new expense (`AddTransactionScreen` `handleSaveAndSplit`, also from receipt review),
+  Report button on Silo AI answers, keep app data on uninstall (`plugins/withKeepDataOnUninstall.js`,
+  `hasFragileUserData`; checked on the emulator: "Keep 1.07 GB of app data"), plain Drive DEVELOPER_ERROR message
+  (`explainSignInError`), Privacy/Terms 2026-11-28 (`TERMS_VERSION` 2026-11-28, re-agree once).
+  The Google Play build of the same commit is `~/silo-releases/silo-1.3.14-play.aab` on orca (sha256 `9155ca12…84a6`).
+  Before that 1.3.13 (versionCode 20, sha256 `45425216…63cd`): tap a total (Cashflow card, Net worth) to hide it (`hideTotals`, also a switch in Settings), colour themes
   (`theme/colors.ts` `ACCENTS`, setting `accentColor`) and pure black dark mode (`pureBlack`), More and Settings
   regrouped (Settings takes `{ section: 'privacy' | 'backup' | 'ai' }` and scrolls there), and
   `plugins/withAndroidComponentHardening.js` un-exports the cropper activity. Before that 1.3.12 (versionCode 19,
@@ -30,26 +35,18 @@
   shows a split badge (amber pending, green all paid). 1.3.4 added Split Bill, Chat with records, the AI notice.
   1.3.3+ phones update in the app (`version.json` has the apk url + sha256 + size). Phones on 1.3.2 or older need the
   one-time back up / uninstall / install / restore (download page `#upgrade`).
-- **Live web pages:** Privacy Policy and Terms (EN + ID, the ID versions prevail) under /projects/silo/privacy/ and /terms/.
-  Privacy updated 2026-11-24 for Split Bill and both pages on 2026-11-27 for the Cuang name and new package id. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
+- **Live web pages:** Privacy Policy and Terms (EN + ID, the ID versions prevail) under /projects/silo/privacy/ and /terms/,
+  last updated 2026-11-28 (Google Play version, keep app data, new menu names). Unlisted
+  https://cuang.dev/projects/silo/play/ (noindex) holds the Play listing assets: icon, feature graphic, 8 screenshots
+  (made-up data), a zip, release notes, and the two foreground-service videos the Play Console asks for. Contact: william@cuang.dev. Source: `docs/legal/` (see its README first).
 - **Ticket system:** in-app reports go to the relay `silo-tickets` (docker-host :8131) and on to Discord #silo
   (Fix / Reject). The dispatcher on orca (`tools/ticket-dispatcher/run.sh`, cron @reboot) runs Antigravity and
   auto-merges passing fixes into `test`; ticket agents add a CHANGELOG line.
-- 1026 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
+- 1031 jest tests pass (1 skipped: the model benchmark); `npx tsc --noEmit` is clean. Emulator (5554): 1.3.5 to 1.3.6 upgrade and
   Silo AI chat verified with the 0.8B model copied in from emulator 5556 (`~/silo-build/chat-bench/ask.sh` style).
 
 ## In progress
-- **1.3.14 built, not published or pushed** (commit `877ced1`): Google Play variant (`SILO_DISTRIBUTION=play` via
-  `app.config.js`; `src/services/distribution.ts` `isPlayBuild()` turns off the cuang.dev update check, banner,
-  update card, test channel, download page and installer; `REQUEST_INSTALL_PACKAGES` blocked), a Report button on
-  finished Silo AI answers (prefills `Report` with `title` / `description`), and Privacy/Terms 2026-11-28 (Play
-  section, new menu names) with `TERMS_VERSION` 2026-11-28. The legal pages are not published yet. They must go live
-  before the Play submission, ideally with a web 1.3.14 so the Terms gate matches.
-  - Play AAB: `~/silo-build/apks/play.aab` on ai-renderer (`build_play.sh`), 1.3.14 / versionCode 21, signed with
-    Silo's key (upload key), arm64-v8a + x86_64, 16 KB aligned, no install-apps permission. Emulator-checked (Play
-    variant installed over web 1.3.13): Terms re-accept, More shows "Updates come from Google Play", Privacy says
-    no update checks, AI answer → Report → prefilled form.
-  - Play Console steps and recommended answers: `docs/play/README.md`.
+- Nothing unpublished. Local commits after `9076e58` are not pushed yet (see Last updated).
 - Background model downloads: `modules/receipt-normalize/.../ModelDownloadService.kt` (foreground service, dataSync,
   notification 4108, HTTP Range resume, SHA-256), JS adapter `src/services/ai/nativeModelDownload.ts`, wired into
   `modelLifecycle.ts` (transfer manifest `resumeData: 'native-range'`; `handleExternalStop` for an attached download,
@@ -59,9 +56,14 @@
   after a kill, full background download to install. Not checked on a real phone or Android 14+ yet.
 
 ## Next steps
-- Google Play: the build is ready (see In progress). The rest happens in the user's Play Console: app signing choice
-  (recommended: upload Silo's existing key so Play and cuang.dev installs update each other), listing, Data safety,
-  the foreground-service declaration with videos, then an internal test track. See `docs/play/README.md`.
+- Google Play: the AAB and all listing assets are ready (see Current state). The rest happens in the user's Play
+  Console: app signing choice (recommended: upload Silo's existing key so Play and cuang.dev installs update each
+  other), listing, Data safety, the dataSync declaration (two uses, video links on /play/), then an internal test
+  track. See `docs/play/README.md`. The user asked about automating Play uploads: needs a service account (README).
+- Google Drive: the user hit DEVELOPER_ERROR on 2026-11-28 because no Android OAuth client exists yet. They need a
+  Google Cloud project with the Drive API, a consent screen published to production (drive.file is non-sensitive),
+  and an Android OAuth client for `dev.cuang.silo` with the release SHA-1 (see [[silo-drive-sync-plan]] memory). If
+  Play App Signing uses a Google-generated key, add a second Android client with Play's app-signing SHA-1.
 - Watch the user's first real model download on 1.3.11 (Android 13+ asks for notification permission first).
 - Watch the user's phone update to 1.3.6 and their real Silo AI questions; add any miss to `BENCH_CASES` first.
 - The user is fine with Silo AI as a somewhat useful gimmick (2026-11-25): no more AI tuning unless they report a problem.
@@ -95,6 +97,8 @@
 - Release notes go in `version.json` (`notes`, plain text, no em dashes) and CHANGELOG.md.
 
 ## Gotchas
+- Emulator 5554's Silo now holds the fictional demo dataset (chat-bench fixture, plus 2 goals and a CGV split) used for
+  the Play screenshots. Re-seed it the same way for new screenshots: never use the user's real receipts or data.
 - Never un-export `expo.modules.clipboard.ClipboardFileProvider`: its `attachInfo` asserts it is exported and Silo
   crashes at launch (happened in a 1.3.13 test build). Check the emulator after any manifest change.
 - Bundles for the build box need `HEAD`: `git bundle create <file> HEAD feat/multi-currency`, or prebuild fails.
