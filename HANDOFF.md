@@ -57,9 +57,11 @@
 
 ## Next steps
 - Google Play: the AAB and all listing assets are ready (see Current state). The rest happens in the user's Play
-  Console: app signing choice (recommended: upload Silo's existing key so Play and cuang.dev installs update each
+  Console (listing text in `docs/play/listing/`): app signing choice (recommended: upload Silo's existing key so Play and cuang.dev installs update each
   other), listing, Data safety, the dataSync declaration (two uses, video links on /play/), then an internal test
-  track. See `docs/play/README.md`. The user asked about automating Play uploads: needs a service account (README).
+  track. See `docs/play/README.md`. Play uploads: `tools/play-publish/publish_play.py` (service account key path in
+  `SILO_PLAY_KEY`; where the key lives is in Claude memory, not here). `check` gave 403 on 2026-11-28 until the account is invited in
+  Play Console with release rights and the first AAB is uploaded by hand.
 - Google Drive: the user hit DEVELOPER_ERROR on 2026-11-28 because no Android OAuth client exists yet. They need a
   Google Cloud project with the Drive API, a consent screen published to production (drive.file is non-sensitive),
   and an Android OAuth client for `dev.cuang.silo` with the release SHA-1 (see [[silo-drive-sync-plan]] memory). If
