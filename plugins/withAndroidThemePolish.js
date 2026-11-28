@@ -3,8 +3,6 @@
 //    white contrast scrim over the 3-button navigation bar under edge-to-edge mode (F-22).
 // 2. Sets colorAccent / colorControlActivated / colorPrimary to Silo's blue brand palette so native
 //    DatePicker dialogs and Material controls match Silo instead of AppCompat's default #00796B teal (F-30).
-// 3. Replaces React Native's Theme.FullScreenDialog (used by every Modal) with the same items plus a
-//    transparent nav bar and no contrast scrim, so popups don't show a light bar in Dark Mode either.
 const {
   AndroidConfig,
   withAndroidColors,
@@ -45,25 +43,6 @@ function applyAndroidStyles(stylesXml) {
     appTheme.item = upsertStyleItem(appTheme.item, 'colorAccent', '@color/colorAccent');
     appTheme.item = upsertStyleItem(appTheme.item, 'colorControlActivated', '@color/colorAccent');
   }
-  const dialogItems = [
-    ['android:windowNoTitle', 'true'],
-    ['android:windowIsFloating', 'false'],
-    ['android:windowBackground', '@android:color/transparent'],
-    ['android:windowDrawsSystemBarBackgrounds', 'true'],
-    ['android:statusBarColor', '@android:color/transparent'],
-    ['android:navigationBarColor', '@android:color/transparent'],
-  ];
-  let dialog = styleList.find((style) => style?.$?.name === 'Theme.FullScreenDialog');
-  if (!dialog) {
-    dialog = { $: { name: 'Theme.FullScreenDialog' }, item: [] };
-    styleList.push(dialog);
-  }
-  for (const [name, value] of dialogItems) dialog.item = upsertStyleItem(dialog.item, name, value);
-  dialog.item = upsertStyleItem(dialog.item, 'android:enforceNavigationBarContrast', 'false', {
-    'tools:targetApi': '29',
-  });
-  resources.style = styleList;
-  stylesXml.resources = resources;
   return stylesXml;
 }
 

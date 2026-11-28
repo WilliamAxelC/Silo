@@ -32,23 +32,6 @@ describe('withAndroidThemePolish Expo config plugin (F-22, F-30)', () => {
     expect(twice.resources.style[0].item).toEqual(items);
   });
 
-  it('regression: popups get no light contrast bar over the nav bar in dark mode (React Native dialog theme)', () => {
-    const stylesXml = { resources: { style: [{ $: { name: 'AppTheme', parent: 'Theme.AppCompat.DayNight.NoActionBar' }, item: [] }] } };
-    const updated = plugin.applyAndroidStyles(stylesXml);
-    const dialogs = updated.resources.style.filter((s: any) => s?.$?.name === 'Theme.FullScreenDialog');
-    expect(dialogs).toHaveLength(1);
-    const value = (name: string) => dialogs[0].item.find((i: any) => i?.$?.name === name)?._;
-    // React Native's own items are kept, since this replaces its style of the same name.
-    expect(value('android:windowNoTitle')).toBe('true');
-    expect(value('android:windowIsFloating')).toBe('false');
-    expect(value('android:windowBackground')).toBe('@android:color/transparent');
-    expect(value('android:windowDrawsSystemBarBackgrounds')).toBe('true');
-    expect(value('android:statusBarColor')).toBe('@android:color/transparent');
-    expect(value('android:navigationBarColor')).toBe('@android:color/transparent');
-    expect(value('android:enforceNavigationBarContrast')).toBe('false');
-    expect(plugin.applyAndroidStyles(updated).resources.style.filter((s: any) => s?.$?.name === 'Theme.FullScreenDialog')).toHaveLength(1);
-  });
-
   it('assigns Silo light and dark accent hex values without duplicating entries', () => {
     const emptyColors = { resources: { color: [] } };
     const light = plugin.applyLightColors(emptyColors);
