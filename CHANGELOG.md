@@ -5,6 +5,8 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+## [1.3.16] - 2026-11-28
+
 ### Added
 - Tablets and foldables: on wide screens Silo is a centred column and popups stop stretching edge to edge; tablets
   and unfolded foldables can rotate (phones stay portrait), and folding or unfolding no longer restarts the screen.
