@@ -116,8 +116,8 @@
   `backup/pre-scrub-1.3.6` and tag `backup/v1.3.6-pre-scrub` hold the old commits: never push them.
 - `android/` is gitignored, but `android/app/build.gradle` and 3 other files are tracked. `git add` with an ignored
   path aborts the whole add, so add them with `git add -f` separately and check `git log` before bundling.
-- Release signing: `plugins/withReleaseSigning.js` plus `SILO_RELEASE_SIGNING` on the build box (key in
-  `~/silo-build/keys`, backup at orca `~/.local/share/silo-release`). Losing the key means no more updates.
+- Release signing: `plugins/withReleaseSigning.js` plus `SILO_RELEASE_SIGNING` on the build box (key and
+  backup locations are in Claude memory, never in this public repo). Losing the key means no more updates.
 - Never `pkill -f <pattern>` over ssh (it kills its own shell, even `[b]racket` patterns if the same command line
   mentions the name again); kill by PID. Wait on a build with `while kill -0 <pid>; do sleep 20; done`.
 - Model download test on emulator 5554: move `files/ai/models/qwen3.5-0.8b/*.gguf` and `files/ai/model-manifest.json`
