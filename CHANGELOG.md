@@ -5,6 +5,11 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+## [1.3.15] - 2026-11-28
+
+### Changed
+- Same app as 1.3.14 with a new version number, so Google Play accepts it as an update.
+
 ## [1.3.14] - 2026-11-28
 
 ### Added
