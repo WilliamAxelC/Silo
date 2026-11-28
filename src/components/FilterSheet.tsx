@@ -16,6 +16,7 @@ import {
   type TransactionFilters,
 } from '../features/transactions/filters';
 import type { CategoryRecord, TagRecord, Wallet } from '../features/transactions/types';
+import { SHEET_WIDTH } from '../theme/layout';
 
 export type FilterSection = 'type' | 'account' | 'category' | 'tag' | 'date';
 
@@ -268,7 +269,7 @@ export function FilterSheet({
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  card: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingTop: 16, paddingHorizontal: 18, maxHeight: '85%' },
+  card: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, paddingTop: 16, paddingHorizontal: 18, maxHeight: '85%' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   title: { fontWeight: '800' },
   scroll: { flexGrow: 0 },

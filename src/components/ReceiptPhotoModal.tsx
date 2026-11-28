@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Dimensions,
+  useWindowDimensions,
   Image,
   Modal,
   ScrollView,
@@ -56,13 +56,14 @@ export const ReceiptPhotoModal: React.FC<ReceiptPhotoModalProps> = ({ visible, i
     };
   }, [visible, transactionId, localUri]);
 
+  // Follows rotation and fold/unfold, unlike Dimensions.get.
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const imageUri = driveUri ?? localUri;
   if (!visible || !imageUri) {
     return null;
   }
 
   const scale = ZOOM_STEPS[zoomIndex] ?? 1;
-  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
   const viewportHeight = Math.max(screenHeight - insets.top - insets.bottom - 120, 320);
   const imageWidth = Math.round(screenWidth * scale);
   const imageHeight = Math.round(viewportHeight * scale);

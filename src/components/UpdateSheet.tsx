@@ -6,6 +6,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppUpdateStore } from '../services/appUpdate';
 import { getInstalledVersion } from '../services/updates';
+import { SHEET_WIDTH } from '../theme/layout';
 
 const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 
@@ -124,7 +125,7 @@ export function UpdateSheet() {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18, gap: 8 },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18, gap: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   notes: { gap: 4, marginTop: 6 },
   progressWrap: { gap: 6, marginTop: 8 },

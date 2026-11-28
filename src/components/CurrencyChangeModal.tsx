@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardSheet } from './KeyboardSheet';
 
 import { expoDb } from '../db/index';
 import { getCurrencySymbol } from '../features/transactions/amount';
@@ -9,6 +10,7 @@ import { formatRate, parseRateText } from '../features/currency/conversion';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { DIALOG_WIDTH } from '../theme/layout';
 
 interface Props {
   fromCurrency: string;
@@ -77,7 +79,7 @@ export function CurrencyChangeModal({ fromCurrency, toCurrency, onClose }: Props
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <KeyboardSheet style={styles.overlay}>
         <View style={[styles.card, { backgroundColor: theme.surface }]} testID="currency-change-modal">
           <Text style={[styles.title, { color: theme.text, fontSize: theme.scaleFont(17) }]}>
             Switch main currency to {toCurrency}?
@@ -130,14 +132,14 @@ export function CurrencyChangeModal({ fromCurrency, toCurrency, onClose }: Props
             <Text style={{ color: theme.textMuted, fontSize: theme.scaleFont(13), fontWeight: '600' }}>Cancel</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardSheet>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
-  card: { borderRadius: 18, padding: 20, gap: 12 },
+  card: { ...DIALOG_WIDTH, borderRadius: 18, padding: 20, gap: 12 },
   title: { fontWeight: '700' },
   body: { lineHeight: 19 },
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

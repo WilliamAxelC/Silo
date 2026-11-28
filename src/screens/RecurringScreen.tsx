@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -44,6 +43,8 @@ import {
 } from '../services/recurring';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from '../components/KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface RecurringDraft {
   id: number | null;
@@ -333,7 +334,7 @@ export const RecurringScreen = () => {
       />
 
       <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={closeEditor}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.overlay}>
+        <KeyboardSheet style={styles.overlay}>
           <View
             testID="recurring-editor-sheet"
             style={[
@@ -533,7 +534,7 @@ export const RecurringScreen = () => {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
       </Modal>
     </SafeAreaView>
   );
@@ -590,7 +591,7 @@ const styles = StyleSheet.create({
   amount: { fontSize: 14, fontWeight: '700' },
   iconBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
   sheetTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
   label: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   typeToggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 12, overflow: 'hidden' },

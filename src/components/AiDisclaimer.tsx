@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { expoDb } from '../db/index';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
+import { SHEET_WIDTH } from '../theme/layout';
 
 const KEY = 'aiDisclaimerSeen';
 export const AI_DISCLAIMER_CAPTION = 'Silo AI can be wrong, even about your own numbers. Check important figures. Not financial advice.';
@@ -77,7 +78,7 @@ export function AiDisclaimerModal() {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  card: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 20, gap: 12 },
+  card: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 20, gap: 12 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   point: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   pointText: { flex: 1 },

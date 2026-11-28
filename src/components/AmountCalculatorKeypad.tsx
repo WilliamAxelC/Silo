@@ -15,6 +15,7 @@ import {
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { SHEET_WIDTH } from '../theme/layout';
 
 const OPERATORS = new Set(['+', '-', '*', '/']);
 
@@ -372,6 +373,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheetWrap: {
+    ...SHEET_WIDTH,
     width: '100%',
   },
   panel: {

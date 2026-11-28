@@ -41,6 +41,8 @@ import type { NavigationProps } from '../navigation/types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from '../components/KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 type MainViewTab = 'bills' | 'people';
 type BillFilterTab = 'pending' | 'settled' | 'all';
@@ -641,7 +643,7 @@ export const SplitBillsScreen = () => {
         animationType="slide"
         onRequestClose={() => setNewPickerVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardSheet style={styles.modalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -739,7 +741,7 @@ export const SplitBillsScreen = () => {
               }
             />
           </View>
-        </View>
+        </KeyboardSheet>
       </Modal>
 
       <ContactsPickerModal
@@ -870,7 +872,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
   },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
+  modalSheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   modalTitle: { fontWeight: '700' },
   modalCloseBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },

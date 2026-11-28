@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { searchCurrencies, SUPPORTED_CURRENCIES } from '../features/currency/currencies';
 import { getCurrencySymbol } from '../features/transactions/amount';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from './KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface Props {
   visible: boolean;
@@ -40,7 +42,7 @@ export function CurrencyPickerModal({ visible, title = 'Choose currency', select
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.backdrop}>
+      <KeyboardSheet style={styles.backdrop}>
         <View
           style={[
             styles.sheet,
@@ -100,14 +102,14 @@ export function CurrencyPickerModal({ visible, title = 'Choose currency', select
             }}
           />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '85%', minHeight: '60%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '85%', minHeight: '60%' },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   closeBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, marginBottom: 8 },

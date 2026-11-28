@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -40,6 +39,8 @@ import { useSplitsStore } from '../features/splits/store';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from './KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 
 /**
@@ -244,10 +245,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
       animationType="slide"
       onRequestClose={() => void (step === 'model' ? handleModelLater() : handleSkip())}
     >
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <KeyboardSheet style={styles.overlay}>
         <View
           testID="welcome-sheet"
           style={[
@@ -458,7 +456,7 @@ export const WelcomeSheet: React.FC<WelcomeSheetProps> = ({ visible }) => {
           </ScrollView>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
     </Modal>
   );
 };
@@ -472,6 +470,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    ...SHEET_WIDTH,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,

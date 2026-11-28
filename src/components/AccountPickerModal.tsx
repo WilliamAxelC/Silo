@@ -7,6 +7,7 @@ import { formatDisplayCurrency } from '../features/transactions/amount';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { SHEET_WIDTH } from '../theme/layout';
 
 export const WALLET_TYPE_META: Record<WalletType, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
   cash: { label: 'Cash', icon: 'cash-outline' },
@@ -108,7 +109,7 @@ export const AccountPickerModal = ({ visible, title, wallets, selectedId, exclud
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '70%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '70%' },
   title: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 8 },
   name: { flex: 1, fontSize: 15, fontWeight: '600' },

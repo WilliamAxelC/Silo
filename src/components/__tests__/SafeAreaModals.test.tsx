@@ -155,6 +155,9 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
     const sheet = renderer.root.findByProps({ testID: 'account-editor-sheet' });
     const sheetStyle = StyleSheet.flatten(sheet.props.style);
     expect(sheetStyle.maxHeight).toBe('88%');
+    // Tablets and unfolded foldables: the sheet stops stretching edge to edge.
+    expect(sheetStyle.maxWidth).toBe(640);
+    expect(sheetStyle.alignSelf).toBe('center');
     expect(sheetStyle.paddingBottom).toBe(MOCK_INSETS.bottom + 24);
 
     const scroll = renderer.root.findByProps({ testID: 'account-editor-scroll' });
@@ -170,7 +173,7 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
     ReactTestRenderer.act(() => renderer.unmount());
   });
 
-  it('uses explicit height KeyboardAvoidingView behavior on Android for CategorySelectorModal and WelcomeSheet (MIN-01)', () => {
+  it('keeps CategorySelectorModal and WelcomeSheet above the keyboard on Android with padding, not height (MIN-01)', () => {
     const originalOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
     try {
@@ -190,14 +193,14 @@ describe('Modal & bottom-sheet bottom safe-area insets (F-06)', () => {
           )
         );
       });
-      expect(catRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('height');
+      expect(catRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('padding');
       ReactTestRenderer.act(() => catRenderer.unmount());
 
       let welcomeRenderer: any;
       ReactTestRenderer.act(() => {
         welcomeRenderer = ReactTestRenderer.create(withInsets(<WelcomeSheet visible />));
       });
-      expect(welcomeRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('height');
+      expect(welcomeRenderer.root.findByType(KeyboardAvoidingView).props.behavior).toBe('padding');
       ReactTestRenderer.act(() => welcomeRenderer.unmount());
     } finally {
       Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });

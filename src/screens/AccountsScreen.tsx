@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -34,6 +33,8 @@ import { quickCurrencyChoices, walletCurrencyOf } from '../features/currency/cur
 import { CurrencyPickerModal } from '../components/CurrencyPickerModal';
 import { refreshDailyRates, walletHomeRate } from '../services/fx/rates';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from '../components/KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface Draft {
   id: number | null;
@@ -321,7 +322,7 @@ export const AccountsScreen = () => {
       </ScrollView>
 
       <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.overlay}>
+        <KeyboardSheet style={styles.overlay}>
           <View
             testID="account-editor-sheet"
             style={[
@@ -520,7 +521,7 @@ export const AccountsScreen = () => {
               ) : null}
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
       </Modal>
     </SafeAreaView>
   );
@@ -559,7 +560,7 @@ const styles = StyleSheet.create({
   archivedText: { fontSize: 13, fontWeight: '600' },
   hint: { fontSize: 12, lineHeight: 18, marginTop: 8 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 28, maxHeight: '88%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 28, maxHeight: '88%' },
   sheetTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   input: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },

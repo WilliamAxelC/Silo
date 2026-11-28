@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { PRIVACY_URL, TERMS_URL, termsPrompt, useTermsStore } from '../services/terms';
+import { SHEET_WIDTH } from '../theme/layout';
 
 /** First launch: agree to the Terms. Changed terms: shown before they apply; "Later" keeps the old ones. */
 export function TermsGate() {
@@ -76,7 +77,7 @@ export function TermsGate() {
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  card: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 20, gap: 12 },
+  card: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 20, gap: 12 },
   links: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
   agree: { minHeight: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },

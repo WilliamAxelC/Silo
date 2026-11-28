@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -22,6 +21,8 @@ import { CurrencyPickerModal } from './CurrencyPickerModal';
 import { formatAmountForInput, formatAmountInput, getCurrencySymbol, parseSignedAmount } from '../features/transactions/amount';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from './KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 const UNITS: Array<{ key: BudgetUnit; one: string; many: string }> = [
   { key: 'day', one: 'Day', many: 'Days' },
@@ -151,7 +152,7 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.overlay}>
+      <KeyboardSheet style={styles.overlay}>
         <View
           testID="budget-plan-editor"
           style={[styles.sheet, { backgroundColor: theme.surface, paddingBottom: getBottomInsetPadding(insets.bottom, 20) }]}
@@ -365,7 +366,7 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
             </TouchableOpacity>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
       {picker ? (
         <DateTimePicker
           value={new Date(picker === 'start' ? startDate : endDate ?? startDate)}
@@ -386,7 +387,7 @@ export function BudgetPlanEditor({ plan, homeCurrency, defaultStart, categories,
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '92%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '92%' },
   content: { padding: 20, gap: 8 },
   title: { fontWeight: '800', marginBottom: 4 },
   label: { fontWeight: '700', marginTop: 10 },

@@ -18,6 +18,7 @@ import {
 import type { DriveFile } from '../services/drive/driveApi';
 import { getErrorMessage } from '../services/ai/localInferenceTypes';
 import { PRIVACY_POLICY_URL } from '../screens/PrivacyScreen';
+import { SHEET_WIDTH } from '../theme/layout';
 
 const OFFLOAD_OPTIONS = [0, 3, 6, 12];
 
@@ -277,6 +278,6 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18 },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18 },
   backupRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 52, borderBottomWidth: 1 },
 });

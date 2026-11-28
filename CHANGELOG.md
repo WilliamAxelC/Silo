@@ -5,6 +5,14 @@ published at https://cuang.dev/projects/silo/ (tags `vX.Y.Z`, branch `prod` = la
 
 ## [Unreleased]
 
+### Added
+- Tablets and foldables: on wide screens Silo is a centred column and popups stop stretching edge to edge; tablets
+  and unfolded foldables can rotate (phones stay portrait), and folding or unfolding no longer restarts the screen.
+
+### Fixed
+- Popups no longer bounce up and down when you tap a field (Edit account and others on newer Android phones). Every
+  popup with a text field now stays above the keyboard, including Change main currency and Pick transaction.
+
 ## [1.3.15] - 2026-11-28
 
 ### Changed

@@ -7,13 +7,13 @@ import {
   ScrollView,
   TextInput,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
 import type { CategoryRecord } from '../features/transactions/types';
+import { KeyboardSheet } from './KeyboardSheet';
+import { DIALOG_WIDTH } from '../theme/layout';
 
 interface CategorySelectorModalProps {
   visible: boolean;
@@ -67,10 +67,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={styles.keyboardShell}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <KeyboardSheet style={styles.keyboardShell}>
         <TouchableOpacity
           style={[styles.modalOverlay, getModalOverlayInsetStyle(insets, 16)]}
           activeOpacity={1}
@@ -233,7 +230,7 @@ export const CategorySelectorModal: React.FC<CategorySelectorModalProps> = ({
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
     </Modal>
   );
 };
@@ -249,6 +246,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   modalContent: {
+    ...DIALOG_WIDTH,
     borderRadius: 20,
     borderWidth: 1,
     padding: 18,

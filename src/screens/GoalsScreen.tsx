@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,6 +21,8 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { formatAmountForInput, formatAmountInput, formatDisplayCurrency, parseSignedAmount } from '../features/transactions/amount';
 import { goalProgress, useGoalsStore, validateGoal, type Goal, type GoalSource } from '../features/goals/goals';
+import { KeyboardSheet } from '../components/KeyboardSheet';
+import { DIALOG_WIDTH, SHEET_WIDTH } from '../theme/layout';
 
 type Draft = {
   id?: number;
@@ -218,7 +218,7 @@ export const GoalsScreen = () => {
       </ScrollView>
 
       <Modal visible={draft !== null} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSheet style={styles.overlay}>
           <View style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: getBottomInsetPadding(insets.bottom, 16) }]}>
             <ScrollView keyboardShouldPersistTaps="handled">
               <Text style={{ color: theme.text, fontWeight: '800', fontSize: theme.scaleFont(18), marginBottom: 12 }}>
@@ -344,7 +344,7 @@ export const GoalsScreen = () => {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
         {pickDate ? (
           <DateTimePicker
             value={new Date(draft?.targetDate ?? Date.now() + 90 * 86400000)}
@@ -359,7 +359,7 @@ export const GoalsScreen = () => {
       </Modal>
 
       <Modal visible={adding !== null} transparent animationType="fade" onRequestClose={() => setAdding(null)}>
-        <KeyboardAvoidingView style={[styles.overlay, styles.centered]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSheet style={[styles.overlay, styles.centered]}>
           <View style={[styles.dialog, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={{ color: theme.text, fontWeight: '800', fontSize: theme.scaleFont(16), marginBottom: 10 }}>
               {adding?.withdraw ? 'Take money out of' : 'Add money to'} {adding?.goal.name}
@@ -388,7 +388,7 @@ export const GoalsScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
       </Modal>
     </SafeAreaView>
   );
@@ -410,8 +410,8 @@ const styles = StyleSheet.create({
   actionBtn: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   centered: { justifyContent: 'center', padding: 20 },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18, maxHeight: '90%' },
-  dialog: { borderWidth: 1, borderRadius: 18, padding: 18 },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, padding: 18, maxHeight: '90%' },
+  dialog: { ...DIALOG_WIDTH, borderWidth: 1, borderRadius: 18, padding: 18 },
   label: { fontWeight: '700', marginBottom: 6, marginTop: 6 },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48, marginBottom: 6 },
   row: { flexDirection: 'row', gap: 10, alignItems: 'center' },

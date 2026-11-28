@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { AppState, InteractionManager, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { AppState, InteractionManager, Linking, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -16,6 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { RootTabParamList, RootStackParamList } from './types';
 import { useAppTheme } from '../theme/useAppTheme';
+import { MAX_CONTENT_WIDTH } from '../theme/layout';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import { getGenerationService } from '../services/ai/generationService';
@@ -197,6 +198,8 @@ const TabNavigator = () => {
 export const AppNavigator = () => {
   const loadSettings = useSettingsStore((state) => state.loadSettings);
   const theme = useAppTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = windowWidth > MAX_CONTENT_WIDTH;
   const isDarkMode = theme.isDarkMode;
 
   useEffect(() => {
@@ -271,37 +274,43 @@ export const AppNavigator = () => {
 
   return (
     <View style={[styles.appShell, { backgroundColor: theme.background }]}>
-      <NavigationContainer
-        ref={navigationRef}
-        theme={navigationTheme}
-        linking={APP_LINKING as any}
-        onReady={() => void handleSharedReceipts()}
+      {/* Tablets, unfolded foldables and landscape: one centred column instead of stretched rows. */}
+      <View
+        testID="app-column"
+        style={[styles.appColumn, isWide && { borderLeftWidth: 1, borderRightWidth: 1, borderColor: theme.border }]}
       >
-        <Stack.Navigator
-          initialRouteName="MainTabs"
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: theme.background },
-            animation: 'slide_from_right',
-          }}
+        <NavigationContainer
+          ref={navigationRef}
+          theme={navigationTheme}
+          linking={APP_LINKING as any}
+          onReady={() => void handleSharedReceipts()}
         >
-          <Stack.Screen name="MainTabs" component={TabNavigator} />
-          <Stack.Screen name="Chatbot" component={ChatbotScreen} />
-          <Stack.Screen name="AddTransactionStack" component={AddTransactionScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
-          <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
-          <Stack.Screen name="Accounts" component={AccountsScreen} />
-          <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
-          <Stack.Screen name="Activity" component={ActivityScreen} />
-          <Stack.Screen name="Recurring" component={RecurringScreen} />
-          <Stack.Screen name="Report" component={ReportScreen} />
-          <Stack.Screen name="Privacy" component={PrivacyScreen} />
-          <Stack.Screen name="Goals" component={GoalsScreen} />
-          <Stack.Screen name="SplitBills" component={SplitBillsScreen} />
-          <Stack.Screen name="SplitBillEditor" component={SplitBillEditorScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+          <Stack.Navigator
+            initialRouteName="MainTabs"
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: theme.background },
+              animation: 'slide_from_right',
+            }}
+          >
+            <Stack.Screen name="MainTabs" component={TabNavigator} />
+            <Stack.Screen name="Chatbot" component={ChatbotScreen} />
+            <Stack.Screen name="AddTransactionStack" component={AddTransactionScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="SystemLogs" component={SystemLogsScreen} />
+            <Stack.Screen name="ReceiptInbox" component={ReceiptInboxScreen} />
+            <Stack.Screen name="Accounts" component={AccountsScreen} />
+            <Stack.Screen name="AccountDetail" component={AccountDetailScreen} />
+            <Stack.Screen name="Activity" component={ActivityScreen} />
+            <Stack.Screen name="Recurring" component={RecurringScreen} />
+            <Stack.Screen name="Report" component={ReportScreen} />
+            <Stack.Screen name="Privacy" component={PrivacyScreen} />
+            <Stack.Screen name="Goals" component={GoalsScreen} />
+            <Stack.Screen name="SplitBills" component={SplitBillsScreen} />
+            <Stack.Screen name="SplitBillEditor" component={SplitBillEditorScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </View>
       <UpdateSheet />
       <TermsGate />
     </View>
@@ -310,6 +319,7 @@ export const AppNavigator = () => {
 
 const styles = StyleSheet.create({
   appShell: { flex: 1 },
+  appColumn: { flex: 1, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   tabBar: {
     elevation: 0,
     overflow: 'visible',

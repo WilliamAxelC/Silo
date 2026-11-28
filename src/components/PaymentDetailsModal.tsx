@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +15,8 @@ import { useSplitsStore } from '../features/splits/store';
 import { getBottomInsetPadding, useSafeInsets } from '../hooks/useSafeInsets';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAppTheme } from '../theme/useAppTheme';
+import { KeyboardSheet } from './KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface Props {
   visible: boolean;
@@ -54,10 +54,7 @@ export const PaymentDetailsModal = ({ visible, onClose }: Props) => {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <KeyboardSheet style={styles.overlay}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
@@ -159,14 +156,14 @@ export const PaymentDetailsModal = ({ visible, onClose }: Props) => {
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   title: { fontWeight: '700' },
   closeBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },

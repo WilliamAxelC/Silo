@@ -17,6 +17,7 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import type { CurrencyTotal } from '../features/splits/types';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface Props {
   visible: boolean;
@@ -210,7 +211,7 @@ export const SettleSplitModal = ({
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '85%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '85%' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   title: { fontWeight: '700' },
   closeBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },

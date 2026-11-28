@@ -3,6 +3,7 @@ import { Modal, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { getModalOverlayInsetStyle, useSafeInsets } from '../hooks/useSafeInsets';
 import { useAppTheme } from '../theme/useAppTheme';
+import { DIALOG_WIDTH } from '../theme/layout';
 
 interface SourceSelectorModalProps {
   visible: boolean;
@@ -71,7 +72,7 @@ export const SourceSelectorModal: React.FC<SourceSelectorModalProps> = ({ visibl
 
 const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
-  modalContent: { borderRadius: 18, padding: 18 },
+  modalContent: { ...DIALOG_WIDTH, borderRadius: 18, padding: 18 },
   modalTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
   modalHint: { fontSize: 12, textAlign: 'center', marginTop: -8, marginBottom: 14 },
   modalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },

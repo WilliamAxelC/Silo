@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
-  KeyboardAvoidingView,
   Linking,
   Platform,
   Image,
@@ -86,6 +85,8 @@ import { DriveSyncSection } from '../components/DriveSyncSection';
 import { CurrencyPickerModal } from '../components/CurrencyPickerModal';
 import { currencyName, quickCurrencyChoices } from '../features/currency/currencies';
 import appConfig from '../../app.json';
+import { KeyboardSheet } from '../components/KeyboardSheet';
+import { DIALOG_WIDTH } from '../theme/layout';
 
 const THEME_OPTIONS: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
@@ -2617,10 +2618,7 @@ export const SettingsScreen = () => {
 
       {/* Add / Edit Category Modal */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={closeModal}>
-        <KeyboardAvoidingView
-          style={styles.keyboardShell}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <KeyboardSheet style={styles.keyboardShell}>
           <TouchableOpacity
             style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.55)' }, getModalOverlayInsetStyle(insets, 20)]}
             activeOpacity={1}
@@ -2673,7 +2671,7 @@ export const SettingsScreen = () => {
               </View>
             </TouchableOpacity>
           </TouchableOpacity>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
       </Modal>
       {pendingCurrency ? (
         <CurrencyChangeModal
@@ -2684,7 +2682,7 @@ export const SettingsScreen = () => {
       ) : null}
 
       <Modal visible={eraseVisible} transparent animationType="fade" onRequestClose={() => setEraseVisible(false)}>
-        <KeyboardAvoidingView style={styles.eraseOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSheet style={styles.eraseOverlay}>
           <View style={[styles.eraseCard, { backgroundColor: theme.surface, borderColor: theme.border }]} testID="erase-dialog">
             <Text style={[styles.rowText, { color: theme.text, fontSize: theme.scaleFont(17), fontWeight: '800' }]}>
               Erase all data?
@@ -2744,7 +2742,7 @@ export const SettingsScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheet>
       </Modal>
     </SafeAreaView>
   );
@@ -2786,7 +2784,7 @@ const styles = StyleSheet.create({
   },
   autoBackupRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48, paddingLeft: 46, paddingRight: 14 },
   eraseOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  eraseCard: { borderWidth: 1, borderRadius: 18, padding: 18 },
+  eraseCard: { ...DIALOG_WIDTH, borderWidth: 1, borderRadius: 18, padding: 18 },
   eraseLink: { minHeight: 48, justifyContent: 'center' },
   eraseInput: { borderWidth: 1, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, marginTop: 8, fontSize: 16, letterSpacing: 2 },
   eraseButtons: { flexDirection: 'row', gap: 10, marginTop: 16 },
@@ -2977,7 +2975,7 @@ const styles = StyleSheet.create({
   categoryActions: { flexDirection: 'row', alignItems: 'center' },
   iconActionBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
-  modalCard: { borderWidth: 1, borderRadius: 20, padding: 18 },
+  modalCard: { ...DIALOG_WIDTH, borderWidth: 1, borderRadius: 20, padding: 18 },
   modalTitle: { fontWeight: '800', marginBottom: 2 },
   dayModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   dayModalHint: { marginTop: 2 },

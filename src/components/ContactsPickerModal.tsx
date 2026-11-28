@@ -3,10 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Linking,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -20,6 +18,8 @@ import { useAppTheme } from '../theme/useAppTheme';
 import { requestAndLoadDeviceContacts, type DeviceContactCandidate } from '../services/contactsImport';
 import { useSplitsStore } from '../features/splits/store';
 import type { SiloContact } from '../features/splits/types';
+import { KeyboardSheet } from './KeyboardSheet';
+import { SHEET_WIDTH } from '../theme/layout';
 
 interface Props {
   visible: boolean;
@@ -213,10 +213,7 @@ export const ContactsPickerModal = ({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <KeyboardSheet style={styles.overlay}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
@@ -569,14 +566,14 @@ export const ContactsPickerModal = ({
             </>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheet>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
+  sheet: { ...SHEET_WIDTH, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 6 },
   headerIconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontWeight: '700' },
