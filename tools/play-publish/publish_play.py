@@ -5,6 +5,7 @@ Needs a Google Cloud service account that was invited in Play Console (Users and
 for Silo, and its JSON key OUTSIDE this repo, with the key file's path in SILO_PLAY_KEY. The first bundle for a new app must be uploaded by hand in Play Console; after that this works.
 
   python3 tools/play-publish/publish_play.py check
+  python3 tools/play-publish/publish_play.py signing-cert VERSION_CODE
   python3 tools/play-publish/publish_play.py upload path/to/app.aab --notes notes.json [--track internal]
       [--status completed|draft] [--dry-run]
 
@@ -112,6 +113,68 @@ def cmd_check(args, token):
         request('DELETE', f'{API}/{PACKAGE}/edits/{edit["id"]}', token=token)
 
 
+def apk_signer_certs(data: bytes) -> list:
+    """DER certificates of the first signer in an APK's v3/v2 signing block (Play-generated APKs have no v1)."""
+    import struct
+    eocd = data.rfind(b'PK\x05\x06')
+    if eocd < 0:
+        raise ValueError('not a zip file')
+    cd_offset = struct.unpack_from('<I', data, eocd + 16)[0]
+    if data[cd_offset - 16:cd_offset] != b'APK Sig Block 42':
+        raise ValueError('no APK signing block')
+    size = struct.unpack_from('<Q', data, cd_offset - 24)[0]
+    pos, end = cd_offset - size - 8 + 8, cd_offset - 24
+    blocks = {}
+    while pos < end:
+        length, = struct.unpack_from('<Q', data, pos)
+        block_id, = struct.unpack_from('<I', data, pos + 8)
+        blocks[block_id] = data[pos + 12:pos + 8 + length]
+        pos += 8 + length
+
+    def seq(buf):
+        out, i = [], 0
+        while i < len(buf):
+            n, = struct.unpack_from('<I', buf, i)
+            out.append(buf[i + 4:i + 4 + n])
+            i += 4 + n
+        return out
+
+    for block_id in (0xF05368C0, 0x7109871A):  # v3, then v2
+        if block_id in blocks:
+            signer = seq(seq(blocks[block_id])[0])[0]
+            signed_data = seq(signer)[0]
+            return seq(seq(signed_data)[1])
+    raise ValueError('no v2/v3 signature')
+
+
+def fingerprint(der: bytes, algo: str) -> str:
+    import hashlib
+    return ':'.join(f'{b:02X}' for b in hashlib.new(algo, der).digest())
+
+
+def cmd_signing_cert(args, token):
+    """Play re-signs uploads with its app signing key. Google sign-in (Drive) needs that certificate's SHA-1 in a
+    second Android OAuth client, so fetch an APK Play generated and read its certificate."""
+    info = request('GET', f'{API}/{PACKAGE}/generatedApks/{args.version_code}', token=token)
+    for entry in info.get('generatedApks', []):
+        apk = entry.get('generatedUniversalApk') or (entry.get('generatedSplitApks') or [{}])[0]
+        if not apk.get('downloadId'):
+            continue
+        url = (f'{API}/{PACKAGE}/generatedApks/{args.version_code}/downloads/'
+               f'{urllib.parse.quote(apk["downloadId"], safe="")}:download?alt=media')
+        req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+        with tempfile.TemporaryDirectory() as tmp, urllib.request.urlopen(req, timeout=600) as resp:
+            path = os.path.join(tmp, 'play.apk')
+            with open(path, 'wb') as f:
+                f.write(resp.read())
+            with open(path, 'rb') as f:
+                cert = apk_signer_certs(f.read())[0]
+        print('SHA-1:  ', fingerprint(cert, 'sha1'))
+        print('SHA-256:', fingerprint(cert, 'sha256'))
+        return
+    sys.exit(f'Play has no generated APKs for versionCode {args.version_code} yet.')
+
+
 def cmd_upload(args, token):
     notes = load_notes(args.notes)
     edit_id = request('POST', f'{API}/{PACKAGE}/edits', {}, token=token)['id']
@@ -147,6 +210,8 @@ def main():
     p.add_argument('--key', default=os.environ.get('SILO_PLAY_KEY', ''))
     sub = p.add_subparsers(dest='cmd', required=True)
     sub.add_parser('check', help='check access and list the releases on each track')
+    sc = sub.add_parser('signing-cert', help="print Play's app signing certificate (for the Drive OAuth client)")
+    sc.add_argument('version_code')
     up = sub.add_parser('upload', help='upload an AAB to a track')
     up.add_argument('aab')
     up.add_argument('--track', default='internal', help='internal (default), alpha, beta or production')
@@ -161,7 +226,7 @@ def main():
     if args.cmd == 'upload' and args.track == 'production' and args.status == 'completed' and not args.dry_run:
         sys.exit('Refusing to roll out straight to production: use --status draft and press Release in Play Console.')
     token = access_token(load_key(args.key))
-    {'check': cmd_check, 'upload': cmd_upload}[args.cmd](args, token)
+    {'check': cmd_check, 'upload': cmd_upload, 'signing-cert': cmd_signing_cert}[args.cmd](args, token)
 
 
 if __name__ == '__main__':
